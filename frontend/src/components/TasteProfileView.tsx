@@ -585,7 +585,7 @@ export const TasteProfileView: React.FC<TasteProfileViewProps> = ({
                 </h2>
               </div>
               <p className="text-xs text-slate-500 mt-1">
-                Tối ưu hóa năng lượng cần nạp, quy mô bữa ăn gia đình và mức chi phí đi chợ mong muốn.
+                Tối ưu hóa năng lượng cần nạp, quy mô bữa ăn gia đình và mức ngân sách bữa ăn mong muốn.
               </p>
             </div>
             <span className="p-2 bg-emerald-50 text-emerald-600 rounded-xl self-start sm:self-auto">

@@ -80,7 +80,7 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab, onOpenLoginModal, o
                   onClick={() => onSelectTab('planner')}
                   className="hover:text-orange-600 transition-colors text-left cursor-pointer"
                 >
-                  Lên thực đơn tuần & Đi chợ thông minh
+                  Lên thực đơn tuần & Quản lý tủ lạnh
                 </button>
               </li>
             </ul>

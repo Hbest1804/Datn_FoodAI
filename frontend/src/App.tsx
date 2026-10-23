@@ -395,10 +395,6 @@ export default function App() {
             setAuthModalType('login');
             setIsAuthModalOpen(true);
           }}
-          onGoToPlanner={() => {
-            setSelectedRecipeForModal(null);
-            setCurrentTab('planner');
-          }}
         />
       )}
 

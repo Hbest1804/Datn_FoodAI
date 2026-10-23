@@ -348,7 +348,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
           referenced_dishes: reply.dishes,
           recipeRecommendation: normalizedDishes.length > 0 ? normalizedDishes[0] : undefined,
           quickReplies: [
-            'Lên danh sách đi chợ cho món này',
+            'Cách sơ chế & bảo quản nguyên liệu',
             'Có thể thay thế gia vị nào nếu thiếu?',
             'Ước tính calo chi tiết từng nguyên liệu'
           ]

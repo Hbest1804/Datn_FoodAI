@@ -10,7 +10,7 @@ import {
   ShieldCheck, 
   RefreshCw, 
   ChefHat, 
-  ShoppingCart, 
+  CalendarDays, 
   Sliders, 
   AlertTriangle,
   CheckCircle2,
@@ -777,7 +777,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                 200g Măng tây tươi còn dư
               </h4>
               <p className="text-xs text-slate-500 leading-relaxed">
-                Được ghi nhận từ chuyến đi chợ 3 ngày trước. Đề xuất kết hợp ngay cùng món <strong className="text-slate-800 font-semibold">Cá hồi sốt bơ tỏi</strong> ở trên để đạt độ giòn ngon nhất trước ngày mai!
+                Được lưu trữ trong tủ lạnh từ 3 ngày trước. Đề xuất kết hợp ngay cùng món <strong className="text-slate-800 font-semibold">Cá hồi sốt bơ tỏi</strong> ở trên để đạt độ giòn ngon nhất trước ngày mai!
               </p>
             </div>
 
@@ -837,15 +837,15 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
 
         <div className="p-6 bg-white rounded-3xl border border-slate-200/80 shadow-xs flex items-center justify-between gap-4">
           <div>
-            <h4 className="text-sm font-bold text-slate-900">Đi chợ cho cả tuần thuận tiện</h4>
-            <p className="text-xs text-slate-500 mt-1">Tự động gom nguyên liệu của thực đơn đề xuất vào danh sách mua sắm.</p>
+            <h4 className="text-sm font-bold text-slate-900">Lên kế hoạch thực đơn 7 ngày</h4>
+            <p className="text-xs text-slate-500 mt-1">Cân bằng calo, phân bổ protein và vi chất dinh dưỡng hợp lý cho cả tuần.</p>
           </div>
           <button
             onClick={onGoToPlanner}
-            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs shrink-0 cursor-pointer flex items-center gap-1.5"
+            className="px-4 py-2.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs shrink-0 cursor-pointer flex items-center gap-1.5"
           >
-            <ShoppingCart className="w-3.5 h-3.5" />
-            Tạo Danh Sách
+            <CalendarDays className="w-3.5 h-3.5" />
+            Xem Thực Đơn
           </button>
         </div>
       </section>
