@@ -6,6 +6,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { sanitizeSearchKeyword, isStrongPassword } from '../utils/validators.js';
 import { generateEmbedding } from '../services/aiService.js';
 import { env } from '../config/appConfig.js';
+import * as XLSX from 'xlsx';
 
 // ────────────────────────────────────────────────────────────────────────────────
 // Quản lý dữ liệu cá nhân (GET/PUT /api/me/profile, PATCH /api/me/password)
@@ -3178,6 +3179,7 @@ export async function adminGetStatsSearchTrends(req, res, next) {
 export async function adminGetStatsExport(req, res, next) {
   try {
     const days = parseInt(req.query.days) || 30;
+    const format = (req.query.format || 'xlsx').toLowerCase();
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
     const [
@@ -3185,35 +3187,114 @@ export async function adminGetStatsExport(req, res, next) {
       { count: newUsers },
       { count: totalDishes },
       { count: publishedDishes },
-      { count: chatQueries }
+      { count: chatQueries },
+      { data: dishes },
+      { data: usersList }
     ] = await Promise.all([
       supabaseAdmin.from('users').select('*', { count: 'exact', head: true }),
       supabaseAdmin.from('users').select('*', { count: 'exact', head: true }).gte('created_at', since),
       supabaseAdmin.from('dishes').select('*', { count: 'exact', head: true }),
       supabaseAdmin.from('dishes').select('*', { count: 'exact', head: true }).eq('is_published', true),
-      supabaseAdmin.from('chat_messages').select('*', { count: 'exact', head: true }).gte('created_at', since)
+      supabaseAdmin.from('chat_messages').select('*', { count: 'exact', head: true }).gte('created_at', since),
+      supabaseAdmin.from('dishes').select(`
+        id, name, slug, category, cook_time_minutes, difficulty, servings, est_cost,
+        calories, protein_g, carbs_g, fat_g, avg_rating, rating_count, favorite_count,
+        is_published, created_at
+      `).order('created_at', { ascending: false }),
+      supabaseAdmin.from('users').select('id, email, display_name, role, status, created_at').order('created_at', { ascending: false }).limit(200)
     ]);
 
-    const csvRows = [
-      ['BÁO CÁO THỐNG KÊ HỆ THỐNG TRỢ LÝ ẨM THỰC'],
-      [`Khoảng thời gian: ${days} ngày gần nhất (${new Date().toLocaleDateString('vi-VN')})`],
-      [''],
-      ['Chỉ số', 'Giá trị'],
-      ['Tổng người dùng', totalUsers || 0],
-      ['Người dùng mới', newUsers || 0],
-      ['Tổng số món ăn', totalDishes || 0],
-      ['Món ăn công khai', publishedDishes || 0],
-      ['Lượt hỏi chatbot', chatQueries || 0],
-    ];
+    if (format === 'csv') {
+      const csvRows = [
+        ['BÁO CÁO THỐNG KÊ HỆ THỐNG TRỢ LÝ ẨM THỰC THÔNG MINH'],
+        [`Khoảng thời gian: ${days} ngày gần nhất (${new Date().toLocaleDateString('vi-VN')})`],
+        [''],
+        ['Chỉ số', 'Giá trị'],
+        ['Tổng người dùng', totalUsers || 0],
+        ['Người dùng mới trong kỳ', newUsers || 0],
+        ['Tổng số món ăn', totalDishes || 0],
+        ['Món ăn công khai', publishedDishes || 0],
+        ['Món ăn bản nháp (ẩn)', (totalDishes || 0) - (publishedDishes || 0)],
+        ['Lượt hỏi chatbot AI trong kỳ', chatQueries || 0],
+      ];
 
-    const csvContent = '\uFEFF' + csvRows.map(e => e.map(val => `"${String(val).replace(/"/g, '""')}"`).join(',')).join('\n');
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="thong-ke-${days}-ngay.csv"`);
-    return res.send(csvContent);
+      const csvContent = '\uFEFF' + csvRows.map(e => e.map(val => `"${String(val).replace(/"/g, '""')}"`).join(',')).join('\n');
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="thong-ke-${days}-ngay.csv"`);
+      return res.send(csvContent);
+    }
+
+    // Xuất định dạng Excel (.xlsx) chuẩn
+    const wb = XLSX.utils.book_new();
+
+    // Sheet 1: Tổng quan chỉ số
+    const overviewData = [
+      ['BÁO CÁO THỐNG KÊ HỆ THỐNG TRỢ LÝ ẨM THỰC THÔNG MINH'],
+      [`Ngày xuất báo cáo: ${new Date().toLocaleString('vi-VN')}`],
+      [`Kỳ báo cáo: ${days} ngày gần nhất`],
+      [],
+      ['TÊN CHỈ SỐ', 'GIÁ TRỊ'],
+      ['Tổng số người dùng đăng ký', totalUsers || 0],
+      ['Người dùng mới trong kỳ', newUsers || 0],
+      ['Tổng số món ăn trong CSDL', totalDishes || 0],
+      ['Món ăn đã công khai (Published)', publishedDishes || 0],
+      ['Món ăn bản nháp / đang ẩn', (totalDishes || 0) - (publishedDishes || 0)],
+      ['Tổng lượt tương tác Chatbot AI trong kỳ', chatQueries || 0],
+    ];
+    const wsOverview = XLSX.utils.aoa_to_sheet(overviewData);
+    wsOverview['!cols'] = [{ wch: 38 }, { wch: 22 }];
+    XLSX.utils.book_append_sheet(wb, wsOverview, 'Tổng quan');
+
+    // Sheet 2: Danh sách món ăn
+    const dishesRows = (dishes || []).map((d, index) => ({
+      'STT': index + 1,
+      'Tên món ăn': d.name || '',
+      'Danh mục': d.category || '',
+      'Khẩu phần (người)': d.servings || 1,
+      'Thời gian nấu (phút)': d.cook_time_minutes || 0,
+      'Độ khó': d.difficulty === 'easy' ? 'Dễ' : (d.difficulty === 'hard' ? 'Khó' : 'Vừa'),
+      'Chi phí ước tính (VNĐ)': d.est_cost ? Number(d.est_cost) : 0,
+      'Calo (kcal)': d.calories ? Number(d.calories) : 0,
+      'Đạm (g)': d.protein_g ? Number(d.protein_g) : 0,
+      'Tinh bột (g)': d.carbs_g ? Number(d.carbs_g) : 0,
+      'Chất béo (g)': d.fat_g ? Number(d.fat_g) : 0,
+      'Điểm đánh giá TB': d.avg_rating ? Number(d.avg_rating) : 0,
+      'Lượt đánh giá': d.rating_count || 0,
+      'Lượt yêu thích': d.favorite_count || 0,
+      'Trạng thái': d.is_published ? 'Đã công khai' : 'Bản nháp',
+      'Ngày tạo': d.created_at ? new Date(d.created_at).toLocaleDateString('vi-VN') : '',
+    }));
+    const wsDishes = XLSX.utils.json_to_sheet(dishesRows);
+    wsDishes['!cols'] = [
+      { wch: 6 }, { wch: 32 }, { wch: 18 }, { wch: 16 }, { wch: 20 },
+      { wch: 10 }, { wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 12 },
+      { wch: 12 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }
+    ];
+    XLSX.utils.book_append_sheet(wb, wsDishes, 'Danh sách món ăn');
+
+    // Sheet 3: Danh sách người dùng
+    const usersRows = (usersList || []).map((u, index) => ({
+      'STT': index + 1,
+      'Email': u.email || '',
+      'Tên hiển thị': u.display_name || '',
+      'Vai trò': u.role === 'admin' ? 'Quản trị viên' : 'Người dùng',
+      'Trạng thái': u.status === 'locked' ? 'Bị khóa' : 'Hoạt động',
+      'Ngày đăng ký': u.created_at ? new Date(u.created_at).toLocaleDateString('vi-VN') : '',
+    }));
+    const wsUsers = XLSX.utils.json_to_sheet(usersRows);
+    wsUsers['!cols'] = [{ wch: 6 }, { wch: 30 }, { wch: 22 }, { wch: 16 }, { wch: 14 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, wsUsers, 'Người dùng');
+
+    // Ghi buffer Excel (.xlsx)
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="bao-cao-thong-ke-${days}-ngay.xlsx"`);
+    return res.send(buffer);
   } catch (err) {
     next(err);
   }
 }
+
 
 export async function adminGetChatbotFrequentQuestions(req, res, next) {
   try {

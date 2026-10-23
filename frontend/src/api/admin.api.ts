@@ -56,7 +56,7 @@ export const adminApi = {
     }
   },
 
-  async exportStats(params: { format?: 'csv' | 'pdf'; from?: string; to?: string; days?: number } = {}): Promise<Blob> {
+  async exportStats(params: { format?: 'xlsx' | 'csv' | 'pdf'; from?: string; to?: string; days?: number } = {}): Promise<Blob> {
     const token = getAuthToken();
     const query = new URLSearchParams();
     if (params.format) query.set('format', params.format);

@@ -292,18 +292,19 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
     }
   };
 
-  // Export stats handler
-  const handleExportStats = async () => {
+  // Export stats handler (.xlsx default)
+  const handleExportStats = async (format: 'xlsx' | 'csv' = 'xlsx') => {
     try {
-      const blob = await apiService.admin.exportStats({ format: 'csv' });
+      const blob = await apiService.admin.exportStats({ format, days: statsDays });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `culina_stats_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.download = `culina_stats_${statsDays}d_${new Date().toISOString().slice(0, 10)}.${format}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       window.URL.revokeObjectURL(url);
+      toast.success(`Đã xuất file báo cáo ${format.toUpperCase()} thành công!`);
     } catch (err: any) {
       toast.error(err.message || 'Lỗi khi xuất báo cáo thống kê');
     }
@@ -909,13 +910,23 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                     </button>
                   ))}
                 </div>
-                <button
-                  onClick={handleExportStats}
-                  className="px-3.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Xuất báo cáo (CSV)
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => handleExportStats('xlsx')}
+                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
+                    title="Xuất báo cáo định dạng Excel (.xlsx)"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Xuất báo cáo (Excel .xlsx)
+                  </button>
+                  <button
+                    onClick={() => handleExportStats('csv')}
+                    className="px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+                    title="Xuất báo cáo định dạng CSV"
+                  >
+                    CSV
+                  </button>
+                </div>
               </div>
             </div>
 
