@@ -184,8 +184,9 @@ Mâm cơm này cung cấp đầy đủ đạm, chất xơ, vitamin và khoáng c
 
 // ── 3. Danh sách model: Sử dụng model cấu hình và các model dự phòng khi failover ──
 function getCandidateModels() {
+  // Mô hình theo tài liệu API (mục 4.4.1, 4.6.4): gemini-3.5-flash-lite; các model sau chỉ dùng khi failover
   const configured = env.gemini.model;
-  const fallbackList = ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
+  const fallbackList = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
 
   if (configured) {
     return [configured, ...fallbackList.filter((m) => m !== configured)];
@@ -236,7 +237,7 @@ async function callGeminiWithFailover({ prompt, maxOutputTokens = 900, temperatu
       // Nếu model bị 503 (quá tải) hoặc 429, ngay lập tức thử model kế tiếp
       if (response.status === 503 || response.status === 429) {
         console.warn(`[AI Engine] Model ${model} bận (status ${response.status}), chuyển sang model kế tiếp...`);
-        lastError = new AIServiceError('AI_SERVICE_BUSY', `Model ${model} đang bận`, 503);
+        lastError = new AIServiceError('AI_SERVICE_ERROR', `Model ${model} đang bận`, 502);
         continue;
       }
 
@@ -277,7 +278,7 @@ async function callGeminiWithFailover({ prompt, maxOutputTokens = 900, temperatu
  * @param {Array} [params.dishesContext] Món ăn trong CSDL liên quan
  * @returns {Promise<{ type: 'recipe'|'general'|'out_of_scope', content: string, dishes: Array }>}
  */
-export async function generateCulinaryReply({ content, fridge = {}, dishesContext = [] }) {
+export async function generateCulinaryReply({ content, fridge = {}, dishesContext = [], systemPrompt }) {
   const normKey = (content || '').toLowerCase().trim().replace(/[?!.,]/g, '').trim();
 
   // 1. Kiểm tra pre-seeded quick answers (< 0.05ms)
@@ -289,12 +290,13 @@ export async function generateCulinaryReply({ content, fridge = {}, dishesContex
         type: pre.type,
         content: pre.content,
         dishes: matched.length > 0 ? matched : dishesContext.slice(0, 2),
+        tokens: 0,
       };
     }
   }
 
   // 2. Kiểm tra cache câu hỏi gần đây (< 0.05ms)
-  const cacheKey = getCacheKey('guest', content, fridge);
+  const cacheKey = getCacheKey('guest', content, fridge, `${systemPrompt}|${dishesContext.map((d) => d.id).join(',')}`);
   const cached = getFromCache(cacheKey);
   if (cached) {
     return cached;
@@ -308,32 +310,26 @@ export async function generateCulinaryReply({ content, fridge = {}, dishesContex
   }
 
   // 4. Xây dựng prompt tinh gọn (loại bỏ token thừa để tăng tốc tối đa)
-  const prompt = buildGeminiPrompt({ content, fridge, dishesContext });
+  const prompt = buildGeminiPrompt({ content, fridge, dishesContext, systemPrompt });
 
-  try {
-    const { rawText } = await callGeminiWithFailover({
-      prompt,
-      maxOutputTokens: 900,
-      temperature: 0.6,
-    });
+  // Lỗi/timeout của dịch vụ AI được ném ra để controller trả 502 AI_SERVICE_ERROR / 504 AI_TIMEOUT (luồng 3a)
+  const { rawText, tokenCount } = await callGeminiWithFailover({
+    prompt,
+    maxOutputTokens: 900,
+    temperature: 0.6,
+  });
 
-    const parsed = parseGeminiResponse(rawText, dishesContext);
-    setToCache(cacheKey, parsed);
-    return parsed;
-  } catch (err) {
-    console.warn('[AI Service] Gemini failover kết thúc, sử dụng bộ sinh phản hồi thông minh tức thì:', err.message);
-    // Thay vì trả về 502/504 làm gián đoạn trải nghiệm người dùng, trả về fallback chất lượng cao ngay lập tức!
-    const fastFallback = fallbackResponse(content, dishesContext, fridge);
-    return fastFallback;
-  }
+  const parsed = { ...parseGeminiResponse(rawText, dishesContext), tokens: tokenCount };
+  setToCache(cacheKey, parsed);
+  return parsed;
 }
 
 /**
  * Xây dựng prompt tinh gọn cho Gemini (cắt giảm 70% dữ liệu không cần thiết để tăng tốc)
  */
-function buildGeminiPrompt({ content, fridge, dishesContext }) {
+function buildGeminiPrompt({ content, fridge, dishesContext, systemPrompt }) {
   // Chỉ gửi id, name, cook_time_minutes và difficulty - bỏ image_url và description dài dòng
-  const dishesSummary = dishesContext.slice(0, 8).map((d) => ({
+  const dishesSummary = dishesContext.map((d) => ({
     id: d.id,
     name: d.name,
     cook_time: d.cook_time_minutes ? `${d.cook_time_minutes}p` : undefined,
@@ -348,11 +344,11 @@ function buildGeminiPrompt({ content, fridge, dishesContext }) {
     fridgeInfo.push(`Tự nhập: ${fridge.custom_ingredients.join(', ')}`);
   }
 
-  return `Bạn là "CulinaAI" - Trợ lý ẩm thực Việt Nam tinh hoa.
+  return `${systemPrompt || 'Bạn là "Trợ lý ẩm thực" của website gợi ý món ăn Việt Nam.'}
 Hãy trả lời câu hỏi nhanh gọn, rõ ràng, gạch đầu dòng súc tích, định dạng Markdown đẹp mắt.
 Nếu câu hỏi hoàn toàn KHÔNG liên quan ẩm thực, dinh dưỡng, nấu nướng: từ chối lịch sự và đặt "type":"out_of_scope".
 
-DANH SÁCH MÓN ĂN HỆ THỐNG PHÙ HỢP:
+DANH SÁCH MÓN ĂN HỆ THỐNG PHÙ HỢP (chỉ được giới thiệu thẻ món trong danh sách này):
 ${JSON.stringify(dishesSummary)}
 
 NGUYÊN LIỆU TRONG TỦ LẠNH:
@@ -439,7 +435,12 @@ function parseGeminiResponse(rawText, dishesContext) {
 
   const rawMatched = Array.isArray(parsed.matched_dish_ids) ? parsed.matched_dish_ids : [];
   const allMatchedIds = [...new Set([...rawMatched, ...extractedIds])];
-  const dishes = dishesContext.filter((d) => allMatchedIds.includes(d.id));
+  let dishes = dishesContext.filter((d) => allMatchedIds.includes(d.id));
+
+  // Tự động tìm món ăn trong dishesContext xuất hiện trong nội dung tư vấn để luôn có hình ảnh
+  if (dishes.length === 0 && (type === 'recipe' || /(món|thực đơn|gợi ý|nấu|bữa|\*\*)/i.test(cleanedContent))) {
+    dishes = matchDishesByNameOrContext(cleanedContent, dishesContext);
+  }
 
   return {
     type,
@@ -459,6 +460,7 @@ export async function generatePersonalizedReply({
   chatHistory = [],
   fridge = {},
   dishesContext = [],
+  systemPrompt,
 }) {
   const normKey = (content || '').toLowerCase().trim().replace(/[?!.,]/g, '').trim();
 
@@ -477,7 +479,7 @@ export async function generatePersonalizedReply({
 
   // 2. Kiểm tra Cache
   const profileKey = `${userProfile.diet_types?.map((d) => d.id).join(',') || ''}_${userProfile.allergen_groups?.map((a) => a.id).join(',') || ''}`;
-  const cacheKey = getCacheKey('user', content, fridge, profileKey);
+  const cacheKey = getCacheKey('user', content, fridge, `${profileKey}|${systemPrompt}|${dishesContext.map((d) => d.id).join(',')}|${chatHistory.length}`);
   const cached = getFromCache(cacheKey);
   if (cached) {
     return cached;
@@ -503,29 +505,19 @@ export async function generatePersonalizedReply({
     chatHistory,
     fridge,
     dishesContext,
+    systemPrompt,
   });
 
-  try {
-    const { rawText, tokenCount } = await callGeminiWithFailover({
-      prompt,
-      maxOutputTokens: 1200,
-      temperature: 0.6,
-    });
+  // Lỗi/timeout của dịch vụ AI được ném ra; controller vẫn giữ tin nhắn người dùng để gửi lại (luồng 3a)
+  const { rawText, tokenCount } = await callGeminiWithFailover({
+    prompt,
+    maxOutputTokens: 1200,
+    temperature: 0.6,
+  });
 
-    const parsed = parsePersonalizedResponse(rawText, dishesContext, tokenCount);
-    setToCache(cacheKey, parsed);
-    return parsed;
-  } catch (err) {
-    console.warn('[AI Service] Gemini Personalized failover kết thúc, sử dụng bộ sinh phản hồi thông minh tức thì:', err.message);
-    const fastFallback = fallbackPersonalizedResponse({
-      content,
-      userProfile,
-      favoriteDishes,
-      fridge,
-      dishesContext,
-    });
-    return fastFallback;
-  }
+  const parsed = parsePersonalizedResponse(rawText, dishesContext, tokenCount);
+  setToCache(cacheKey, parsed);
+  return parsed;
 }
 
 /**
@@ -538,8 +530,9 @@ function buildPersonalizedPrompt({
   chatHistory,
   fridge,
   dishesContext,
+  systemPrompt,
 }) {
-  const dishesSummary = dishesContext.slice(0, 8).map((d) => ({
+  const dishesSummary = dishesContext.map((d) => ({
     id: d.id,
     name: d.name,
     cook_time: d.cook_time_minutes ? `${d.cook_time_minutes}p` : undefined,
@@ -575,7 +568,8 @@ function buildPersonalizedPrompt({
     .map((m) => `${m.role === 'user' ? 'Khách' : 'Bếp trưởng'}: ${m.content.slice(0, 80)}`)
     .join('\n');
 
-  return `Bạn là CulinaAI - Trợ lý ẩm thực cá nhân hóa thông minh của Việt Nam.
+  return `${systemPrompt || 'Bạn là "Trợ lý ẩm thực" của website gợi ý món ăn Việt Nam.'}
+Đây là người dùng đã đăng nhập, hãy cá nhân hóa theo hồ sơ khẩu vị bên dưới.
 Hãy trả lời trực diện, súc tích, giàu chuyên môn ẩm thực bằng Markdown đẹp mắt.
 
 HỒ SƠ KHẨU VỊ:
@@ -583,7 +577,7 @@ ${profileParts.length ? profileParts.join('\n') : '(Chưa thiết lập)'}
 ${favList ? `Món yêu thích: ${favList}` : ''}
 ${fridgeParts.length ? fridgeParts.join('\n') : ''}
 
-MÓN ĂN AN TOÀN TRONG HỆ THỐNG:
+MÓN ĂN AN TOÀN TRONG HỆ THỐNG (đã loại món chứa nguyên liệu dị ứng/không thích; chỉ được giới thiệu thẻ món trong danh sách này):
 ${JSON.stringify(dishesSummary)}
 
 ${historyText ? `LỊCH SỬ HỘI THOẠI:\n${historyText}\n` : ''}
@@ -634,7 +628,7 @@ function parsePersonalizedResponse(rawText, dishesContext, tokenCount = 150) {
     };
   }
 
-  const outcome = ['answered', 'no_match', 'out_of_scope', 'fallback'].includes(parsed.outcome)
+  const outcome = ['answered', 'no_match', 'out_of_scope'].includes(parsed.outcome)
     ? parsed.outcome
     : (parsed.type === 'out_of_scope' ? 'out_of_scope' : 'answered');
 
@@ -643,7 +637,12 @@ function parsePersonalizedResponse(rawText, dishesContext, tokenCount = 150) {
 
   const rawMatched = Array.isArray(parsed.matched_dish_ids) ? parsed.matched_dish_ids : [];
   const allMatchedIds = [...new Set([...rawMatched, ...extractedIds])];
-  const dishes = dishesContext.filter((d) => allMatchedIds.includes(d.id));
+  let dishes = dishesContext.filter((d) => allMatchedIds.includes(d.id));
+
+  // Tự động tìm món ăn trong dishesContext xuất hiện trong nội dung tư vấn để luôn có hình ảnh
+  if (dishes.length === 0 && (outcome === 'answered' || /(món|thực đơn|gợi ý|nấu|bữa|\*\*)/i.test(cleanedContent))) {
+    dishes = matchDishesByNameOrContext(cleanedContent, dishesContext);
+  }
 
   return {
     outcome,
@@ -654,15 +653,26 @@ function parsePersonalizedResponse(rawText, dishesContext, tokenCount = 150) {
 }
 
 /**
- * Khớp món ăn dựa trên từ khóa trong câu hỏi
+ * Khớp món ăn dựa trên từ khóa trong câu hỏi hoặc xuất hiện trong nội dung câu trả lời
  */
-function matchDishesFromContext(content, dishesContext = []) {
-  const c = (content || '').toLowerCase();
-  const words = c.split(/\s+/).filter((w) => w.length >= 3);
-  return dishesContext.filter((d) => {
-    const name = (d.name || '').toLowerCase();
-    return words.some((w) => name.includes(w));
+function matchDishesByNameOrContext(content, dishesContext = []) {
+  if (!dishesContext.length) return [];
+  const normText = (content || '').toLowerCase();
+
+  // 1. Tìm các món ăn trong dishesContext có tên xuất hiện trong text
+  const matched = dishesContext.filter((d) => {
+    const name = (d.name || '').toLowerCase().trim();
+    if (!name || name.length < 3) return false;
+    return normText.includes(name) || name.split(/\s+/).filter((w) => w.length > 2).every((w) => normText.includes(w));
   });
+
+  if (matched.length > 0) return matched;
+
+  // 2. Nếu nội dung có dấu hiệu gợi ý món ăn, trả về top món trong ngữ cảnh
+  if (/(món|thực đơn|gợi ý|nấu|bữa|\*\*)/i.test(normText)) {
+    return dishesContext.slice(0, 4);
+  }
+  return [];
 }
 
 /**
@@ -781,7 +791,7 @@ export function fallbackPersonalizedResponse({
  */
 export async function generateEmbedding(text, outputDimensionality = 768) {
   if (!text || typeof text !== 'string' || !text.trim()) {
-    throw new AIServiceError('INVALID_INPUT', 'Văn bản embedding không được để trống.', 422);
+    throw new AIServiceError('VALIDATION_ERROR', 'Văn bản embedding không được để trống.', 422);
   }
 
   const model = env.gemini.embeddingModel || 'gemini-embedding-2';
@@ -789,19 +799,9 @@ export async function generateEmbedding(text, outputDimensionality = 768) {
     (m, i, arr) => arr.indexOf(m) === i
   );
 
-  // Nếu chưa có API key, sinh deterministic pseudo-vector 768 chiều cho môi trường local/dev
+  // Không sinh véc-tơ giả: véc-tơ ngẫu nhiên làm sai lệch truy hồi và gợi ý
   if (!env.gemini.apiKey) {
-    const hash = crypto.createHash('sha256').update(text).digest();
-    const pseudoVector = [];
-    for (let i = 0; i < outputDimensionality; i++) {
-      const val = (hash[i % hash.length] / 255) * 2 - 1;
-      pseudoVector.push(parseFloat(val.toFixed(6)));
-    }
-    return {
-      embedding: pseudoVector,
-      model: `${model}-simulated`,
-      dimensions: outputDimensionality,
-    };
+    throw new AIServiceError('AI_SERVICE_ERROR', 'Chưa cấu hình GEMINI_API_KEY nên không tạo được embedding.', 502);
   }
 
   let lastError = null;
@@ -833,7 +833,7 @@ export async function generateEmbedding(text, outputDimensionality = 768) {
       if (!response.ok) {
         const errText = await response.text();
         console.warn(`[Embedding Engine] Model ${targetModel} trả về lỗi ${response.status}: ${errText.slice(0, 100)}`);
-        lastError = new AIServiceError('EMBEDDING_API_ERROR', `Lỗi model ${targetModel}: ${response.status}`, 502);
+        lastError = new AIServiceError('AI_SERVICE_ERROR', `Lỗi model ${targetModel}: ${response.status}`, 502);
         continue;
       }
 
@@ -853,19 +853,9 @@ export async function generateEmbedding(text, outputDimensionality = 768) {
     }
   }
 
-  // Fallback an toàn nếu API Gemini gặp sự cố mạng: sinh deterministic vector đảm bảo luồng không đứt gãy
-  console.warn('[Embedding Engine] Gemini Embedding failover fallback:', lastError?.message);
-  const hash = crypto.createHash('sha256').update(text).digest();
-  const fallbackVector = [];
-  for (let i = 0; i < outputDimensionality; i++) {
-    const val = (hash[i % hash.length] / 255) * 2 - 1;
-    fallbackVector.push(parseFloat(val.toFixed(6)));
-  }
-  return {
-    embedding: fallbackVector,
-    model: `${model}-fallback`,
-    dimensions: outputDimensionality,
-  };
+  throw lastError?.name === 'AIServiceError'
+    ? lastError
+    : new AIServiceError('AI_SERVICE_ERROR', `Không tạo được embedding: ${lastError?.message || 'lỗi không xác định'}`, 502);
 }
 
 export { AIServiceError };

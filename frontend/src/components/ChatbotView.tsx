@@ -27,6 +27,7 @@ import { toast, showConfirm } from './NotificationModal';
 
 interface ChatbotViewProps {
   currentUser: UserProfile;
+  recipes?: Recipe[];
   initialPrompt?: string;
   initialFridge?: string[];
   initialSessionId?: string;
@@ -36,8 +37,44 @@ interface ChatbotViewProps {
   onAddToPlanner: (recipe: Recipe) => void;
 }
 
+function getAppetizingImageForDishName(name: string): string {
+  const n = (name || '').toLowerCase();
+  if (n.includes('bò') || n.includes('beef')) {
+    return 'https://images.unsplash.com/photo-1544025162-d76694265947?auto=format&fit=crop&w=400&q=80';
+  }
+  if (n.includes('cá hồi') || n.includes('salmon')) {
+    return 'https://images.unsplash.com/photo-1519708227418-c8fd9a32b7a2?auto=format&fit=crop&w=400&q=80';
+  }
+  if (n.includes('tôm') || n.includes('shrimp') || n.includes('hải sản') || n.includes('mực') || n.includes('ngao')) {
+    return 'https://images.unsplash.com/photo-1565680018434-b513d5e5fd47?auto=format&fit=crop&w=400&q=80';
+  }
+  if (n.includes('đậu') || n.includes('chay') || n.includes('tofu') || n.includes('nấm')) {
+    return 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80';
+  }
+  if (n.includes('canh') || n.includes('soup') || n.includes('mây') || n.includes('trứng')) {
+    return 'https://images.unsplash.com/photo-1547592166-23ac45744acd?auto=format&fit=crop&w=400&q=80';
+  }
+  if (n.includes('gà') || n.includes('chicken')) {
+    return 'https://images.unsplash.com/photo-1598103442097-8b74394b95c6?auto=format&fit=crop&w=400&q=80';
+  }
+  if (n.includes('heo') || n.includes('lợn') || n.includes('thịt kho') || n.includes('sườn') || n.includes('ba chỉ')) {
+    return 'https://images.unsplash.com/photo-1529193591184-b1d58069ecdd?auto=format&fit=crop&w=400&q=80';
+  }
+  if (n.includes('rau') || n.includes('xào') || n.includes('luộc') || n.includes('cải') || n.includes('muống')) {
+    return 'https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=400&q=80';
+  }
+  if (n.includes('mì') || n.includes('bún') || n.includes('phở') || n.includes('hủ tiếu')) {
+    return 'https://images.unsplash.com/photo-1569718212165-3a8278d5f624?auto=format&fit=crop&w=400&q=80';
+  }
+  if (n.includes('gỏi') || n.includes('salad') || n.includes('nộm')) {
+    return 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&w=400&q=80';
+  }
+  return 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80';
+}
+
 export const ChatbotView: React.FC<ChatbotViewProps> = ({
   currentUser,
+  recipes = [],
   initialPrompt,
   initialFridge,
   initialSessionId,
@@ -82,6 +119,82 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
   });
   const [showAttachFridge, setShowAttachFridge] = useState(false);
   const [newFridgeItem, setNewFridgeItem] = useState('');
+
+  // Tự động nhận diện và ghép ảnh món ăn trực quan từ câu trả lời của Chatbot
+  const getDishesForMessage = useCallback((msg: ChatMessage): Recipe[] => {
+    const list: Recipe[] = [];
+    const seenNames = new Set<string>();
+
+    // 1. Ưu tiên lấy từ referenced_dishes do backend trả về
+    if (Array.isArray(msg.referenced_dishes) && msg.referenced_dishes.length > 0) {
+      msg.referenced_dishes.forEach((d: any) => {
+        const norm = normalizeDish(d);
+        if (norm.title && !seenNames.has(norm.title.toLowerCase())) {
+          seenNames.add(norm.title.toLowerCase());
+          list.push(norm);
+        }
+      });
+    }
+
+    // 2. Tự động quét các món ăn dạng **Tên Món**: trong nội dung tư vấn của AI
+    const text = msg.content || msg.text || '';
+    if (msg.role === 'assistant' || msg.sender === 'assistant') {
+      const dishRegex = /(?:\*\s*)?\*\*([^*\n:]{3,60})\*\*(?:\s*:|\s*–|\s*-)?/g;
+      let match;
+      while ((match = dishRegex.exec(text)) !== null) {
+        const candidate = match[1].trim();
+        const lower = candidate.toLowerCase();
+        if (/^(lưu ý|mẹo|chú ý|cách làm|nguyên liệu|bước \d+|hướng dẫn|thành phần|giá trị|lời khuyên|chúc bạn|ưu điểm|cách sơ chế|bảo quản|phân tích|tổng kết)/i.test(lower)) {
+          continue;
+        }
+
+        if (!seenNames.has(lower)) {
+          seenNames.add(lower);
+
+          // Tìm món tương ứng trong hệ thống recipes
+          const systemMatch = (recipes || []).find(r => 
+            r.title?.toLowerCase().includes(lower) || 
+            lower.includes(r.title?.toLowerCase() || '')
+          );
+
+          if (systemMatch) {
+            list.push(systemMatch);
+          } else {
+            // Trích xuất thời gian nấu nếu có trong đoạn văn (ví dụ: "15 phút", "20 phút")
+            const afterText = text.slice(match.index, match.index + 200);
+            const timeMatch = afterText.match(/(\d+)\s*phút/i);
+            const cookingTime = timeMatch ? parseInt(timeMatch[1], 10) : 15;
+
+            list.push({
+              id: `ai-dish-${candidate.replace(/\s+/g, '-').toLowerCase()}`,
+              title: candidate,
+              name: candidate,
+              slug: candidate.replace(/\s+/g, '-').toLowerCase(),
+              image: getAppetizingImageForDishName(candidate),
+              image_url: getAppetizingImageForDishName(candidate),
+              cookingTime,
+              cook_time_minutes: cookingTime,
+              difficulty: 'Dễ',
+              category: 'Món gợi ý AI',
+              description: `Món ăn dinh dưỡng chuẩn vị được Bếp Trưởng ChefAI tư vấn riêng cho bữa ăn của bạn.`,
+              ingredients: [
+                { name: 'Nguyên liệu tươi sạch', amount: 'Theo khẩu phần gia đình' },
+                { name: 'Gia vị cơ bản', amount: 'Vừa đủ' }
+              ],
+              steps: [
+                { step: 1, instruction: 'Sơ chế sạch nguyên liệu và để ráo nước.' },
+                { step: 2, instruction: `Chế biến món ${candidate} trong khoảng ${cookingTime} phút theo hướng dẫn.` },
+                { step: 3, instruction: 'Trình bày ra đĩa, nêm nếm vừa miệng và thưởng thức khi còn nóng.' }
+              ],
+              macros: { calories: 380, protein: 22, carbs: 35, fat: 12 },
+            });
+          }
+        }
+      }
+    }
+
+    return list.slice(0, 6);
+  }, [recipes]);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
@@ -645,42 +758,46 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
                     <div className="whitespace-pre-line">{msg.content || msg.text}</div>
                   </div>
 
-                  {/* Referenced Dishes Cards (returned from AI / Supabase context) */}
-                  {(msg.referenced_dishes && msg.referenced_dishes.length > 0) && (
-                    <div className="space-y-2 pt-1 w-full">
-                      <div className="text-[11px] font-bold text-orange-700 uppercase tracking-wide flex items-center gap-1">
-                        <Sparkles className="w-3.5 h-3.5" />
-                        Món ăn đề xuất phù hợp:
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {msg.referenced_dishes.map((dish: any) => (
-                          <div
-                            key={dish.id}
-                            onClick={() => onOpenRecipe(normalizeDish(dish))}
-                            className="bg-white p-3 rounded-2xl border border-orange-200/90 shadow-2xs hover:shadow-md transition-all cursor-pointer flex gap-3 items-center group"
-                          >
-                            <img
-                              src={dish.image_url || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=200&q=80'}
-                              alt={dish.name}
-                              className="w-16 h-16 rounded-xl object-cover shrink-0 group-hover:scale-105 transition-transform"
-                            />
-                            <div className="min-w-0 flex-1">
-                              <h5 className="font-bold text-xs text-slate-900 group-hover:text-orange-600 truncate">
-                                {dish.name}
-                              </h5>
-                              <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-1">
-                                <span>⏱ {dish.cook_time_minutes || 20}p</span>
-                                <span>• {formatDifficulty(dish.difficulty)}</span>
+                  {/* Referenced Dishes Cards with rich appetizing food photos */}
+                  {(() => {
+                    const messageDishes = getDishesForMessage(msg);
+                    if (messageDishes.length === 0) return null;
+                    return (
+                      <div className="space-y-2.5 pt-2 w-full animate-in fade-in duration-300">
+                        <div className="text-[11px] font-bold text-orange-700 uppercase tracking-wide flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-orange-500" />
+                          Món ăn tư vấn kèm hình ảnh & công thức:
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {messageDishes.map((dish: any) => (
+                            <div
+                              key={dish.id || dish.title}
+                              onClick={() => onOpenRecipe(normalizeDish(dish))}
+                              className="bg-white p-3 rounded-2xl border border-orange-200/90 shadow-2xs hover:shadow-md hover:border-orange-300 transition-all cursor-pointer flex gap-3 items-center group"
+                            >
+                              <img
+                                src={dish.image || dish.image_url || getAppetizingImageForDishName(dish.title || dish.name)}
+                                alt={dish.title || dish.name}
+                                className="w-16 h-16 rounded-xl object-cover shrink-0 group-hover:scale-105 transition-transform border border-slate-100"
+                              />
+                              <div className="min-w-0 flex-1">
+                                <h5 className="font-bold text-xs text-slate-900 group-hover:text-orange-600 truncate">
+                                  {dish.title || dish.name}
+                                </h5>
+                                <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-1">
+                                  <span>⏱ {dish.cookingTime || dish.cook_time_minutes || 15} phút</span>
+                                  <span>• {formatDifficulty(dish.difficulty)}</span>
+                                </div>
+                                <span className="text-[10px] font-bold text-orange-600 flex items-center gap-0.5 mt-1 group-hover:translate-x-0.5 transition-transform">
+                                  Xem công thức & nấu ngay <ChevronRight className="w-3 h-3" />
+                                </span>
                               </div>
-                              <span className="text-[10px] font-bold text-orange-600 flex items-center gap-0.5 mt-1">
-                                Xem công thức <ChevronRight className="w-3 h-3" />
-                              </span>
                             </div>
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {/* Feedback Buttons for Assistant Message (Section 4.6.6) */}
                   {!isGuest && (msg.role === 'assistant' || msg.sender === 'assistant') && msg.id && !msg.id.startsWith('temp') && (

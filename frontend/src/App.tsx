@@ -304,6 +304,7 @@ export default function App() {
         {currentTab === 'chat' && (
           <ChatbotView
             currentUser={currentUser}
+            recipes={recipes}
             initialPrompt={initialChatPrompt}
             initialFridge={initialChatFridge}
             initialSessionId={initialChatSessionId}
