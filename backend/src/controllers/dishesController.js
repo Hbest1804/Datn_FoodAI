@@ -190,10 +190,12 @@ export async function getDishes(req, res, next) {
         slug,
         description,
         image_url,
-        region_id,
-        category_id,
+        category,
+        category_normalized,
         cook_time_minutes,
         difficulty,
+        servings,
+        est_cost,
         calories,
         protein_g,
         carbs_g,
@@ -201,7 +203,6 @@ export async function getDishes(req, res, next) {
         is_published,
         created_at,
         updated_at,
-        category:categories(id, name),
         dish_tags(tag:tags(id, name)),
         dish_ingredients(
           quantity,
@@ -219,7 +220,14 @@ export async function getDishes(req, res, next) {
 
     // Chuyển trực tiếp các điều kiện lọc sang SQL
     if (parsedCategoryId !== undefined) {
-      query = query.eq('category_id', parsedCategoryId);
+      const { data: cat } = await supabaseAdmin
+        .from('categories')
+        .select('name')
+        .eq('id', parsedCategoryId)
+        .maybeSingle();
+      if (cat) {
+        query = query.eq('category', cat.name);
+      }
     }
     if (difficulty !== undefined) {
       query = query.eq('difficulty', difficulty);
@@ -387,7 +395,7 @@ export async function getDishes(req, res, next) {
         description: dish.description,
         image_url: dish.image_url,
         region: dish.region ? { id: dish.region.id, name: dish.region.name } : null,
-        category: dish.category ? { id: dish.category.id, name: dish.category.name } : null,
+        category: typeof dish.category === 'object' ? dish.category : (dish.category ? { name: dish.category } : null),
         cook_time_minutes: dish.cook_time_minutes,
         difficulty: dish.difficulty,
         calories: dish.calories,
@@ -525,8 +533,8 @@ export async function getDishDetail(req, res, next) {
         slug,
         description,
         image_url,
-        region_id,
-        category_id,
+        category,
+        category_normalized,
         cook_time_minutes,
         difficulty,
         servings,
@@ -535,11 +543,10 @@ export async function getDishDetail(req, res, next) {
         protein_g,
         carbs_g,
         fat_g,
-        steps,
         is_published,
         created_at,
         updated_at,
-        category:categories(id, name),
+        recipe_steps(step_order, content),
         dish_tags(tag:tags(id, name)),
         dish_ingredients(
           quantity,
@@ -670,10 +677,8 @@ export async function getDishDetail(req, res, next) {
       .neq('id', dish.id)
       .limit(6);
 
-    if (dish.category_id) {
-      relatedQuery = relatedQuery.eq('category_id', dish.category_id);
-    } else if (dish.region_id) {
-      relatedQuery = relatedQuery.eq('region_id', dish.region_id);
+    if (dish.category) {
+      relatedQuery = relatedQuery.eq('category', dish.category);
     }
 
     const { data: relatedDishesData } = await relatedQuery;
@@ -693,7 +698,9 @@ export async function getDishDetail(req, res, next) {
         : null
     }));
 
-    const rawSteps = Array.isArray(dish.steps) ? dish.steps : [];
+    const rawSteps = (Array.isArray(dish.recipe_steps) && dish.recipe_steps.length > 0)
+      ? dish.recipe_steps.map(s => ({ order: s.step_order, content: s.content }))
+      : (Array.isArray(dish.steps) ? dish.steps : []);
     const formattedSteps = rawSteps.map((step, idx) => ({
       order: step.order ?? idx + 1,
       content: step.content || step.instruction || '',
@@ -719,7 +726,7 @@ export async function getDishDetail(req, res, next) {
       description: dish.description,
       image_url: dish.image_url,
       region: dish.region ? { id: dish.region.id, name: dish.region.name } : null,
-      category: dish.category ? { id: dish.category.id, name: dish.category.name } : null,
+      category: typeof dish.category === 'object' ? dish.category : (dish.category ? { name: dish.category } : null),
       cook_time_minutes: dish.cook_time_minutes,
       difficulty: dish.difficulty,
       calories: dish.calories,

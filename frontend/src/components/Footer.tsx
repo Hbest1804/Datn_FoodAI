@@ -1,4 +1,4 @@
-import React from 'react';
+ import React from 'react';
 import { UtensilsCrossed, Sparkles, Shield, HeartHandshake } from 'lucide-react';
 import { ChefLogo3D } from './ChefLogo3D';
 
@@ -20,7 +20,7 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab, onOpenLoginModal, o
               <span className="text-2xl font-black text-slate-900 tracking-tight">ChefAI</span>
             </div>
             <p className="text-sm text-slate-500 leading-relaxed max-w-md">
-              Hệ thống trợ lý ẩm thực thông minh tích hợp trí tuệ nhân tạo Gemini, tư vấn công thức nấu nướng, 
+              Hệ thống trợ lý ẩm thực thông minh tích hợp trí tuệ nhân tạo, tư vấn công thức nấu nướng, 
               đề xuất thực đơn cá nhân hóa theo khẩu vị, quản lý dinh dưỡng và kiểm soát an toàn dị ứng thực phẩm.
             </p>
             <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200/60 w-fit">
@@ -80,7 +80,7 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab, onOpenLoginModal, o
                   onClick={() => onSelectTab('planner')}
                   className="hover:text-orange-600 transition-colors text-left cursor-pointer"
                 >
-                  Lên thực đơn tuần & Đi chợ thông minh
+                  Lên thực đơn tuần & Quản lý tủ lạnh
                 </button>
               </li>
             </ul>
@@ -183,7 +183,7 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab, onOpenLoginModal, o
         {/* Bottom bar */}
         <div className="pt-8 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 gap-4">
           <div>
-            © 2026 ChefAI. Bảo lưu mọi quyền. • Tích hợp AI Gemini 3.8 Flash
+            © 2026 ChefAI. Bảo lưu mọi quyền. • Trợ lý ẩm thực & dinh dưỡng thông minh
           </div>
           <div className="flex items-center gap-6">
             <span className="hover:text-slate-600 cursor-pointer">An toàn thực phẩm</span>

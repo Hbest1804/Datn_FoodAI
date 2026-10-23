@@ -139,7 +139,8 @@ export async function getPersonalizedRecommendations({
       slug,
       description,
       image_url,
-      category_id,
+      category,
+      category_normalized,
       cook_time_minutes,
       difficulty,
       servings,
@@ -149,7 +150,6 @@ export async function getPersonalizedRecommendations({
       fat_g,
       is_published,
       created_at,
-      categories (id, name),
       dish_ingredients (
         ingredient_id,
         is_optional,
@@ -163,7 +163,10 @@ export async function getPersonalizedRecommendations({
     .eq('is_published', true);
 
   if (categoryId) {
-    dishesQuery = dishesQuery.eq('category_id', Number(categoryId));
+    const { data: cat } = await supabaseAdmin.from('categories').select('name').eq('id', Number(categoryId)).maybeSingle();
+    if (cat) {
+      dishesQuery = dishesQuery.eq('category', cat.name);
+    }
   }
 
   const { data: rawDishes, error: dishesErr } = await dishesQuery;
@@ -354,7 +357,7 @@ export async function getPersonalizedRecommendations({
         slug: dish.slug,
         description: dish.description,
         image_url: dish.image_url,
-        category: dish.categories ? { id: dish.category_id, name: dish.categories.name } : null,
+        category: typeof dish.category === 'object' ? dish.category : (dish.category ? { name: dish.category } : null),
         cook_time_minutes: dish.cook_time_minutes,
         difficulty: dish.difficulty,
         calories: dish.calories,

@@ -247,15 +247,15 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
           <div>
             <span className="text-xs font-bold text-orange-600 uppercase tracking-wider flex items-center gap-1">
               <Sparkles className="w-3.5 h-3.5" />
-              TÌM KIẾM THEO CHUẨN MỤC 4.3 BACKEND • CSDL SUPABASE
+              BỘ LỌC & TÌM KIẾM ẨM THỰC THÔNG MINH
             </span>
             <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight mt-0.5">
-              Tìm kiếm & Lọc Món ăn Thông Minh
+              Tìm kiếm & Lọc Món ăn Phù hợp
             </h1>
           </div>
           <div className="px-3 py-1 rounded-full bg-white border border-slate-200 text-xs text-slate-600 font-semibold flex items-center gap-1.5 shadow-2xs self-start sm:self-auto">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            Đồng bộ CSDL Supabase • Tìm theo tên & nguyên liệu không dấu
+            Tìm theo tên món & nguyên liệu không dấu
           </div>
         </div>
 
@@ -561,7 +561,7 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs">
             <div className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-2">
               <span>
-                Tìm thấy <strong className="text-orange-600">{totalItems}</strong> món ăn trong CSDL Supabase
+                Tìm thấy <strong className="text-orange-600">{totalItems}</strong> món ăn phù hợp
               </span>
               {loading && (
                 <span className="w-3.5 h-3.5 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
@@ -786,7 +786,7 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
                 Bạn cần AI sáng tạo món mới theo nguyên liệu đang có?
               </h4>
               <p className="text-xs text-slate-500 max-w-xl">
-                Gửi trực tiếp câu hỏi hoặc danh sách đồ ăn thừa trong tủ lạnh cho Trợ lý ChefAI, công nghệ Gemini sẽ tức thì lên thực đơn vừa khít và an toàn dị ứng!
+                Gửi trực tiếp câu hỏi hoặc danh sách đồ ăn thừa trong tủ lạnh cho Trợ lý ChefAI, hệ thống AI thông minh sẽ tức thì lên thực đơn vừa khít và an toàn dị ứng!
               </p>
             </div>
             <button

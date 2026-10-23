@@ -1,57 +1,65 @@
 // src/scripts/seedDatabase.js
-// Nạp toàn bộ dữ liệu mẫu (Master data + Món ăn + Công thức + Nguyên liệu) vào Supabase
+// Nạp toàn bộ dữ liệu mẫu (Master data + Món ăn + Công thức + Nguyên liệu) vào Supabase theo Schema v3
 
 import { supabaseAdmin } from '../config/supabase.js';
 
 async function seed() {
   console.log('🚀 Bắt đầu nạp dữ liệu mẫu vào Supabase...\n');
 
-  // 1. REGIONS
-  console.log('📍 1. Đang nạp Regions...');
-  const regionsData = [
-    { code: 'north', name: 'Miền Bắc' },
-    { code: 'central', name: 'Miền Trung' },
-    { code: 'south', name: 'Miền Nam' },
-  ];
-  const { data: regions, error: regErr } = await supabaseAdmin
-    .from('regions')
-    .upsert(regionsData, { onConflict: 'code' })
-    .select();
-  if (regErr) throw new Error(`Lỗi regions: ${regErr.message}`);
-  const regionMap = Object.fromEntries(regions.map(r => [r.code, r.id]));
-  console.log(`   ✅ Đã nạp ${regions.length} vùng miền.`);
+  // 1. REGIONS (Nạp nếu bảng regions tồn tại)
+  try {
+    console.log('📍 1. Đang nạp Regions...');
+    const regionsData = [
+      { code: 'north', name: 'Miền Bắc' },
+      { code: 'central', name: 'Miền Trung' },
+      { code: 'south', name: 'Miền Nam' },
+    ];
+    const { data: regions, error: regErr } = await supabaseAdmin
+      .from('regions')
+      .upsert(regionsData, { onConflict: 'code' })
+      .select();
+    if (!regErr && regions) {
+      console.log(`   ✅ Đã nạp ${regions.length} vùng miền.`);
+    }
+  } catch (err) {
+    console.log('   ℹ️ Bỏ qua nạp regions (không bắt buộc trong schema v3).');
+  }
 
   // 2. CATEGORIES
-  console.log('📁 2. Đang nạp Categories...');
-  const categoriesData = [
-    { name: 'Món nước', slug: 'mon-nuoc' },
-    { name: 'Món xào', slug: 'mon-xao' },
-    { name: 'Món kho', slug: 'mon-kho' },
-    { name: 'Món canh', slug: 'mon-canh' },
-    { name: 'Món nướng / chiên', slug: 'mon-nuong-chien' },
-    { name: 'Món gỏi / nộm', slug: 'mon-goi-nom' },
-    { name: 'Món tráng miệng', slug: 'mon-trang-mieng' },
-    { name: 'Đồ uống', slug: 'do-uong' },
-  ];
-  const { data: categories, error: catErr } = await supabaseAdmin
-    .from('categories')
-    .upsert(categoriesData, { onConflict: 'slug' })
-    .select();
-  if (catErr) throw new Error(`Lỗi categories: ${catErr.message}`);
-  const catMap = Object.fromEntries(categories.map(c => [c.slug, c.id]));
-  console.log(`   ✅ Đã nạp ${categories.length} danh mục món ăn.`);
+  try {
+    console.log('📁 2. Đang nạp Categories...');
+    const categoriesData = [
+      { name: 'Món nước', slug: 'mon-nuoc' },
+      { name: 'Món xào', slug: 'mon-xao' },
+      { name: 'Món kho', slug: 'mon-kho' },
+      { name: 'Món canh', slug: 'mon-canh' },
+      { name: 'Món nướng / chiên', slug: 'mon-nuong-chien' },
+      { name: 'Món gỏi / nộm', slug: 'mon-goi-nom' },
+      { name: 'Món tráng miệng', slug: 'mon-trang-mieng' },
+      { name: 'Đồ uống', slug: 'do-uong' },
+    ];
+    const { data: categories, error: catErr } = await supabaseAdmin
+      .from('categories')
+      .upsert(categoriesData, { onConflict: 'slug' })
+      .select();
+    if (!catErr && categories) {
+      console.log(`   ✅ Đã nạp ${categories.length} danh mục món ăn.`);
+    }
+  } catch (err) {
+    console.log('   ℹ️ Bỏ qua categories.');
+  }
 
-  // 3. TAGS
+  // 3. TAGS (Bao gồm id chỉ định rõ để tránh lỗi NOT NULL constraint)
   console.log('🏷️  3. Đang nạp Tags...');
   const tagsData = [
-    { name: 'Cay' },
-    { name: 'Chua ngọt' },
-    { name: 'Thanh đạm' },
-    { name: 'Bổ dưỡng' },
-    { name: 'Nhanh gọn' },
-    { name: 'Tiết kiệm' },
-    { name: 'Dễ làm' },
-    { name: 'Đặc sản' },
+    { id: 1, name: 'Cay' },
+    { id: 2, name: 'Chua ngọt' },
+    { id: 3, name: 'Thanh đạm' },
+    { id: 4, name: 'Bổ dưỡng' },
+    { id: 5, name: 'Nhanh gọn' },
+    { id: 6, name: 'Tiết kiệm' },
+    { id: 7, name: 'Dễ làm' },
+    { id: 8, name: 'Đặc sản' },
   ];
   const { data: tags, error: tagErr } = await supabaseAdmin
     .from('tags')
@@ -64,13 +72,13 @@ async function seed() {
   // 4. DIET TYPES
   console.log('🥗 4. Đang nạp Diet Types...');
   const dietData = [
-    { code: 'normal', name: 'Bình thường' },
-    { code: 'eat_clean', name: 'Eat Clean' },
-    { code: 'vegetarian', name: 'Ăn chay' },
-    { code: 'vegan', name: 'Thuần chay' },
-    { code: 'keto', name: 'Keto / Low-Carb' },
-    { code: 'high_protein', name: 'Tăng cơ (High Protein)' },
-    { code: 'low_sugar', name: 'Tiểu đường / Ít đường' },
+    { id: 1, code: 'normal', name: 'Bình thường' },
+    { id: 2, code: 'eat_clean', name: 'Eat Clean' },
+    { id: 3, code: 'vegetarian', name: 'Ăn chay' },
+    { id: 4, code: 'vegan', name: 'Thuần chay' },
+    { id: 5, code: 'keto', name: 'Keto / Low-Carb' },
+    { id: 6, code: 'high_protein', name: 'Tăng cơ (High Protein)' },
+    { id: 7, code: 'low_sugar', name: 'Tiểu đường / Ít đường' },
   ];
   const { error: dietErr } = await supabaseAdmin
     .from('diet_types')
@@ -81,13 +89,13 @@ async function seed() {
   // 5. ALLERGEN GROUPS
   console.log('⚠️  5. Đang nạp Allergen Groups...');
   const allergenData = [
-    { code: 'seafood', name: 'Hải sản có vỏ' },
-    { code: 'peanut', name: 'Đậu phộng' },
-    { code: 'dairy', name: 'Sữa bò / Lactose' },
-    { code: 'gluten', name: 'Gluten' },
-    { code: 'egg', name: 'Trứng' },
-    { code: 'soy', name: 'Đậu nành' },
-    { code: 'sesame', name: 'Vừng mè' },
+    { id: 1, code: 'seafood', name: 'Hải sản có vỏ' },
+    { id: 2, code: 'peanut', name: 'Đậu phộng' },
+    { id: 3, code: 'dairy', name: 'Sữa bò / Lactose' },
+    { id: 4, code: 'gluten', name: 'Gluten' },
+    { id: 5, code: 'egg', name: 'Trứng' },
+    { id: 6, code: 'soy', name: 'Đậu nành' },
+    { id: 7, code: 'sesame', name: 'Vừng mè' },
   ];
   const { data: allergens, error: algErr } = await supabaseAdmin
     .from('allergen_groups')
@@ -100,26 +108,26 @@ async function seed() {
   // 6. INGREDIENTS
   console.log('🥩 6. Đang nạp Ingredients...');
   const ingredientsData = [
-    { name: 'Thịt bò', default_unit: 'g', aliases: ['thịt bò', 'thit bo', 'bò'], allergen_group_id: null },
-    { name: 'Thịt heo', default_unit: 'g', aliases: ['thịt lợn', 'thit heo', 'thit lon', 'heo', 'lợn'], allergen_group_id: null },
-    { name: 'Thịt gà', default_unit: 'g', aliases: ['thit ga', 'gà'], allergen_group_id: null },
-    { name: 'Trứng gà', default_unit: 'quả', aliases: ['trung ga', 'trứng'], allergen_group_id: algMap['egg'] },
-    { name: 'Tôm', default_unit: 'g', aliases: ['tom', 'tôm sú', 'tôm thẻ'], allergen_group_id: algMap['seafood'] },
-    { name: 'Cá hồi', default_unit: 'g', aliases: ['ca hoi'], allergen_group_id: algMap['seafood'] },
-    { name: 'Đậu phụ', default_unit: 'bìa', aliases: ['dau phu', 'đậu hũ', 'dau hu'], allergen_group_id: algMap['soy'] },
-    { name: 'Cà chua', default_unit: 'quả', aliases: ['ca chua'], allergen_group_id: null },
-    { name: 'Khoai tây', default_unit: 'củ', aliases: ['khoai tay'], allergen_group_id: null },
-    { name: 'Hành tây', default_unit: 'củ', aliases: ['hanh tay'], allergen_group_id: null },
-    { name: 'Hành lá', default_unit: 'nhánh', aliases: ['hanh la'], allergen_group_id: null },
-    { name: 'Tỏi', default_unit: 'tép', aliases: ['toi'], allergen_group_id: null },
-    { name: 'Ớt', default_unit: 'quả', aliases: ['ot'], allergen_group_id: null },
-    { name: 'Gừng', default_unit: 'củ', aliases: ['gung'], allergen_group_id: null },
-    { name: 'Cà rốt', default_unit: 'củ', aliases: ['ca rot'], allergen_group_id: null },
-    { name: 'Nấm hương', default_unit: 'g', aliases: ['nam huong', 'nấm đông cô'], allergen_group_id: null },
-    { name: 'Rau muống', default_unit: 'bó', aliases: ['rau muong'], allergen_group_id: null },
-    { name: 'Bắp cải', default_unit: 'bắp', aliases: ['bap cai'], allergen_group_id: null },
-    { name: 'Chanh', default_unit: 'quả', aliases: ['chanh'], allergen_group_id: null },
-    { name: 'Nước mắm', default_unit: 'thìa canh', aliases: ['nuoc mam'], allergen_group_id: null },
+    { name: 'Thịt bò', default_unit: 'g', aliases: ['thịt bò', 'thit bo', 'bò'], is_common: true, allergen_group_id: null },
+    { name: 'Thịt heo', default_unit: 'g', aliases: ['thịt lợn', 'thit heo', 'thit lon', 'heo', 'lợn'], is_common: true, allergen_group_id: null },
+    { name: 'Thịt gà', default_unit: 'g', aliases: ['thit ga', 'gà'], is_common: true, allergen_group_id: null },
+    { name: 'Trứng gà', default_unit: 'quả', aliases: ['trung ga', 'trứng'], is_common: true, allergen_group_id: algMap['egg'] },
+    { name: 'Tôm', default_unit: 'g', aliases: ['tom', 'tôm sú', 'tôm thẻ'], is_common: true, allergen_group_id: algMap['seafood'] },
+    { name: 'Cá hồi', default_unit: 'g', aliases: ['ca hoi'], is_common: false, allergen_group_id: algMap['seafood'] },
+    { name: 'Đậu phụ', default_unit: 'bìa', aliases: ['dau phu', 'đậu hũ', 'dau hu'], is_common: false, allergen_group_id: algMap['soy'] },
+    { name: 'Cà chua', default_unit: 'quả', aliases: ['ca chua'], is_common: true, allergen_group_id: null },
+    { name: 'Khoai tây', default_unit: 'củ', aliases: ['khoai tay'], is_common: true, allergen_group_id: null },
+    { name: 'Hành tây', default_unit: 'củ', aliases: ['hanh tay'], is_common: true, allergen_group_id: null },
+    { name: 'Hành lá', default_unit: 'nhánh', aliases: ['hanh la'], is_common: true, allergen_group_id: null },
+    { name: 'Tỏi', default_unit: 'tép', aliases: ['toi'], is_common: true, allergen_group_id: null },
+    { name: 'Ớt', default_unit: 'quả', aliases: ['ot'], is_common: true, allergen_group_id: null },
+    { name: 'Gừng', default_unit: 'củ', aliases: ['gung'], is_common: false, allergen_group_id: null },
+    { name: 'Cà rốt', default_unit: 'củ', aliases: ['ca rot'], is_common: true, allergen_group_id: null },
+    { name: 'Nấm hương', default_unit: 'g', aliases: ['nam huong', 'nấm đông cô'], is_common: false, allergen_group_id: null },
+    { name: 'Rau muống', default_unit: 'bó', aliases: ['rau muong'], is_common: false, allergen_group_id: null },
+    { name: 'Bắp cải', default_unit: 'bắp', aliases: ['bap cai'], is_common: false, allergen_group_id: null },
+    { name: 'Chanh', default_unit: 'quả', aliases: ['chanh'], is_common: false, allergen_group_id: null },
+    { name: 'Nước mắm', default_unit: 'thìa canh', aliases: ['nuoc mam'], is_common: false, allergen_group_id: null },
   ];
   const { data: ingredients, error: ingErr } = await supabaseAdmin
     .from('ingredients')
@@ -131,14 +139,13 @@ async function seed() {
 
   // 7. DISHES
   console.log('🍲 7. Đang nạp Món ăn (Dishes)...');
-  const dishesData = [
+  const dishesDefinition = [
     {
       name: 'Phở Bò Tái Lăn Hà Nội Chuẩn Vị',
       slug: 'pho-bo-tai-lan-ha-noi',
       description: 'Bánh phở mềm mượt, thịt bò thăn thái mỏng xào lăn thơm nức mùi gừng tỏi cháy cạnh, chan nước dùng ninh xương ống thơm hồi quế.',
       image_url: 'https://images.unsplash.com/photo-1582878826629-29b7ad1cdc43?auto=format&fit=crop&w=1000&q=80',
-      region_id: regionMap['north'],
-      category_id: catMap['mon-nuoc'],
+      category: 'Món nước',
       cook_time_minutes: 45,
       difficulty: 'medium',
       servings: 2,
@@ -148,20 +155,18 @@ async function seed() {
       carbs_g: 62,
       fat_g: 14,
       steps: [
-        { order: 1, content: 'Thịt bò thái thật mỏng ngang thớ. Gừng đập dập, tỏi băm nhỏ. Ướp thịt bò với 1 thìa nước mắm, tiêu và nửa phần gừng tỏi.', duration_minutes: 10 },
-        { order: 2, content: 'Đun sôi nồi nước dùng bò thảo mộc, giữ nóng liu riu trên bếp.', duration_minutes: 15 },
-        { order: 3, content: 'Làm nóng chảo lớn với dầu ăn, phi thơm gừng tỏi còn lại rồi cho thịt bò vào xào lăn lửa lớn trong 1 phút vừa chín tới.', duration_minutes: 5 },
-        { order: 4, content: 'Trần bánh phở qua nước sôi, xếp vào tô, cho thịt bò xào lăn, hành tây thái mỏng và hành lá lên trên rồi chan nước dùng thật sôi.', duration_minutes: 5 },
+        { order: 1, content: 'Thịt bò thái thật mỏng ngang thớ. Gừng đập dập, tỏi băm nhỏ. Ướp thịt bò với 1 thìa nước mắm, tiêu và nửa phần gừng tỏi.' },
+        { order: 2, content: 'Đun sôi nồi nước dùng bò thảo mộc, giữ nóng liu riu trên bếp.' },
+        { order: 3, content: 'Làm nóng chảo lớn với dầu ăn, phi thơm gừng tỏi còn lại rồi cho thịt bò vào xào lăn lửa lớn trong 1 phút vừa chín tới.' },
+        { order: 4, content: 'Trần bánh phở qua nước sôi, xếp vào tô, cho thịt bò xào lăn, hành tây thái mỏng và hành lá lên trên rồi chan nước dùng thật sôi.' },
       ],
-      is_published: true,
     },
     {
       name: 'Cá Hồi Áp Chảo Măng Tây Sốt Chanh Bơ',
       slug: 'ca-hoi-ap-chao-mang-tay',
       description: 'Phi lê cá hồi tươi áp chảo giòn da mềm ngọt thịt, sốt chanh bơ tỏi thơm ngậy, món ăn thanh đạm giàu omega 3.',
       image_url: 'https://images.unsplash.com/photo-1467003909585-2f8a72700288?auto=format&fit=crop&w=1000&q=80',
-      region_id: regionMap['south'],
-      category_id: catMap['mon-nuong-chien'],
+      category: 'Món nướng / chiên',
       cook_time_minutes: 15,
       difficulty: 'easy',
       servings: 2,
@@ -171,19 +176,17 @@ async function seed() {
       carbs_g: 8,
       fat_g: 26,
       steps: [
-        { order: 1, content: 'Rửa sạch cá hồi, dùng khăn giấy thấm thật khô bề mặt thịt và da. Rắc chút muối tiêu lên 2 mặt cá, ướp 5 phút.', duration_minutes: 5 },
-        { order: 2, content: 'Làm nóng chảo với dầu ô liu ở lửa vừa-lớn. Áp chảo mặt da trong 4 phút cho vàng giòn rụm rồi lật mặt áp tiếp 3 phút.', duration_minutes: 7 },
-        { order: 3, content: 'Hạ nhỏ lửa, cho tỏi băm và nước cốt chanh vào chảo rưới đều lên mặt cá trước khi tắt bếp.', duration_minutes: 3 },
+        { order: 1, content: 'Rửa sạch cá hồi, dùng khăn giấy thấm thật khô bề mặt thịt và da. Rắc chút muối tiêu lên 2 mặt cá, ướp 5 phút.' },
+        { order: 2, content: 'Làm nóng chảo với dầu ô liu ở lửa vừa-lớn. Áp chảo mặt da trong 4 phút cho vàng giòn rụm rồi lật mặt áp tiếp 3 phút.' },
+        { order: 3, content: 'Hạ nhỏ lửa, cho tỏi băm và nước cốt chanh vào chảo rưới đều lên mặt cá trước khi tắt bếp.' },
       ],
-      is_published: true,
     },
     {
       name: 'Bò Xào Hành Tây Cần Tỏi',
       slug: 'bo-xao-hanh-tay-can-toi',
       description: 'Thịt bò xào mềm ngọt tự nhiên kết hợp cùng hành tây giòn thơm, dậy mùi thơm của tỏi phi, bữa cơm gia đình nhanh gọn.',
       image_url: 'https://images.unsplash.com/photo-1544025162-d76694265947?auto=format&fit=crop&w=1000&q=80',
-      region_id: regionMap['north'],
-      category_id: catMap['mon-xao'],
+      category: 'Món xào',
       cook_time_minutes: 15,
       difficulty: 'easy',
       servings: 2,
@@ -193,20 +196,18 @@ async function seed() {
       carbs_g: 12,
       fat_g: 16,
       steps: [
-        { order: 1, content: 'Thịt bò thái mỏng ướp với tỏi băm, hạt nêm, tiêu và 1 thìa dầu ăn cho mềm.', duration_minutes: 5 },
-        { order: 2, content: 'Hành tây bóc vỏ bổ múi cau, tỏi đập dập.', duration_minutes: 3 },
-        { order: 3, content: 'Phi thơm tỏi, xào thịt bò trên lửa lớn vừa chín tái thì trút ra đĩa riêng.', duration_minutes: 3 },
-        { order: 4, content: 'Xào hành tây chín tới rồi đổ thịt bò vào đảo nhanh tay 30 giây, nêm nước mắm vừa ăn rồi tắt bếp.', duration_minutes: 4 },
+        { order: 1, content: 'Thịt bò thái mỏng ướp với tỏi băm, hạt nêm, tiêu và 1 thìa dầu ăn cho mềm.' },
+        { order: 2, content: 'Hành tây bóc vỏ bổ múi cau, tỏi đập dập.' },
+        { order: 3, content: 'Phi thơm tỏi, xào thịt bò trên lửa lớn vừa chín tái thì trút ra đĩa riêng.' },
+        { order: 4, content: 'Xào hành tây chín tới rồi đổ thịt bò vào đảo nhanh tay 30 giây, nêm nước mắm vừa ăn rồi tắt bếp.' },
       ],
-      is_published: true,
     },
     {
       name: 'Thịt Heo Kho Trứng Cút Đậm Đà',
       slug: 'thit-heo-kho-trung-cut',
       description: 'Món thịt kho trứng truyền thống màu nâu cánh gián óng ả, thịt ba chỉ béo ngậy mềm tan cùng trứng thơm bùi ngấm vị.',
-      image_url: 'https://images.unsplash.com/photo-1541832676-9b763b0239ab?auto=format&fit=crop&w=1000&q=80',
-      region_id: regionMap['south'],
-      category_id: catMap['mon-kho'],
+      image_url: 'https://images.unsplash.com/photo-1514944298352-fa5a5658e265?auto=format&fit=crop&w=1000&q=80',
+      category: 'Món kho',
       cook_time_minutes: 40,
       difficulty: 'medium',
       servings: 4,
@@ -216,20 +217,18 @@ async function seed() {
       carbs_g: 6,
       fat_g: 36,
       steps: [
-        { order: 1, content: 'Thịt heo cắt miếng vuông vừa ăn, luộc sơ qua nước sôi để khử mùi hôi.', duration_minutes: 5 },
-        { order: 2, content: 'Trứng luộc chín, bóc sạch vỏ.', duration_minutes: 10 },
-        { order: 3, content: 'Thắng nước màu đường cánh gián, cho tỏi băm vào phi thơm rồi trút thịt heo vào xào săn.', duration_minutes: 5 },
-        { order: 4, content: 'Thêm nước mắm, nước sôi ngập thịt, cho trứng vào kho lửa nhỏ 25 phút đến khi nước cạn sánh.', duration_minutes: 20 },
+        { order: 1, content: 'Thịt heo cắt miếng vuông vừa ăn, luộc sơ qua nước sôi để khử mùi hôi.' },
+        { order: 2, content: 'Trứng luộc chín, bóc sạch vỏ.' },
+        { order: 3, content: 'Thắng nước màu đường cánh gián, cho tỏi băm vào phi thơm rồi trút thịt heo vào xào săn.' },
+        { order: 4, content: 'Thêm nước mắm, nước sôi ngập thịt, cho trứng vào kho lửa nhỏ 25 phút đến khi nước cạn sánh.' },
       ],
-      is_published: true,
     },
     {
       name: 'Canh Cà Chua Trứng (Canh Mây)',
       slug: 'canh-ca-chua-trung-canh-may',
       description: 'Món canh thanh ngọt giải nhiệt, vân trứng vàng óng bồng bềnh như mây, vị chua dịu nhẹ của cà chua tươi.',
       image_url: 'https://images.unsplash.com/photo-1547592166-23ac45744acd?auto=format&fit=crop&w=1000&q=80',
-      region_id: regionMap['north'],
-      category_id: catMap['mon-canh'],
+      category: 'Món canh',
       cook_time_minutes: 10,
       difficulty: 'easy',
       servings: 2,
@@ -239,20 +238,18 @@ async function seed() {
       carbs_g: 8,
       fat_g: 8,
       steps: [
-        { order: 1, content: 'Cà chua rửa sạch bổ múi cau. Hành lá cắt nhỏ. Đập trứng vào bát đánh tan nhẹ.', duration_minutes: 3 },
-        { order: 2, content: 'Phi thơm đầu hành, xào cà chua mềm ra màu đỏ đẹp rồi đổ 600ml nước vào đun sôi.', duration_minutes: 4 },
-        { order: 3, content: 'Nêm nước mắm vừa ăn, từ từ rót trứng vào nồi đồng thời khuấy nhẹ theo một chiều tạo vân mây.', duration_minutes: 2 },
-        { order: 4, content: 'Rắc hành lá tiêu thơm rồi tắt bếp múc ra tô.', duration_minutes: 1 },
+        { order: 1, content: 'Cà chua rửa sạch bổ múi cau. Hành lá cắt nhỏ. Đập trứng vào bát đánh tan nhẹ.' },
+        { order: 2, content: 'Phi thơm đầu hành, xào cà chua mềm ra màu đỏ đẹp rồi đổ 600ml nước vào đun sôi.' },
+        { order: 3, content: 'Nêm nước mắm vừa ăn, từ từ rót trứng vào nồi đồng thời khuấy nhẹ theo một chiều tạo vân mây.' },
+        { order: 4, content: 'Rắc hành lá tiêu thơm rồi tắt bếp múc ra tô.' },
       ],
-      is_published: true,
     },
     {
       name: 'Tôm Rim Mặn Ngọt Đậm Đà',
       slug: 'tom-rim-man-ngot',
       description: 'Tôm tươi rim vàng óng, vỏ giòn ngọt thịt ngấm vị mặn mòi của nước mắm thơm lừng và ngọt ngào vị đường thắng.',
       image_url: 'https://images.unsplash.com/photo-1565680018434-b513d5e5fd47?auto=format&fit=crop&w=1000&q=80',
-      region_id: regionMap['central'],
-      category_id: catMap['mon-kho'],
+      category: 'Món kho',
       cook_time_minutes: 20,
       difficulty: 'easy',
       servings: 3,
@@ -262,20 +259,18 @@ async function seed() {
       carbs_g: 5,
       fat_g: 10,
       steps: [
-        { order: 1, content: 'Tôm rửa sạch cắt râu và ngạnh, để ráo nước.', duration_minutes: 5 },
-        { order: 2, content: 'Phi thơm tỏi băm, cho tôm vào đảo đều tay đến khi tôm chuyển màu đỏ au săn lại.', duration_minutes: 5 },
-        { order: 3, content: 'Thêm hỗn hợp nước mắm, đường, tiêu và rim lửa nhỏ đến khi nước sốt keo bám bóng quanh mình tôm.', duration_minutes: 8 },
-        { order: 4, content: 'Rắc hành lá thái nhỏ và ớt xắt lên trên rồi tắt bếp.', duration_minutes: 2 },
+        { order: 1, content: 'Tôm rửa sạch cắt râu và ngạnh, để ráo nước.' },
+        { order: 2, content: 'Phi thơm tỏi băm, cho tôm vào đảo đều tay đến khi tôm chuyển màu đỏ au săn lại.' },
+        { order: 3, content: 'Thêm hỗn hợp nước mắm, đường, tiêu và rim lửa nhỏ đến khi nước sốt keo bám bóng quanh mình tôm.' },
+        { order: 4, content: 'Rắc hành lá thái nhỏ và ớt xắt lên trên rồi tắt bếp.' },
       ],
-      is_published: true,
     },
     {
       name: 'Gà Xào Nấm Hương Gừng Tươi',
       slug: 'ga-xao-nam-huong-gung',
       description: 'Thịt gà ta săn ngọt xào cùng nấm hương thơm lừng và gừng cay ấm, món ăn bổ dưỡng thích hợp cho cả gia đình.',
       image_url: 'https://images.unsplash.com/photo-1604908176997-125f25cc6f3d?auto=format&fit=crop&w=1000&q=80',
-      region_id: regionMap['north'],
-      category_id: catMap['mon-xao'],
+      category: 'Món xào',
       cook_time_minutes: 20,
       difficulty: 'easy',
       servings: 3,
@@ -285,20 +280,18 @@ async function seed() {
       carbs_g: 6,
       fat_g: 14,
       steps: [
-        { order: 1, content: 'Thịt gà chặt miếng vừa ăn, ướp với nước mắm, gừng thái chỉ và tiêu.', duration_minutes: 7 },
-        { order: 2, content: 'Nấm hương ngâm nở, rửa sạch cắt chân và khía hoa.', duration_minutes: 5 },
-        { order: 3, content: 'Phi tỏi thơm, xào thịt gà săn rồi cho nấm hương vào xào chung trên lửa vừa.', duration_minutes: 6 },
-        { order: 4, content: 'Nêm lại gia vị cho vừa miệng, rắc hành lá đảo đều rồi tắt bếp.', duration_minutes: 2 },
+        { order: 1, content: 'Thịt gà chặt miếng vừa ăn, ướp với nước mắm, gừng thái chỉ và tiêu.' },
+        { order: 2, content: 'Nấm hương ngâm nở, rửa sạch cắt chân và khía hoa.' },
+        { order: 3, content: 'Phi tỏi thơm, xào thịt gà săn rồi cho nấm hương vào xào chung trên lửa vừa.' },
+        { order: 4, content: 'Nêm lại gia vị cho vừa miệng, rắc hành lá đảo đều rồi tắt bếp.' },
       ],
-      is_published: true,
     },
     {
       name: 'Rau Muống Xào Tỏi Xanh Mướt',
       slug: 'rau-muong-xao-toi',
       description: 'Rau muống non giòn ngọt xào lửa lớn giữ trọn màu xanh mướt mát, thơm nức mùi tỏi phi giòn tan.',
       image_url: 'https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=1000&q=80',
-      region_id: regionMap['north'],
-      category_id: catMap['mon-xao'],
+      category: 'Món xào',
       cook_time_minutes: 8,
       difficulty: 'easy',
       servings: 2,
@@ -308,20 +301,18 @@ async function seed() {
       carbs_g: 6,
       fat_g: 6,
       steps: [
-        { order: 1, content: 'Rau muống nhặt sạch lá úa, rửa nhiều lần với nước rồi để ráo.', duration_minutes: 3 },
-        { order: 2, content: 'Tỏi bóc vỏ đập dập. Chần sơ rau muống qua nước sôi 30 giây rồi vớt ra ngâm nước đá lạnh.', duration_minutes: 2 },
-        { order: 3, content: 'Phi vàng tỏi, cho rau muống vào xào lửa lớn đảo nhanh tay trong 2 phút.', duration_minutes: 2 },
-        { order: 4, content: 'Nêm 1 thìa nước mắm ngon, rắc thêm tỏi phi thơm lên mặt rồi trút ra đĩa thưởng thức.', duration_minutes: 1 },
+        { order: 1, content: 'Rau muống nhặt sạch lá úa, rửa nhiều lần với nước rồi để ráo.' },
+        { order: 2, content: 'Tỏi bóc vỏ đập dập. Chần sơ rau muống qua nước sôi 30 giây rồi vớt ra ngâm nước đá lạnh.' },
+        { order: 3, content: 'Phi vàng tỏi, cho rau muống vào xào lửa lớn đảo nhanh tay trong 2 phút.' },
+        { order: 4, content: 'Nêm 1 thìa nước mắm ngon, rắc thêm tỏi phi thơm lên mặt rồi trút ra đĩa thưởng thức.' },
       ],
-      is_published: true,
     },
     {
       name: 'Đậu Phụ Sốt Cà Chua Hành Lá',
       slug: 'dau-phu-sot-ca-chua',
       description: 'Miếng đậu phụ rán vàng giòn ngập trong sốt cà chua sánh mịn chua ngọt thanh tao, thơm dịu hương hành lá.',
       image_url: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=1000&q=80',
-      region_id: regionMap['north'],
-      category_id: catMap['mon-kho'],
+      category: 'Món kho',
       cook_time_minutes: 15,
       difficulty: 'easy',
       servings: 2,
@@ -331,20 +322,18 @@ async function seed() {
       carbs_g: 9,
       fat_g: 10,
       steps: [
-        { order: 1, content: 'Đậu phụ cắt miếng vuông vừa ăn, rán vàng đều các mặt.', duration_minutes: 6 },
-        { order: 2, content: 'Cà chua băm nhỏ xào nhừ tạo sốt sánh mịn.', duration_minutes: 4 },
-        { order: 3, content: 'Cho đậu phụ đã rán vào chảo sốt cà chua, nêm nước mắm rim nhỏ lửa 3 phút cho ngấm đều.', duration_minutes: 3 },
-        { order: 4, content: 'Rắc hành lá thái nhỏ lên trên rồi tắt bếp.', duration_minutes: 2 },
+        { order: 1, content: 'Đậu phụ cắt miếng vuông vừa ăn, rán vàng đều các mặt.' },
+        { order: 2, content: 'Cà chua băm nhỏ xào nhừ tạo sốt sánh mịn.' },
+        { order: 3, content: 'Cho đậu phụ đã rán vào chảo sốt cà chua, nêm nước mắm rim nhỏ lửa 3 phút cho ngấm đều.' },
+        { order: 4, content: 'Rắc hành lá thái nhỏ lên trên rồi tắt bếp.' },
       ],
-      is_published: true,
     },
     {
       name: 'Bò Hầm Khoai Tây Cà Rốt',
       slug: 'bo-ham-khoai-tay-ca-rot',
       description: 'Thịt bò dẻ sườn hầm mềm tan trong miệng, khoai tây và cà rốt bở bùi ngọt tự nhiên, nước canh sóng sánh thơm lừng.',
       image_url: 'https://images.unsplash.com/photo-1547496502-affa22d38842?auto=format&fit=crop&w=1000&q=80',
-      region_id: regionMap['north'],
-      category_id: catMap['mon-canh'],
+      category: 'Món canh',
       cook_time_minutes: 50,
       difficulty: 'medium',
       servings: 3,
@@ -354,20 +343,18 @@ async function seed() {
       carbs_g: 35,
       fat_g: 16,
       steps: [
-        { order: 1, content: 'Thịt bò cắt khối vuông ướp gừng, tỏi và nước mắm 15 phút.', duration_minutes: 15 },
-        { order: 2, content: 'Khoai tây, cà rốt gọt vỏ cắt miếng vừa ăn ngâm nước muối loãng.', duration_minutes: 5 },
-        { order: 3, content: 'Xào săn thịt bò rồi đổ 800ml nước ninh nhỏ lửa 30 phút cho thịt mềm.', duration_minutes: 30 },
-        { order: 4, content: 'Cho khoai tây, cà rốt vào hầm thêm 15 phút đến khi bở bùi, nêm nếm lại gia vị rồi tắt bếp.', duration_minutes: 15 },
+        { order: 1, content: 'Thịt bò cắt khối vuông ướp gừng, tỏi và nước mắm 15 phút.' },
+        { order: 2, content: 'Khoai tây, cà rốt gọt vỏ cắt miếng vừa ăn ngâm nước muối loãng.' },
+        { order: 3, content: 'Xào săn thịt bò rồi đổ 800ml nước ninh nhỏ lửa 30 phút cho thịt mềm.' },
+        { order: 4, content: 'Cho khoai tây, cà rốt vào hầm thêm 15 phút đến khi bở bùi, nêm nếm lại gia vị rồi tắt bếp.' },
       ],
-      is_published: true,
     },
     {
       name: 'Bún Bò Huế Cay Nồng Đậm Đà',
       slug: 'bun-bo-hue-cay-nong',
       description: 'Tô bún bò xứ Huế trứ danh với nước dùng cay nồng hương sả ớt, màu điều đỏ rực rỡ, thịt bò mềm ngọt hòa quyện cùng mùi mắm ruốc đặc trưng.',
       image_url: 'https://images.unsplash.com/photo-1569718212165-3a8278d5f624?auto=format&fit=crop&w=1000&q=80',
-      region_id: regionMap['central'],
-      category_id: catMap['mon-nuoc'],
+      category: 'Món nước',
       cook_time_minutes: 60,
       difficulty: 'hard',
       servings: 4,
@@ -377,22 +364,27 @@ async function seed() {
       carbs_g: 65,
       fat_g: 18,
       steps: [
-        { order: 1, content: 'Thịt bắp bò và giò heo rửa sạch, luộc sơ rồi rửa lại nước lạnh cho sạch bọt.', duration_minutes: 10 },
-        { order: 2, content: 'Ninh thịt với gừng, hành tây và nước sôi trong 40 phút cho mềm ngọt.', duration_minutes: 40 },
-        { order: 3, content: 'Phi dầu màu điều với tỏi, sả và ớt bột cho thơm cay nồng rồi trút vào nồi nước dùng.', duration_minutes: 5 },
-        { order: 4, content: 'Xếp bún vào tô, thêm thịt thái lát, rắc hành lá hành tây rồi chan nước dùng nóng hổi, ăn kèm chanh ớt.', duration_minutes: 5 },
+        { order: 1, content: 'Thịt bắp bò và giò heo rửa sạch, luộc sơ rồi rửa lại nước lạnh cho sạch bọt.' },
+        { order: 2, content: 'Ninh thịt với gừng, hành tây và nước sôi trong 40 phút cho mềm ngọt.' },
+        { order: 3, content: 'Phi dầu màu điều với tỏi, sả và ớt bột cho thơm cay nồng rồi trút vào nồi nước dùng.' },
+        { order: 4, content: 'Xếp bún vào tô, thêm thịt thái lát, rắc hành lá hành tây rồi chan nước dùng nóng hổi, ăn kèm chanh ớt.' },
       ],
-      is_published: true,
     },
   ];
 
+  // Nạp món ăn với is_published = false để tránh vi phạm trigger check_published_has_recipe
+  const dishesPayload = dishesDefinition.map(({ steps, ...rest }) => ({
+    ...rest,
+    is_published: false,
+  }));
+
   const { data: dishes, error: dishErr } = await supabaseAdmin
     .from('dishes')
-    .upsert(dishesData, { onConflict: 'slug' })
+    .upsert(dishesPayload, { onConflict: 'slug' })
     .select();
   if (dishErr) throw new Error(`Lỗi dishes: ${dishErr.message}`);
   const dishMap = Object.fromEntries(dishes.map(d => [d.slug, d.id]));
-  console.log(`   ✅ Đã nạp ${dishes.length} món ăn kèm công thức chi tiết.`);
+  console.log(`   ✅ Đã nạp ${dishes.length} món ăn vào bảng dishes.`);
 
   // 8. DISH TAGS
   console.log('🏷️  8. Đang nạp Dish Tags...');
@@ -426,8 +418,28 @@ async function seed() {
   if (dtErr) throw new Error(`Lỗi dish_tags: ${dtErr.message}`);
   console.log(`   ✅ Đã nạp ${dishTagsData.length} liên kết tag cho món ăn.`);
 
-  // 9. DISH INGREDIENTS
-  console.log('🧂 9. Đang nạp Dish Ingredients...');
+  // 9. RECIPE STEPS (Bảng recipe_steps chuẩn v3)
+  console.log('📝 9. Đang nạp Recipe Steps...');
+  const recipeStepsData = [];
+  for (const item of dishesDefinition) {
+    const dishId = dishMap[item.slug];
+    if (!dishId || !item.steps) continue;
+    for (const s of item.steps) {
+      recipeStepsData.push({
+        dish_id: dishId,
+        step_order: s.order,
+        content: s.content,
+      });
+    }
+  }
+  const { error: stepErr } = await supabaseAdmin
+    .from('recipe_steps')
+    .upsert(recipeStepsData, { onConflict: 'dish_id,step_order' });
+  if (stepErr) throw new Error(`Lỗi recipe_steps: ${stepErr.message}`);
+  console.log(`   ✅ Đã nạp ${recipeStepsData.length} bước thực hiện công thức.`);
+
+  // 10. DISH INGREDIENTS
+  console.log('🧂 10. Đang nạp Dish Ingredients...');
   const dishIngRaw = [
     // Phở Bò Tái Lăn Hà Nội
     ['pho-bo-tai-lan-ha-noi', 'Thịt bò', 250, 'g', false],
@@ -533,6 +545,16 @@ async function seed() {
     .upsert(dishIngredientsData, { onConflict: 'dish_id,ingredient_id' });
   if (diErr) throw new Error(`Lỗi dish_ingredients: ${diErr.message}`);
   console.log(`   ✅ Đã nạp ${dishIngredientsData.length} nguyên liệu cho các món ăn.`);
+
+  // 11. CÔNG KHAI CÁC MÓN ĂN (Kích hoạt trigger check_published_has_recipe)
+  console.log('🌟 11. Đang công khai tất cả món ăn (is_published = true)...');
+  const allDishIds = Object.values(dishMap);
+  const { error: pubErr } = await supabaseAdmin
+    .from('dishes')
+    .update({ is_published: true })
+    .in('id', allDishIds);
+  if (pubErr) throw new Error(`Lỗi công khai dishes: ${pubErr.message}`);
+  console.log(`   ✅ Đã công khai thành công ${allDishIds.length} món ăn.`);
 
   console.log('\n🎉 NẠP TOÀN BỘ DỮ LIỆU THÀNH CÔNG VÀO SUPABASE!');
   process.exit(0);

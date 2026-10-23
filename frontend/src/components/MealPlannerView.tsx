@@ -3,13 +3,11 @@ import {
   CalendarDays, 
   Sparkles, 
   Flame, 
-  ShoppingCart, 
   Trash2, 
   Plus, 
   Check, 
   Clock, 
   ChefHat, 
-  Share2,
   AlertCircle
 } from 'lucide-react';
 import { Recipe, UserProfile, FridgeItem } from '../types';
@@ -39,8 +37,6 @@ export const MealPlannerView: React.FC<MealPlannerViewProps> = ({
     } catch {}
     return [];
   });
-
-  const [checkedGrocery, setCheckedGrocery] = useState<string[]>([]);
 
   // Persist fridge items
   useEffect(() => {
@@ -85,35 +81,22 @@ export const MealPlannerView: React.FC<MealPlannerViewProps> = ({
     return dayDishes;
   }, [recipes, selectedDayIndex]);
 
-  // Dynamically calculate total calories for the selected day
+  // Dynamically calculate total calories and macros for the selected day
   const totalCaloSelectedDay = useMemo(() => {
     return dailySchedule.reduce((sum, item) => sum + (item.recipe?.macros?.calories || 400), 0);
   }, [dailySchedule]);
 
-  // Dynamically extract real ingredients from recipes to build grocery shopping list
-  const dynamicGrocery = useMemo(() => {
-    if (!recipes || recipes.length === 0) return [];
+  const totalProteinSelectedDay = useMemo(() => {
+    return dailySchedule.reduce((sum, item) => sum + (item.recipe?.macros?.protein || 22), 0);
+  }, [dailySchedule]);
 
-    const map = new Map<string, string>();
-    recipes.slice(0, 5).forEach(r => {
-      (r.ingredients || []).forEach(ing => {
-        if (ing.name && !map.has(ing.name)) {
-          const amountStr = ing.amount ? `${ing.amount} ${ing.unit || 'phần'}` : 'Vừa đủ';
-          map.set(ing.name, `${ing.name} (${amountStr})`);
-        }
-      });
-    });
+  const totalCarbsSelectedDay = useMemo(() => {
+    return dailySchedule.reduce((sum, item) => sum + (item.recipe?.macros?.carbs || 45), 0);
+  }, [dailySchedule]);
 
-    return Array.from(map.values());
-  }, [recipes]);
-
-  const toggleGroceryCheck = (item: string) => {
-    if (checkedGrocery.includes(item)) {
-      setCheckedGrocery(checkedGrocery.filter(i => i !== item));
-    } else {
-      setCheckedGrocery([...checkedGrocery, item]);
-    }
-  };
+  const totalFatSelectedDay = useMemo(() => {
+    return dailySchedule.reduce((sum, item) => sum + (item.recipe?.macros?.fat || 15), 0);
+  }, [dailySchedule]);
 
   const handleAddFridgeItem = async () => {
     const name = await showPrompt({
@@ -163,13 +146,13 @@ export const MealPlannerView: React.FC<MealPlannerViewProps> = ({
         <div>
           <span className="text-xs font-bold text-orange-600 uppercase tracking-wider flex items-center gap-1">
             <CalendarDays className="w-3.5 h-3.5" />
-            KẾ HOẠCH BỮA ĂN DỰA TRÊN DỮ LIỆU THỰC
+            KẾ HOẠCH DINH DƯỠNG CÁ NHÂN HÓA
           </span>
           <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight mt-0.5">
             Thực Đơn Tuần & Tủ Lạnh Thông Minh
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Cân bằng dinh dưỡng 7 ngày theo kho món ăn từ cơ sở dữ liệu, quản lý nguyên liệu chống lãng phí và xuất danh sách đi chợ.
+            Cân bằng dinh dưỡng 7 ngày với thực đơn món ăn phong phú, quản lý nguyên liệu tủ lạnh và chống lãng phí thực phẩm.
           </p>
         </div>
 
@@ -209,7 +192,7 @@ export const MealPlannerView: React.FC<MealPlannerViewProps> = ({
         ))}
       </div>
 
-      {/* Main Grid: Left 2 Cols (Daily Meals Schedule), Right 1 Col (Smart Fridge & Shopping List) */}
+      {/* Main Grid: Left 2 Cols (Daily Meals Schedule), Right 1 Col (Smart Fridge & Nutrition Analysis) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Left 2 Cols: Meals of Selected Day */}
         <div className="lg:col-span-2 space-y-6">
@@ -354,59 +337,61 @@ export const MealPlannerView: React.FC<MealPlannerViewProps> = ({
             </button>
           </div>
 
-          {/* Grocery Shopping List Box */}
+          {/* Daily Nutrition Balance & Medical Guidance Box */}
           <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <div className="flex items-center gap-2">
-                <ShoppingCart className="w-5 h-5 text-emerald-600" />
-                <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                  Đi Chợ Từ Công Thức Thực
-                </h4>
+                <div className="w-8 h-8 rounded-xl bg-orange-50 flex items-center justify-center text-orange-600">
+                  <Flame className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                    Dinh Dưỡng Ngày Này
+                  </h4>
+                  <p className="text-[11px] text-slate-400">
+                    {daysOfWeek[selectedDayIndex]?.day || 'Hôm nay'} ({totalCaloSelectedDay} kcal)
+                  </p>
+                </div>
               </div>
-              <button
-                onClick={() => {
-                  if (dynamicGrocery.length === 0) {
-                    toast.warning('Chưa có nguyên liệu nào để chia sẻ.', 'Danh sách đi chợ');
-                    return;
-                  }
-                  navigator.clipboard?.writeText(dynamicGrocery.join('\n'));
-                  toast.success('Đã sao chép danh sách mua sắm vào clipboard!', 'Chia sẻ thành công');
-                }}
-                className="text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
-                title="Chia sẻ danh sách"
-              >
-                <Share2 className="w-4 h-4" />
-              </button>
+              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+                Chuẩn Y Khoa
+              </span>
             </div>
 
-            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-              {dynamicGrocery.length === 0 ? (
-                <div className="py-6 text-center text-xs text-slate-400">
-                  Danh sách đi chợ sẽ tự động xuất hiện khi có món ăn trong thực đơn.
-                </div>
-              ) : (
-                dynamicGrocery.map(item => {
-                  const isChecked = checkedGrocery.includes(item);
-                  return (
-                    <label
-                      key={item}
-                      onClick={() => toggleGroceryCheck(item)}
-                      className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-slate-50 text-xs cursor-pointer"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() => toggleGroceryCheck(item)}
-                        className="rounded text-emerald-600 focus:ring-emerald-500 accent-emerald-600"
-                      />
-                      <span className={isChecked ? 'line-through text-slate-400' : 'text-slate-700 font-medium'}>
-                        {item}
-                      </span>
-                    </label>
-                  );
-                })
-              )}
+            {/* Macro Breakdown */}
+            <div className="grid grid-cols-3 gap-2">
+              <div className="bg-orange-50/60 border border-orange-100 p-2.5 rounded-2xl text-center">
+                <span className="text-[10px] font-bold text-orange-700 block uppercase">Đạm (Protein)</span>
+                <span className="text-base font-extrabold text-orange-900">{totalProteinSelectedDay}g</span>
+              </div>
+              <div className="bg-amber-50/60 border border-amber-100 p-2.5 rounded-2xl text-center">
+                <span className="text-[10px] font-bold text-amber-700 block uppercase">Tinh bột (Carb)</span>
+                <span className="text-base font-extrabold text-amber-900">{totalCarbsSelectedDay}g</span>
+              </div>
+              <div className="bg-emerald-50/60 border border-emerald-100 p-2.5 rounded-2xl text-center">
+                <span className="text-[10px] font-bold text-emerald-700 block uppercase">Chất béo (Fat)</span>
+                <span className="text-base font-extrabold text-emerald-900">{totalFatSelectedDay}g</span>
+              </div>
             </div>
+
+            {/* Nutrition Advice & Medical Reminders */}
+            <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-1.5 text-xs">
+              <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-orange-500" />
+                Đánh Giá Khẩu Phần Cân Bằng:
+              </div>
+              <p className="text-[11px] text-slate-600 leading-relaxed">
+                Thực đơn ngày này cung cấp tỉ lệ dưỡng chất tối ưu cho thể trạng trung bình. Nên uống đủ 2L nước và bổ sung thêm rau xanh cho bữa tối.
+              </p>
+            </div>
+
+            <button
+              onClick={() => onOpenChatWithPrompt(`Đánh giá cân bằng dinh dưỡng cho thực đơn ngày ${daysOfWeek[selectedDayIndex]?.day || 'hôm nay'} (${totalCaloSelectedDay} kcal, ${totalProteinSelectedDay}g đạm) và tư vấn thêm theo thể trạng`)}
+              className="w-full py-2.5 bg-slate-100 hover:bg-orange-50 text-slate-700 hover:text-orange-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200/60"
+            >
+              <ChefHat className="w-3.5 h-3.5 text-orange-500" />
+              Tư vấn thực đơn này cùng ChefAI
+            </button>
           </div>
         </div>
       </div>

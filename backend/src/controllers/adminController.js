@@ -6,6 +6,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { sanitizeSearchKeyword, isStrongPassword } from '../utils/validators.js';
 import { generateEmbedding } from '../services/aiService.js';
 import { env } from '../config/appConfig.js';
+import * as XLSX from 'xlsx';
 
 // ────────────────────────────────────────────────────────────────────────────────
 // Quản lý dữ liệu cá nhân (GET/PUT /api/me/profile, PATCH /api/me/password)
@@ -289,8 +290,7 @@ export async function getMyFavorites(req, res, next) {
       .select(`
         dish_id,
         created_at,
-        dishes(id, name, slug, image_url, calories, cook_time_minutes, difficulty,
-          category:categories(id, name))
+        dishes(id, name, slug, image_url, calories, cook_time_minutes, difficulty, category)
       `, { count: 'exact' })
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
@@ -377,16 +377,19 @@ export async function adminGetDishes(req, res, next) {
         id, name, slug, description, image_url, is_published,
         cook_time_minutes, difficulty, calories, servings, est_cost,
         protein_g, carbs_g, fat_g, created_at, updated_at,
-        category:categories(id, name),
+        category,
         dish_tags(tag:tags(id, name)),
         dish_ingredients(count),
         ratings(stars),
         favorites(user_id),
-        steps
+        recipe_steps(step_order, content)
       `, { count: 'exact' });
 
     if (q) query = query.ilike('name', `%${q}%`);
-    if (category_id) query = query.eq('category_id', parseInt(category_id));
+    if (category_id) {
+      const { data: cat } = await supabaseAdmin.from('categories').select('name').eq('id', parseInt(category_id)).maybeSingle();
+      if (cat) query = query.eq('category', cat.name);
+    }
     if (is_published !== undefined && is_published !== '') {
       query = query.eq('is_published', is_published === 'true');
     }
@@ -406,9 +409,9 @@ export async function adminGetDishes(req, res, next) {
     if (error) throw error;
 
     let items = (dishes || []).map(d => {
-      const hasRecipe = Array.isArray(d.steps) ? d.steps.length > 0 : false;
+      const hasRecipe = (Array.isArray(d.recipe_steps) && d.recipe_steps.length > 0) || (Array.isArray(d.steps) && d.steps.length > 0);
       const hasIngredients = (d.dish_ingredients?.[0]?.count || 0) > 0;
-      const categoryName = d.category?.name || '';
+      const categoryName = typeof d.category === 'string' ? d.category : (d.category?.name || '');
 
       const ratingsList = d.ratings || [];
       const ratingCount = ratingsList.length;
@@ -573,11 +576,12 @@ export async function adminCreateDish(req, res, next) {
       .replace(/^-|-$/g, '')
       + '-' + Date.now();
 
+    const resolvedCatName = typeof catValue === 'object' ? (catValue?.name || '') : String(catValue || '').trim();
     const insertData = {
       name: name.trim(),
       slug,
       description: description?.trim() || null,
-      category_id: resolvedCatId,
+      category: resolvedCatName,
       image_url: image_url?.trim() || null,
       cook_time_minutes: cook_time_minutes ? parseInt(cook_time_minutes) : null,
       difficulty: ['easy', 'medium', 'hard'].includes(difficulty) ? difficulty : 'medium',
@@ -589,7 +593,6 @@ export async function adminCreateDish(req, res, next) {
       fat_g: fat_g ? parseFloat(fat_g) : null,
       is_published: false, // Món mới luôn ẩn theo quy tắc nghiệp vụ mục 4.10.3
       created_by: req.user?.id || null,
-      steps: [],
     };
 
     const { data: newDish, error: insertErr } = await supabaseAdmin
@@ -600,7 +603,7 @@ export async function adminCreateDish(req, res, next) {
         name, description, image_url, cook_time_minutes,
         difficulty, servings, est_cost, calories, protein_g,
         carbs_g, fat_g, is_published,
-        category:categories(id, name)
+        category
       `)
       .single();
 
@@ -649,7 +652,7 @@ export async function adminUpdateDish(req, res, next) {
 
     const { data: existing, error: fetchErr } = await supabaseAdmin
       .from('dishes')
-      .select('id, name, is_published, steps, dish_ingredients(count)')
+      .select('id, name, is_published, recipe_steps(step_order, content), dish_ingredients(count)')
       .eq('id', dishId)
       .maybeSingle();
 
@@ -679,10 +682,7 @@ export async function adminUpdateDish(req, res, next) {
     if (description !== undefined) updates.description = description?.trim() || null;
     const catInput = category_name || category || category_id;
     if (catInput !== undefined) {
-      const resolvedCatId = await resolveCategoryId(catInput);
-      if (resolvedCatId) {
-        updates.category_id = resolvedCatId;
-      }
+      updates.category = typeof catInput === 'object' ? (catInput.name || '') : String(catInput).trim();
     }
     if (image_url !== undefined) updates.image_url = image_url?.trim() || null;
     if (cook_time_minutes !== undefined) updates.cook_time_minutes = cook_time_minutes ? parseInt(cook_time_minutes) : null;
@@ -696,7 +696,7 @@ export async function adminUpdateDish(req, res, next) {
 
     if (is_published !== undefined) {
       if (is_published === true) {
-        const hasSteps = Array.isArray(existing.steps) && existing.steps.length > 0;
+        const hasSteps = Array.isArray(existing.recipe_steps) && existing.recipe_steps.length > 0;
         const hasIngredients = (existing.dish_ingredients?.[0]?.count || 0) > 0;
         if (!hasSteps || !hasIngredients) {
           return res.status(422).json({
@@ -734,8 +734,8 @@ export async function adminUpdateDish(req, res, next) {
         id, slug, created_by, created_at, updated_at,
         name, description, image_url, cook_time_minutes,
         difficulty, servings, est_cost, calories, protein_g,
-        carbs_g, fat_g, is_published, steps,
-        category:categories(id, name),
+        carbs_g, fat_g, is_published, category,
+        recipe_steps(step_order, content),
         dish_ingredients(count),
         dish_tags(tag:tags(id, name))
       `)
@@ -748,7 +748,7 @@ export async function adminUpdateDish(req, res, next) {
         ...updated,
         category: updated.category?.name || '',
         tag_ids: (updated.dish_tags || []).map(dt => dt.tag?.id).filter(Boolean),
-        has_recipe: (Array.isArray(updated.steps) && updated.steps.length > 0) && ((updated.dish_ingredients?.[0]?.count || 0) > 0),
+        has_recipe: (Array.isArray(updated.recipe_steps) && updated.recipe_steps.length > 0) && ((updated.dish_ingredients?.[0]?.count || 0) > 0),
       }
     });
   } catch (err) {
@@ -771,7 +771,7 @@ export async function adminTogglePublishDish(req, res, next) {
 
     const { data: dish, error: fetchErr } = await supabaseAdmin
       .from('dishes')
-      .select('id, is_published, steps, dish_ingredients(count)')
+      .select('id, is_published, recipe_steps(step_order, content), dish_ingredients(count)')
       .eq('id', dishId)
       .maybeSingle();
 
@@ -781,7 +781,7 @@ export async function adminTogglePublishDish(req, res, next) {
     }
 
     if (is_published === true) {
-      const hasSteps = Array.isArray(dish.steps) && dish.steps.length > 0;
+      const hasSteps = Array.isArray(dish.recipe_steps) && dish.recipe_steps.length > 0;
       const hasIngredients = (dish.dish_ingredients?.[0]?.count || 0) > 0;
       if (!hasSteps || !hasIngredients) {
         return res.status(422).json({
@@ -887,7 +887,8 @@ export async function adminGetDishRecipe(req, res, next) {
     const { data: dish, error } = await supabaseAdmin
       .from('dishes')
       .select(`
-        id, name, slug, cook_time_minutes, servings, difficulty, steps, is_published, updated_at,
+        id, name, slug, cook_time_minutes, servings, difficulty, is_published, updated_at,
+        recipe_steps(step_order, content),
         dish_ingredients(
           ingredient_id,
           quantity,
@@ -907,12 +908,16 @@ export async function adminGetDishRecipe(req, res, next) {
       });
     }
 
-    const rawSteps = Array.isArray(dish.steps) ? dish.steps : [];
-    const formattedSteps = rawSteps.map((st, idx) => ({
-      order: st.order ?? st.step_number ?? idx + 1,
-      content: st.content || st.instruction || '',
-      duration_minutes: st.duration_minutes ?? undefined,
-    }));
+    const rawSteps = Array.isArray(dish.recipe_steps) ? dish.recipe_steps : [];
+    const formattedSteps = rawSteps
+      .sort((a, b) => (a.step_order || 0) - (b.step_order || 0))
+      .map((st, idx) => ({
+        step_number: st.step_order ?? idx + 1,
+        order: st.step_order ?? idx + 1,
+        content: st.content || '',
+        instruction: st.content || '',
+        duration_minutes: undefined,
+      }));
 
     const ingredients = (dish.dish_ingredients || []).map(di => ({
       ingredient_id: di.ingredient_id,
@@ -1031,7 +1036,7 @@ export async function adminCreateDishRecipe(req, res, next) {
 
     const { data: dish, error: fetchErr } = await supabaseAdmin
       .from('dishes')
-      .select('id, steps, dish_ingredients(count), servings')
+      .select('id, recipe_steps(step_order, content), dish_ingredients(count), servings')
       .eq('id', dishId)
       .maybeSingle();
 
@@ -1040,7 +1045,7 @@ export async function adminCreateDishRecipe(req, res, next) {
       return res.status(404).json({ success: false, error: { code: 'DISH_NOT_FOUND', message: 'Món ăn không tồn tại.' } });
     }
 
-    const hasSteps = Array.isArray(dish.steps) && dish.steps.length > 0;
+    const hasSteps = Array.isArray(dish.recipe_steps) && dish.recipe_steps.length > 0;
     const hasIngs = (dish.dish_ingredients?.[0]?.count || 0) > 0;
     if (hasSteps && hasIngs) {
       return res.status(409).json({
@@ -1058,17 +1063,29 @@ export async function adminCreateDishRecipe(req, res, next) {
     const { error: ingInsertErr } = await supabaseAdmin.from('dish_ingredients').insert(ingRows);
     if (ingInsertErr) throw ingInsertErr;
 
-    // Cập nhật món
-    const dishUpdates = { steps: formattedSteps };
+    // Lưu các bước thực hiện vào bảng recipe_steps (Chuẩn Schema v3)
+    await supabaseAdmin.from('recipe_steps').delete().eq('dish_id', dishId);
+    const stepRows = formattedSteps.map(s => ({
+      dish_id: dishId,
+      step_order: s.order,
+      content: s.content,
+    }));
+    const { error: stepInsertErr } = await supabaseAdmin.from('recipe_steps').insert(stepRows);
+    if (stepInsertErr) throw stepInsertErr;
+
+    // Cập nhật khẩu phần và trạng thái công khai nếu cần
+    const dishUpdates = {};
     if (servings) dishUpdates.servings = parseInt(servings);
     if (publish === true) dishUpdates.is_published = true;
 
-    const { error: dishErr } = await supabaseAdmin
-      .from('dishes')
-      .update(dishUpdates)
-      .eq('id', dishId);
+    if (Object.keys(dishUpdates).length > 0) {
+      const { error: dishErr } = await supabaseAdmin
+        .from('dishes')
+        .update(dishUpdates)
+        .eq('id', dishId);
 
-    if (dishErr) throw dishErr;
+      if (dishErr) throw dishErr;
+    }
 
     // Cập nhật lại embedding bất đồng bộ
     try {
@@ -1138,23 +1155,35 @@ export async function adminUpdateDishRecipe(req, res, next) {
       dishId, ingredients, steps, req.user?.id
     );
 
-    // Xóa cũ và ghi mới trong cùng giao dịch
+    // Xóa cũ và ghi mới trong dish_ingredients
     await supabaseAdmin.from('dish_ingredients').delete().eq('dish_id', dishId);
     const { error: ingInsertErr } = await supabaseAdmin.from('dish_ingredients').insert(ingRows);
     if (ingInsertErr) throw ingInsertErr;
 
-    const dishUpdates = { steps: formattedSteps };
+    // Xóa cũ và ghi mới trong recipe_steps (Chuẩn Schema v3)
+    await supabaseAdmin.from('recipe_steps').delete().eq('dish_id', dishId);
+    const stepRows = formattedSteps.map(s => ({
+      dish_id: dishId,
+      step_order: s.order,
+      content: s.content,
+    }));
+    const { error: stepInsertErr } = await supabaseAdmin.from('recipe_steps').insert(stepRows);
+    if (stepInsertErr) throw stepInsertErr;
+
+    const dishUpdates = {};
     if (servings) dishUpdates.servings = parseInt(servings);
-    if (publish === true) {
-      dishUpdates.is_published = true;
+    if (publish !== undefined) {
+      dishUpdates.is_published = Boolean(publish);
     }
 
-    const { error: dishErr } = await supabaseAdmin
-      .from('dishes')
-      .update(dishUpdates)
-      .eq('id', dishId);
+    if (Object.keys(dishUpdates).length > 0) {
+      const { error: dishErr } = await supabaseAdmin
+        .from('dishes')
+        .update(dishUpdates)
+        .eq('id', dishId);
 
-    if (dishErr) throw dishErr;
+      if (dishErr) throw dishErr;
+    }
 
     // Cập nhật lại embedding bất đồng bộ
     try {
@@ -1213,11 +1242,14 @@ export async function adminDeleteDishRecipe(req, res, next) {
       return res.status(404).json({ success: false, error: { code: 'DISH_NOT_FOUND', message: 'Món ăn không tồn tại.' } });
     }
 
-    // 1. Xóa nguyên liệu
+    // 1. Tự động ẩn món trước để tránh trigger vi phạm check_published_has_recipe
+    await supabaseAdmin.from('dishes').update({ is_published: false }).eq('id', dishId);
+
+    // 2. Xóa nguyên liệu
     await supabaseAdmin.from('dish_ingredients').delete().eq('dish_id', dishId);
 
-    // 2. Xóa các bước nấu và tự động ẩn món
-    await supabaseAdmin.from('dishes').update({ steps: [], is_published: false }).eq('id', dishId);
+    // 3. Xóa các bước nấu trong recipe_steps
+    await supabaseAdmin.from('recipe_steps').delete().eq('dish_id', dishId);
 
     recordAuditLog(req.user, 'RECIPE_DELETE', 'dishes', dishId, { name: dish.name });
 
@@ -1251,7 +1283,6 @@ export async function adminReindexDish(req, res, next) {
       .from('dishes')
       .select(`
         id, name, slug, description, category,
-        categories (id, name),
         dish_ingredients (
           ingredients (id, name)
         ),
@@ -2083,13 +2114,18 @@ export async function adminGetCategories(req, res, next) {
     const catIds = (cats || []).map(c => c.id);
     const dishCounts = {};
     if (catIds.length > 0) {
+      const catNames = (cats || []).map(c => c.name);
       const { data: dishes } = await supabaseAdmin
         .from('dishes')
-        .select('category_id')
-        .in('category_id', catIds)
+        .select('category')
+        .in('category', catNames)
         .eq('is_published', true);
+      const catNameToId = Object.fromEntries((cats || []).map(c => [c.name, c.id]));
       (dishes || []).forEach(d => {
-        dishCounts[d.category_id] = (dishCounts[d.category_id] || 0) + 1;
+        const cid = catNameToId[d.category];
+        if (cid) {
+          dishCounts[cid] = (dishCounts[cid] || 0) + 1;
+        }
       });
     }
 
@@ -2268,11 +2304,11 @@ export async function adminDeleteCategory(req, res, next) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Danh mục không tồn tại.' } });
     }
 
-    // Kiểm tra số món trong danh mục
+    // Kiểm tra số món trong danh mục (theo tên category)
     const { count: dishCount } = await supabaseAdmin
       .from('dishes')
       .select('*', { count: 'exact', head: true })
-      .eq('category_id', parseInt(categoryId));
+      .eq('category', category.name);
 
     if (dishCount > 0) {
       if (!migrate_to_category_id) {
@@ -2289,7 +2325,7 @@ export async function adminDeleteCategory(req, res, next) {
       // Kiểm tra danh mục đích tồn tại
       const { data: targetCat } = await supabaseAdmin
         .from('categories')
-        .select('id')
+        .select('id, name')
         .eq('id', parseInt(migrate_to_category_id))
         .maybeSingle();
 
@@ -2300,8 +2336,8 @@ export async function adminDeleteCategory(req, res, next) {
       // Chuyển món sang danh mục đích
       const { error: migrateErr } = await supabaseAdmin
         .from('dishes')
-        .update({ category_id: parseInt(migrate_to_category_id) })
-        .eq('category_id', parseInt(categoryId));
+        .update({ category: targetCat.name })
+        .eq('category', category.name);
 
       if (migrateErr) throw migrateErr;
     }
@@ -2628,16 +2664,16 @@ export async function adminGetDishDetail(req, res, next) {
       .from('dishes')
       .select(`
         id, slug, name, description, image_url,
-        region_id, category_id, cook_time_minutes, difficulty,
+        cook_time_minutes, difficulty,
         servings, est_cost, calories, protein_g, carbs_g, fat_g,
         is_published, created_at, updated_at,
-        category:categories(id, name),
+        category,
         dish_tags(tag:tags(id, name)),
         dish_ingredients(
           ingredient_id, quantity, unit, is_optional,
           ingredient:ingredients(id, name, default_unit)
         ),
-        steps
+        recipe_steps(step_order, content)
       `)
       .eq('id', dishId)
       .maybeSingle();
@@ -2647,7 +2683,7 @@ export async function adminGetDishDetail(req, res, next) {
       return res.status(404).json({ success: false, error: { code: 'DISH_NOT_FOUND', message: 'Món ăn không tồn tại.' } });
     }
 
-    const hasRecipe = Array.isArray(dish.steps) ? dish.steps.length > 0 : false;
+    const hasRecipe = (Array.isArray(dish.recipe_steps) && dish.recipe_steps.length > 0) || (Array.isArray(dish.steps) && dish.steps.length > 0);
     const hasIngredients = Array.isArray(dish.dish_ingredients) ? dish.dish_ingredients.length > 0 : false;
 
     return res.json({
@@ -2658,8 +2694,8 @@ export async function adminGetDishDetail(req, res, next) {
         name: dish.name,
         description: dish.description,
         image_url: dish.image_url,
-        region_id: dish.region_id,
-        category_id: dish.category_id,
+        region_id: dish.region_id || null,
+        category_id: dish.category_id || null,
         cook_time_minutes: dish.cook_time_minutes,
         difficulty: dish.difficulty,
         servings: dish.servings,
@@ -2668,13 +2704,15 @@ export async function adminGetDishDetail(req, res, next) {
         protein_g: dish.protein_g,
         carbs_g: dish.carbs_g,
         fat_g: dish.fat_g,
-        category: dish.category,
-        region: dish.region,
+        category: typeof dish.category === 'object' ? dish.category : (dish.category ? { name: dish.category } : null),
+        region: dish.region || null,
         tags: (dish.dish_tags || []).map(dt => dt.tag).filter(Boolean),
         tag_ids: (dish.dish_tags || []).map(dt => dt.tag?.id).filter(Boolean),
         has_recipe: hasRecipe && hasIngredients,
         is_published: dish.is_published,
-        steps: Array.isArray(dish.steps) ? dish.steps : [],
+        steps: (Array.isArray(dish.recipe_steps) && dish.recipe_steps.length > 0)
+          ? dish.recipe_steps.map(s => ({ step_number: s.step_order, instruction: s.content, content: s.content }))
+          : (Array.isArray(dish.steps) ? dish.steps : []),
         ingredients: (dish.dish_ingredients || []).map(di => ({
           ingredient_id: di.ingredient_id,
           name: di.ingredient?.name || '',
@@ -2815,7 +2853,7 @@ export async function adminGetStatsTopDishes(req, res, next) {
     if (by === 'favorites') {
       const { data: favs } = await supabaseAdmin
         .from('favorites')
-        .select('dish_id, dishes(id, name, slug, image_url, category:categories(name))')
+        .select('dish_id, dishes(id, name, slug, image_url, category)')
         .gte('created_at', fromDate)
         .lte('created_at', toDate);
 
@@ -2833,7 +2871,7 @@ export async function adminGetStatsTopDishes(req, res, next) {
           name: val.dish?.name || 'Món ăn',
           slug: val.dish?.slug,
           image_url: val.dish?.image_url,
-          category: val.dish?.category?.name || '',
+          category: typeof val.dish?.category === 'object' ? val.dish?.category?.name : (val.dish?.category || ''),
           favorite_count: val.count,
           dish: val.dish,
         }))
@@ -2846,7 +2884,7 @@ export async function adminGetStatsTopDishes(req, res, next) {
     if (by === 'rating') {
       const { data: ratings } = await supabaseAdmin
         .from('ratings')
-        .select('dish_id, stars, dishes(id, name, slug, image_url, category:categories(name))')
+        .select('dish_id, stars, dishes(id, name, slug, image_url, category)')
         .gte('created_at', fromDate)
         .lte('created_at', toDate);
 
@@ -2865,7 +2903,7 @@ export async function adminGetStatsTopDishes(req, res, next) {
           name: val.dish?.name || 'Món ăn',
           slug: val.dish?.slug,
           image_url: val.dish?.image_url,
-          category: val.dish?.category?.name || '',
+          category: typeof val.dish?.category === 'object' ? val.dish?.category?.name : (val.dish?.category || ''),
           avg_rating: +(val.totalStars / val.count).toFixed(1),
           rating_count: val.count,
           dish: val.dish,
@@ -2879,7 +2917,7 @@ export async function adminGetStatsTopDishes(req, res, next) {
     // Mặc định by = 'views'
     const { data: views } = await supabaseAdmin
       .from('interaction_logs')
-      .select('dish_id, dishes(id, name, slug, image_url, category:categories(name))')
+      .select('dish_id, dishes(id, name, slug, image_url, category)')
       .eq('interaction_type', 'view')
       .gte('created_at', fromDate)
       .lte('created_at', toDate);
@@ -2898,7 +2936,7 @@ export async function adminGetStatsTopDishes(req, res, next) {
         name: val.dish?.name || 'Món ăn',
         slug: val.dish?.slug,
         image_url: val.dish?.image_url,
-        category: val.dish?.category?.name || '',
+        category: typeof val.dish?.category === 'object' ? val.dish?.category?.name : (val.dish?.category || ''),
         views: val.count,
         dish: val.dish,
       }))
@@ -2909,7 +2947,7 @@ export async function adminGetStatsTopDishes(req, res, next) {
     if (items.length === 0) {
       const { data: dishesList } = await supabaseAdmin
         .from('dishes')
-        .select('id, name, slug, image_url, category:categories(name)')
+        .select('id, name, slug, image_url, category')
         .eq('is_published', true)
         .limit(limitNum);
 
@@ -2918,7 +2956,7 @@ export async function adminGetStatsTopDishes(req, res, next) {
         name: d.name,
         slug: d.slug,
         image_url: d.image_url,
-        category: d.category?.name || '',
+        category: typeof d.category === 'object' ? d.category?.name : (d.category || ''),
         views: Math.max(12, 100 - idx * 7),
         dish: d,
       }));
@@ -3141,6 +3179,7 @@ export async function adminGetStatsSearchTrends(req, res, next) {
 export async function adminGetStatsExport(req, res, next) {
   try {
     const days = parseInt(req.query.days) || 30;
+    const format = (req.query.format || 'xlsx').toLowerCase();
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
     const [
@@ -3148,35 +3187,114 @@ export async function adminGetStatsExport(req, res, next) {
       { count: newUsers },
       { count: totalDishes },
       { count: publishedDishes },
-      { count: chatQueries }
+      { count: chatQueries },
+      { data: dishes },
+      { data: usersList }
     ] = await Promise.all([
       supabaseAdmin.from('users').select('*', { count: 'exact', head: true }),
       supabaseAdmin.from('users').select('*', { count: 'exact', head: true }).gte('created_at', since),
       supabaseAdmin.from('dishes').select('*', { count: 'exact', head: true }),
       supabaseAdmin.from('dishes').select('*', { count: 'exact', head: true }).eq('is_published', true),
-      supabaseAdmin.from('chat_messages').select('*', { count: 'exact', head: true }).gte('created_at', since)
+      supabaseAdmin.from('chat_messages').select('*', { count: 'exact', head: true }).gte('created_at', since),
+      supabaseAdmin.from('dishes').select(`
+        id, name, slug, category, cook_time_minutes, difficulty, servings, est_cost,
+        calories, protein_g, carbs_g, fat_g, avg_rating, rating_count, favorite_count,
+        is_published, created_at
+      `).order('created_at', { ascending: false }),
+      supabaseAdmin.from('users').select('id, email, display_name, role, status, created_at').order('created_at', { ascending: false }).limit(200)
     ]);
 
-    const csvRows = [
-      ['BÁO CÁO THỐNG KÊ HỆ THỐNG TRỢ LÝ ẨM THỰC'],
-      [`Khoảng thời gian: ${days} ngày gần nhất (${new Date().toLocaleDateString('vi-VN')})`],
-      [''],
-      ['Chỉ số', 'Giá trị'],
-      ['Tổng người dùng', totalUsers || 0],
-      ['Người dùng mới', newUsers || 0],
-      ['Tổng số món ăn', totalDishes || 0],
-      ['Món ăn công khai', publishedDishes || 0],
-      ['Lượt hỏi chatbot', chatQueries || 0],
-    ];
+    if (format === 'csv') {
+      const csvRows = [
+        ['BÁO CÁO THỐNG KÊ HỆ THỐNG TRỢ LÝ ẨM THỰC THÔNG MINH'],
+        [`Khoảng thời gian: ${days} ngày gần nhất (${new Date().toLocaleDateString('vi-VN')})`],
+        [''],
+        ['Chỉ số', 'Giá trị'],
+        ['Tổng người dùng', totalUsers || 0],
+        ['Người dùng mới trong kỳ', newUsers || 0],
+        ['Tổng số món ăn', totalDishes || 0],
+        ['Món ăn công khai', publishedDishes || 0],
+        ['Món ăn bản nháp (ẩn)', (totalDishes || 0) - (publishedDishes || 0)],
+        ['Lượt hỏi chatbot AI trong kỳ', chatQueries || 0],
+      ];
 
-    const csvContent = '\uFEFF' + csvRows.map(e => e.map(val => `"${String(val).replace(/"/g, '""')}"`).join(',')).join('\n');
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="thong-ke-${days}-ngay.csv"`);
-    return res.send(csvContent);
+      const csvContent = '\uFEFF' + csvRows.map(e => e.map(val => `"${String(val).replace(/"/g, '""')}"`).join(',')).join('\n');
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="thong-ke-${days}-ngay.csv"`);
+      return res.send(csvContent);
+    }
+
+    // Xuất định dạng Excel (.xlsx) chuẩn
+    const wb = XLSX.utils.book_new();
+
+    // Sheet 1: Tổng quan chỉ số
+    const overviewData = [
+      ['BÁO CÁO THỐNG KÊ HỆ THỐNG TRỢ LÝ ẨM THỰC THÔNG MINH'],
+      [`Ngày xuất báo cáo: ${new Date().toLocaleString('vi-VN')}`],
+      [`Kỳ báo cáo: ${days} ngày gần nhất`],
+      [],
+      ['TÊN CHỈ SỐ', 'GIÁ TRỊ'],
+      ['Tổng số người dùng đăng ký', totalUsers || 0],
+      ['Người dùng mới trong kỳ', newUsers || 0],
+      ['Tổng số món ăn trong CSDL', totalDishes || 0],
+      ['Món ăn đã công khai (Published)', publishedDishes || 0],
+      ['Món ăn bản nháp / đang ẩn', (totalDishes || 0) - (publishedDishes || 0)],
+      ['Tổng lượt tương tác Chatbot AI trong kỳ', chatQueries || 0],
+    ];
+    const wsOverview = XLSX.utils.aoa_to_sheet(overviewData);
+    wsOverview['!cols'] = [{ wch: 38 }, { wch: 22 }];
+    XLSX.utils.book_append_sheet(wb, wsOverview, 'Tổng quan');
+
+    // Sheet 2: Danh sách món ăn
+    const dishesRows = (dishes || []).map((d, index) => ({
+      'STT': index + 1,
+      'Tên món ăn': d.name || '',
+      'Danh mục': d.category || '',
+      'Khẩu phần (người)': d.servings || 1,
+      'Thời gian nấu (phút)': d.cook_time_minutes || 0,
+      'Độ khó': d.difficulty === 'easy' ? 'Dễ' : (d.difficulty === 'hard' ? 'Khó' : 'Vừa'),
+      'Chi phí ước tính (VNĐ)': d.est_cost ? Number(d.est_cost) : 0,
+      'Calo (kcal)': d.calories ? Number(d.calories) : 0,
+      'Đạm (g)': d.protein_g ? Number(d.protein_g) : 0,
+      'Tinh bột (g)': d.carbs_g ? Number(d.carbs_g) : 0,
+      'Chất béo (g)': d.fat_g ? Number(d.fat_g) : 0,
+      'Điểm đánh giá TB': d.avg_rating ? Number(d.avg_rating) : 0,
+      'Lượt đánh giá': d.rating_count || 0,
+      'Lượt yêu thích': d.favorite_count || 0,
+      'Trạng thái': d.is_published ? 'Đã công khai' : 'Bản nháp',
+      'Ngày tạo': d.created_at ? new Date(d.created_at).toLocaleDateString('vi-VN') : '',
+    }));
+    const wsDishes = XLSX.utils.json_to_sheet(dishesRows);
+    wsDishes['!cols'] = [
+      { wch: 6 }, { wch: 32 }, { wch: 18 }, { wch: 16 }, { wch: 20 },
+      { wch: 10 }, { wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 12 },
+      { wch: 12 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }
+    ];
+    XLSX.utils.book_append_sheet(wb, wsDishes, 'Danh sách món ăn');
+
+    // Sheet 3: Danh sách người dùng
+    const usersRows = (usersList || []).map((u, index) => ({
+      'STT': index + 1,
+      'Email': u.email || '',
+      'Tên hiển thị': u.display_name || '',
+      'Vai trò': u.role === 'admin' ? 'Quản trị viên' : 'Người dùng',
+      'Trạng thái': u.status === 'locked' ? 'Bị khóa' : 'Hoạt động',
+      'Ngày đăng ký': u.created_at ? new Date(u.created_at).toLocaleDateString('vi-VN') : '',
+    }));
+    const wsUsers = XLSX.utils.json_to_sheet(usersRows);
+    wsUsers['!cols'] = [{ wch: 6 }, { wch: 30 }, { wch: 22 }, { wch: 16 }, { wch: 14 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, wsUsers, 'Người dùng');
+
+    // Ghi buffer Excel (.xlsx)
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="bao-cao-thong-ke-${days}-ngay.xlsx"`);
+    return res.send(buffer);
   } catch (err) {
     next(err);
   }
 }
+
 
 export async function adminGetChatbotFrequentQuestions(req, res, next) {
   try {

@@ -12,7 +12,6 @@ import {
   Star, 
   Plus, 
   Minus, 
-  ShoppingCart, 
   Play, 
   Pause, 
   CheckCircle2, 
@@ -490,15 +489,6 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
                     Hãy nêm gia vị theo khẩu vị gia đình. Nếu bạn theo chế độ giảm muối, có thể giảm lượng mắm hoặc hạt nêm 30% mà vẫn giữ được độ ngọt tự nhiên từ rau củ.
                   </p>
                 </div>
-
-                {/* Add to grocery button */}
-                <button
-                  onClick={() => toast.success(`Đã thêm ${recipe.ingredients?.length || 0} nguyên liệu của món ${recipe.title} vào danh sách đi chợ!`, 'Đi chợ')}
-                  className="w-full py-2.5 bg-orange-50 hover:bg-orange-100 text-orange-700 font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <ShoppingCart className="w-4 h-4" />
-                  Đưa vào Danh sách đi chợ
-                </button>
               </div>
 
               {/* Recommended Utensils */}

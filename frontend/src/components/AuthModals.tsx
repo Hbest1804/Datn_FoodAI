@@ -254,7 +254,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
               </div>
 
               <div className="pt-6 text-[11px] text-slate-400">
-                © 2026 ChefAI Platform • Tích hợp Gemini 3.8 Flash
+                © 2026 ChefAI Platform • Trợ lý ẩm thực thông minh
               </div>
             </div>
 

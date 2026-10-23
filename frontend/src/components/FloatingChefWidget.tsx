@@ -194,7 +194,7 @@ export const FloatingChefWidget: React.FC<FloatingChefWidgetProps> = ({
                   </span>
                 </div>
                 <p className="text-[10px] text-orange-100">
-                  Phân tích Calo & Khẩu vị tức thì • Gemini 3.8
+                  Phân tích Calo & Khẩu vị tức thì • Trợ lý AI
                 </p>
               </div>
             </div>

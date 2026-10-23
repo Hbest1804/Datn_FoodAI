@@ -292,18 +292,19 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
     }
   };
 
-  // Export stats handler
-  const handleExportStats = async () => {
+  // Export stats handler (.xlsx default)
+  const handleExportStats = async (format: 'xlsx' | 'csv' = 'xlsx') => {
     try {
-      const blob = await apiService.admin.exportStats({ format: 'csv' });
+      const blob = await apiService.admin.exportStats({ format, days: statsDays });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `culina_stats_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.download = `culina_stats_${statsDays}d_${new Date().toISOString().slice(0, 10)}.${format}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       window.URL.revokeObjectURL(url);
+      toast.success(`Đã xuất file báo cáo ${format.toUpperCase()} thành công!`);
     } catch (err: any) {
       toast.error(err.message || 'Lỗi khi xuất báo cáo thống kê');
     }
@@ -609,7 +610,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
     setReindexingDishId(dishId);
     try {
       await apiService.admin.reindexDish(dishId);
-      toast.success('Đã tính toán lại vector embedding AI (gemini-embedding-2) cho món ăn thành công!');
+      toast.success('Đã cập nhật chỉ mục tìm kiếm thông minh cho món ăn thành công!');
     } catch (err: any) {
       toast.error(err.message || 'Không thể reindex món ăn');
     } finally {
@@ -872,7 +873,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
             <ArrowRight className="w-4 h-4" />
           </button>
           <div className="mt-3 px-3 text-[10px] text-slate-400">
-            Culina Admin Studio • Gemini 3.8 Engine • Live
+            Culina Admin Studio • Hệ Thống Trực Tuyến
           </div>
         </div>
       </div>
@@ -886,7 +887,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
               <div>
                 <span className="text-xs font-bold text-orange-600 uppercase tracking-wider flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  HỆ THỐNG TRỰC TUYẾN • GEMINI 3.8 ACTIVE
+                  HỆ THỐNG TRỰC TUYẾN • HOẠT ĐỘNG ỔN ĐỊNH
                 </span>
                 <h2 className="text-2xl font-black text-slate-900 tracking-tight mt-0.5">
                   Tổng Quan & Thống Kê Hệ Thống Culina
@@ -909,13 +910,23 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                     </button>
                   ))}
                 </div>
-                <button
-                  onClick={handleExportStats}
-                  className="px-3.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Xuất báo cáo (CSV)
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => handleExportStats('xlsx')}
+                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
+                    title="Xuất báo cáo định dạng Excel (.xlsx)"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Xuất báo cáo (Excel .xlsx)
+                  </button>
+                  <button
+                    onClick={() => handleExportStats('csv')}
+                    className="px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+                    title="Xuất báo cáo định dạng CSV"
+                  >
+                    CSV
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -971,7 +982,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                 </div>
                 <div className="text-2xl font-black text-slate-900">{stats.aiSuccessRate || 98.6}%</div>
                 <div className="text-[11px] text-emerald-600 font-bold">
-                  Độ trễ trung bình: {stats.geminiLatencyMs || 410}ms
+                  Độ trễ phản hồi: {stats.geminiLatencyMs || 410}ms
                 </div>
               </div>
             </div>
@@ -1312,7 +1323,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                                 onClick={() => handleReindexDish(r.id)}
                                 disabled={reindexingDishId === r.id}
                                 className="p-1.5 hover:bg-amber-50 rounded-lg text-slate-500 hover:text-amber-600 cursor-pointer transition-colors"
-                                title="Tính lại vector embedding AI (gemini-embedding-2)"
+                                title="Cập nhật lại chỉ mục tìm kiếm thông minh"
                               >
                                 <Sparkles className={`w-4 h-4 ${reindexingDishId === r.id ? 'animate-spin text-amber-500' : ''}`} />
                               </button>
@@ -1787,13 +1798,13 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                 Giám Sát Chatbot Culina AI
               </h2>
               <p className="text-xs text-slate-500">
-                Theo dõi độ trễ mô hình Gemini 3.8, tỷ lệ giải đáp thành công và hệ thống bộ lọc cảnh báo dị ứng.
+                Theo dõi độ trễ hệ thống AI, tỷ lệ giải đáp thành công và hệ thống bộ lọc cảnh báo dị ứng.
               </p>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="p-5 bg-white rounded-3xl border border-slate-200/80 shadow-xs space-y-1">
-                <span className="text-[10px] font-bold text-slate-400 uppercase">ĐỘ TRỄ GEMINI AI</span>
+                <span className="text-[10px] font-bold text-slate-400 uppercase">ĐỘ TRỄ PHẢN HỒI AI</span>
                 <div className="text-2xl font-black text-slate-900">410 ms</div>
                 <div className="text-xs text-emerald-600 font-semibold">Tốc độ phản hồi cực nhanh</div>
               </div>
@@ -1816,11 +1827,11 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                   CẤU HÌNH BẢO MẬT & GUARD RAILS HIỆN TẠI
                 </span>
                 <span className="text-xs text-emerald-400 font-mono">
-                  {chatbotHealth?.status === 'ok' ? 'Online • Gemini 3.8 Active' : 'active • gemini-3.8'}
+                  {chatbotHealth?.status === 'ok' ? 'Trực tuyến • Sẵn sàng' : 'Hoạt động ổn định'}
                 </span>
               </div>
               <p className="text-xs text-slate-300 leading-relaxed">
-                Mô hình tự động đối chiếu các chất dị ứng (Hải sản, Đậu phộng, Lactose, Gluten, Trứng, Đậu nành) từ bảng <code>allergen_groups</code> và hồ sơ khẩu vị của người dùng trước khi xuất công thức nấu ăn.
+                Mô hình tự động đối chiếu các nhóm chất dị ứng (Hải sản, Đậu phộng, Lactose, Gluten, Trứng, Đậu nành) và hồ sơ khẩu vị của người dùng trước khi xuất công thức nấu ăn.
               </p>
             </div>
 

@@ -348,7 +348,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
           referenced_dishes: reply.dishes,
           recipeRecommendation: normalizedDishes.length > 0 ? normalizedDishes[0] : undefined,
           quickReplies: [
-            'Lên danh sách đi chợ cho món này',
+            'Cách sơ chế & bảo quản nguyên liệu',
             'Có thể thay thế gia vị nào nếu thiếu?',
             'Ước tính calo chi tiết từng nguyên liệu'
           ]
@@ -474,7 +474,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
               <div className="flex items-center gap-2">
                 <span className="font-black text-slate-900 text-sm">Bếp Trưởng AI Cá Nhân Hóa</span>
                 <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold text-[10px] border border-emerald-200">
-                  Supabase RAG & Gemini 3.8
+                  Trợ Lý Thông Minh
                 </span>
                 <span className="text-emerald-600 font-semibold text-[11px]">• Trực tuyến</span>
               </div>
@@ -650,7 +650,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
                     <div className="space-y-2 pt-1 w-full">
                       <div className="text-[11px] font-bold text-orange-700 uppercase tracking-wide flex items-center gap-1">
                         <Sparkles className="w-3.5 h-3.5" />
-                        Món ăn đề xuất từ CSDL:
+                        Món ăn đề xuất phù hợp:
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {msg.referenced_dishes.map((dish: any) => (
@@ -742,7 +742,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
                 </div>
                 <div className="p-3 bg-orange-50 border border-orange-200/80 rounded-2xl text-xs text-orange-800 flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-orange-500 animate-spin" />
-                  <span>Bếp trưởng AI đang tính toán công thức & phân tích CSDL...</span>
+                  <span>Bếp trưởng AI đang tính toán công thức phù hợp...</span>
                 </div>
               </div>
             )}
@@ -832,7 +832,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
               </button>
             </form>
             <p className="text-[10px] text-slate-400 mt-2 text-center">
-              ChefAI tích hợp dữ liệu Viện Dinh Dưỡng & CSDL món ăn Việt Nam, kiểm tra an toàn dị ứng trước khi gợi ý.
+              ChefAI tích hợp dữ liệu dinh dưỡng chuẩn cùng ẩm thực Việt Nam, kiểm tra an toàn dị ứng trước khi gợi ý.
             </p>
           </div>
         </div>

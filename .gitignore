@@ -8,7 +8,7 @@ use_case_extracted.txt
 backend/schema_chatbot_am_thuc.sql
 diagram.png
 backend/src/scripts/test*
-htdb.png
+*.png
 *.zip
 
 # Dependencies & Build
