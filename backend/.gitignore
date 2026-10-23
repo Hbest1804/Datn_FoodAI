@@ -1,0 +1,8 @@
+node_modules/
+.env
+logs/
+*.log
+.DS_Store
+*.sql
+schema_chatbot_am_thuc.sql
+src/scripts/test*

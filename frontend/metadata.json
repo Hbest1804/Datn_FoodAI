@@ -1,0 +1,6 @@
+{
+  "name": "ChefAI - Trợ Lý Ẩm Thực Thông Minh",
+  "description": "Hệ thống trợ lý ẩm thực thông minh tích hợp chatbot AI Bếp Trưởng, tư vấn dinh dưỡng chuẩn y khoa và gợi ý món ăn cá nhân hóa theo khẩu vị, tủ lạnh và bệnh lý.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

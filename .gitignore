@@ -1,0 +1,30 @@
+Untitled_Diagramtq.png
+*.docx
+api_targets.txt
+doc_api.txt
+api_extracted.txt
+use_case_extracted.txt
+*.sql
+backend/schema_chatbot_am_thuc.sql
+diagram.png
+backend/src/scripts/test*
+htdb.png
+*.zip
+
+# Dependencies & Build
+node_modules/
+dist/
+build/
+coverage/
+
+# Environment files
+.env
+.env*.local
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+.DS_Store
+
