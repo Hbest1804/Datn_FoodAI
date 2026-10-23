@@ -575,11 +575,12 @@ export async function adminCreateDish(req, res, next) {
       .replace(/^-|-$/g, '')
       + '-' + Date.now();
 
+    const resolvedCatName = typeof catValue === 'object' ? (catValue?.name || '') : String(catValue || '').trim();
     const insertData = {
       name: name.trim(),
       slug,
       description: description?.trim() || null,
-      category_id: resolvedCatId,
+      category: resolvedCatName,
       image_url: image_url?.trim() || null,
       cook_time_minutes: cook_time_minutes ? parseInt(cook_time_minutes) : null,
       difficulty: ['easy', 'medium', 'hard'].includes(difficulty) ? difficulty : 'medium',
@@ -591,7 +592,6 @@ export async function adminCreateDish(req, res, next) {
       fat_g: fat_g ? parseFloat(fat_g) : null,
       is_published: false, // Món mới luôn ẩn theo quy tắc nghiệp vụ mục 4.10.3
       created_by: req.user?.id || null,
-      steps: [],
     };
 
     const { data: newDish, error: insertErr } = await supabaseAdmin
@@ -651,7 +651,7 @@ export async function adminUpdateDish(req, res, next) {
 
     const { data: existing, error: fetchErr } = await supabaseAdmin
       .from('dishes')
-      .select('id, name, is_published, steps, dish_ingredients(count)')
+      .select('id, name, is_published, recipe_steps(step_order, content), dish_ingredients(count)')
       .eq('id', dishId)
       .maybeSingle();
 
@@ -681,10 +681,7 @@ export async function adminUpdateDish(req, res, next) {
     if (description !== undefined) updates.description = description?.trim() || null;
     const catInput = category_name || category || category_id;
     if (catInput !== undefined) {
-      const resolvedCatId = await resolveCategoryId(catInput);
-      if (resolvedCatId) {
-        updates.category_id = resolvedCatId;
-      }
+      updates.category = typeof catInput === 'object' ? (catInput.name || '') : String(catInput).trim();
     }
     if (image_url !== undefined) updates.image_url = image_url?.trim() || null;
     if (cook_time_minutes !== undefined) updates.cook_time_minutes = cook_time_minutes ? parseInt(cook_time_minutes) : null;
@@ -698,7 +695,7 @@ export async function adminUpdateDish(req, res, next) {
 
     if (is_published !== undefined) {
       if (is_published === true) {
-        const hasSteps = Array.isArray(existing.steps) && existing.steps.length > 0;
+        const hasSteps = Array.isArray(existing.recipe_steps) && existing.recipe_steps.length > 0;
         const hasIngredients = (existing.dish_ingredients?.[0]?.count || 0) > 0;
         if (!hasSteps || !hasIngredients) {
           return res.status(422).json({
@@ -750,7 +747,7 @@ export async function adminUpdateDish(req, res, next) {
         ...updated,
         category: updated.category?.name || '',
         tag_ids: (updated.dish_tags || []).map(dt => dt.tag?.id).filter(Boolean),
-        has_recipe: (Array.isArray(updated.steps) && updated.steps.length > 0) && ((updated.dish_ingredients?.[0]?.count || 0) > 0),
+        has_recipe: (Array.isArray(updated.recipe_steps) && updated.recipe_steps.length > 0) && ((updated.dish_ingredients?.[0]?.count || 0) > 0),
       }
     });
   } catch (err) {
@@ -773,7 +770,7 @@ export async function adminTogglePublishDish(req, res, next) {
 
     const { data: dish, error: fetchErr } = await supabaseAdmin
       .from('dishes')
-      .select('id, is_published, steps, dish_ingredients(count)')
+      .select('id, is_published, recipe_steps(step_order, content), dish_ingredients(count)')
       .eq('id', dishId)
       .maybeSingle();
 
@@ -783,7 +780,7 @@ export async function adminTogglePublishDish(req, res, next) {
     }
 
     if (is_published === true) {
-      const hasSteps = Array.isArray(dish.steps) && dish.steps.length > 0;
+      const hasSteps = Array.isArray(dish.recipe_steps) && dish.recipe_steps.length > 0;
       const hasIngredients = (dish.dish_ingredients?.[0]?.count || 0) > 0;
       if (!hasSteps || !hasIngredients) {
         return res.status(422).json({
@@ -889,7 +886,8 @@ export async function adminGetDishRecipe(req, res, next) {
     const { data: dish, error } = await supabaseAdmin
       .from('dishes')
       .select(`
-        id, name, slug, cook_time_minutes, servings, difficulty, steps, is_published, updated_at,
+        id, name, slug, cook_time_minutes, servings, difficulty, is_published, updated_at,
+        recipe_steps(step_order, content),
         dish_ingredients(
           ingredient_id,
           quantity,
@@ -909,12 +907,16 @@ export async function adminGetDishRecipe(req, res, next) {
       });
     }
 
-    const rawSteps = Array.isArray(dish.steps) ? dish.steps : [];
-    const formattedSteps = rawSteps.map((st, idx) => ({
-      order: st.order ?? st.step_number ?? idx + 1,
-      content: st.content || st.instruction || '',
-      duration_minutes: st.duration_minutes ?? undefined,
-    }));
+    const rawSteps = Array.isArray(dish.recipe_steps) ? dish.recipe_steps : [];
+    const formattedSteps = rawSteps
+      .sort((a, b) => (a.step_order || 0) - (b.step_order || 0))
+      .map((st, idx) => ({
+        step_number: st.step_order ?? idx + 1,
+        order: st.step_order ?? idx + 1,
+        content: st.content || '',
+        instruction: st.content || '',
+        duration_minutes: undefined,
+      }));
 
     const ingredients = (dish.dish_ingredients || []).map(di => ({
       ingredient_id: di.ingredient_id,
@@ -1033,7 +1035,7 @@ export async function adminCreateDishRecipe(req, res, next) {
 
     const { data: dish, error: fetchErr } = await supabaseAdmin
       .from('dishes')
-      .select('id, steps, dish_ingredients(count), servings')
+      .select('id, recipe_steps(step_order, content), dish_ingredients(count), servings')
       .eq('id', dishId)
       .maybeSingle();
 
@@ -1042,7 +1044,7 @@ export async function adminCreateDishRecipe(req, res, next) {
       return res.status(404).json({ success: false, error: { code: 'DISH_NOT_FOUND', message: 'Món ăn không tồn tại.' } });
     }
 
-    const hasSteps = Array.isArray(dish.steps) && dish.steps.length > 0;
+    const hasSteps = Array.isArray(dish.recipe_steps) && dish.recipe_steps.length > 0;
     const hasIngs = (dish.dish_ingredients?.[0]?.count || 0) > 0;
     if (hasSteps && hasIngs) {
       return res.status(409).json({
@@ -1060,17 +1062,29 @@ export async function adminCreateDishRecipe(req, res, next) {
     const { error: ingInsertErr } = await supabaseAdmin.from('dish_ingredients').insert(ingRows);
     if (ingInsertErr) throw ingInsertErr;
 
-    // Cập nhật món
-    const dishUpdates = { steps: formattedSteps };
+    // Lưu các bước thực hiện vào bảng recipe_steps (Chuẩn Schema v3)
+    await supabaseAdmin.from('recipe_steps').delete().eq('dish_id', dishId);
+    const stepRows = formattedSteps.map(s => ({
+      dish_id: dishId,
+      step_order: s.order,
+      content: s.content,
+    }));
+    const { error: stepInsertErr } = await supabaseAdmin.from('recipe_steps').insert(stepRows);
+    if (stepInsertErr) throw stepInsertErr;
+
+    // Cập nhật khẩu phần và trạng thái công khai nếu cần
+    const dishUpdates = {};
     if (servings) dishUpdates.servings = parseInt(servings);
     if (publish === true) dishUpdates.is_published = true;
 
-    const { error: dishErr } = await supabaseAdmin
-      .from('dishes')
-      .update(dishUpdates)
-      .eq('id', dishId);
+    if (Object.keys(dishUpdates).length > 0) {
+      const { error: dishErr } = await supabaseAdmin
+        .from('dishes')
+        .update(dishUpdates)
+        .eq('id', dishId);
 
-    if (dishErr) throw dishErr;
+      if (dishErr) throw dishErr;
+    }
 
     // Cập nhật lại embedding bất đồng bộ
     try {
@@ -1140,23 +1154,35 @@ export async function adminUpdateDishRecipe(req, res, next) {
       dishId, ingredients, steps, req.user?.id
     );
 
-    // Xóa cũ và ghi mới trong cùng giao dịch
+    // Xóa cũ và ghi mới trong dish_ingredients
     await supabaseAdmin.from('dish_ingredients').delete().eq('dish_id', dishId);
     const { error: ingInsertErr } = await supabaseAdmin.from('dish_ingredients').insert(ingRows);
     if (ingInsertErr) throw ingInsertErr;
 
-    const dishUpdates = { steps: formattedSteps };
+    // Xóa cũ và ghi mới trong recipe_steps (Chuẩn Schema v3)
+    await supabaseAdmin.from('recipe_steps').delete().eq('dish_id', dishId);
+    const stepRows = formattedSteps.map(s => ({
+      dish_id: dishId,
+      step_order: s.order,
+      content: s.content,
+    }));
+    const { error: stepInsertErr } = await supabaseAdmin.from('recipe_steps').insert(stepRows);
+    if (stepInsertErr) throw stepInsertErr;
+
+    const dishUpdates = {};
     if (servings) dishUpdates.servings = parseInt(servings);
-    if (publish === true) {
-      dishUpdates.is_published = true;
+    if (publish !== undefined) {
+      dishUpdates.is_published = Boolean(publish);
     }
 
-    const { error: dishErr } = await supabaseAdmin
-      .from('dishes')
-      .update(dishUpdates)
-      .eq('id', dishId);
+    if (Object.keys(dishUpdates).length > 0) {
+      const { error: dishErr } = await supabaseAdmin
+        .from('dishes')
+        .update(dishUpdates)
+        .eq('id', dishId);
 
-    if (dishErr) throw dishErr;
+      if (dishErr) throw dishErr;
+    }
 
     // Cập nhật lại embedding bất đồng bộ
     try {
@@ -1215,11 +1241,14 @@ export async function adminDeleteDishRecipe(req, res, next) {
       return res.status(404).json({ success: false, error: { code: 'DISH_NOT_FOUND', message: 'Món ăn không tồn tại.' } });
     }
 
-    // 1. Xóa nguyên liệu
+    // 1. Tự động ẩn món trước để tránh trigger vi phạm check_published_has_recipe
+    await supabaseAdmin.from('dishes').update({ is_published: false }).eq('id', dishId);
+
+    // 2. Xóa nguyên liệu
     await supabaseAdmin.from('dish_ingredients').delete().eq('dish_id', dishId);
 
-    // 2. Xóa các bước nấu và tự động ẩn món
-    await supabaseAdmin.from('dishes').update({ steps: [], is_published: false }).eq('id', dishId);
+    // 3. Xóa các bước nấu trong recipe_steps
+    await supabaseAdmin.from('recipe_steps').delete().eq('dish_id', dishId);
 
     recordAuditLog(req.user, 'RECIPE_DELETE', 'dishes', dishId, { name: dish.name });
 
@@ -2084,13 +2113,18 @@ export async function adminGetCategories(req, res, next) {
     const catIds = (cats || []).map(c => c.id);
     const dishCounts = {};
     if (catIds.length > 0) {
+      const catNames = (cats || []).map(c => c.name);
       const { data: dishes } = await supabaseAdmin
         .from('dishes')
-        .select('category_id')
-        .in('category_id', catIds)
+        .select('category')
+        .in('category', catNames)
         .eq('is_published', true);
+      const catNameToId = Object.fromEntries((cats || []).map(c => [c.name, c.id]));
       (dishes || []).forEach(d => {
-        dishCounts[d.category_id] = (dishCounts[d.category_id] || 0) + 1;
+        const cid = catNameToId[d.category];
+        if (cid) {
+          dishCounts[cid] = (dishCounts[cid] || 0) + 1;
+        }
       });
     }
 
@@ -2269,11 +2303,11 @@ export async function adminDeleteCategory(req, res, next) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Danh mục không tồn tại.' } });
     }
 
-    // Kiểm tra số món trong danh mục
+    // Kiểm tra số món trong danh mục (theo tên category)
     const { count: dishCount } = await supabaseAdmin
       .from('dishes')
       .select('*', { count: 'exact', head: true })
-      .eq('category_id', parseInt(categoryId));
+      .eq('category', category.name);
 
     if (dishCount > 0) {
       if (!migrate_to_category_id) {
@@ -2290,7 +2324,7 @@ export async function adminDeleteCategory(req, res, next) {
       // Kiểm tra danh mục đích tồn tại
       const { data: targetCat } = await supabaseAdmin
         .from('categories')
-        .select('id')
+        .select('id, name')
         .eq('id', parseInt(migrate_to_category_id))
         .maybeSingle();
 
@@ -2301,8 +2335,8 @@ export async function adminDeleteCategory(req, res, next) {
       // Chuyển món sang danh mục đích
       const { error: migrateErr } = await supabaseAdmin
         .from('dishes')
-        .update({ category_id: parseInt(migrate_to_category_id) })
-        .eq('category_id', parseInt(categoryId));
+        .update({ category: targetCat.name })
+        .eq('category', category.name);
 
       if (migrateErr) throw migrateErr;
     }
