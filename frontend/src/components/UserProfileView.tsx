@@ -829,7 +829,7 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
                 Vùng nguy hiểm: Xóa tài khoản vĩnh viễn
               </span>
               <p className="text-[11px] text-red-600/80 mt-1">
-                Toàn bộ thông tin tài khoản, hồ sơ khẩu vị, danh sách dị ứng và các đoạn hội thoại sẽ bị xóa vĩnh viễn khỏi cơ sở dữ liệu Supabase.
+                Toàn bộ thông tin tài khoản, hồ sơ khẩu vị, danh sách dị ứng và các đoạn hội thoại sẽ bị xóa vĩnh viễn khỏi hệ thống.
               </p>
             </div>
             <button

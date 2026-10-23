@@ -163,13 +163,13 @@ export const MealPlannerView: React.FC<MealPlannerViewProps> = ({
         <div>
           <span className="text-xs font-bold text-orange-600 uppercase tracking-wider flex items-center gap-1">
             <CalendarDays className="w-3.5 h-3.5" />
-            KẾ HOẠCH BỮA ĂN DỰA TRÊN DỮ LIỆU THỰC
+            KẾ HOẠCH DINH DƯỠNG CÁ NHÂN HÓA
           </span>
           <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight mt-0.5">
             Thực Đơn Tuần & Tủ Lạnh Thông Minh
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Cân bằng dinh dưỡng 7 ngày theo kho món ăn từ cơ sở dữ liệu, quản lý nguyên liệu chống lãng phí và xuất danh sách đi chợ.
+            Cân bằng dinh dưỡng 7 ngày với thực đơn món ăn phong phú, quản lý nguyên liệu chống lãng phí và xuất danh sách đi chợ.
           </p>
         </div>
 
