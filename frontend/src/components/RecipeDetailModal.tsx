@@ -18,7 +18,8 @@ import {
   Lightbulb,
   Heart,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  MessageSquare
 } from 'lucide-react';
 import { Recipe, UserProfile } from '../types';
 import { apiService } from '../services/api';
@@ -31,6 +32,7 @@ interface RecipeDetailModalProps {
   currentUser: UserProfile;
   onAddToPlanner: (recipe: Recipe) => void;
   onOpenAuth?: () => void;
+  onOpenChatWithPrompt?: (prompt: string, fridgeContext?: string[]) => void;
 }
 
 interface CommunityReviewItem {
@@ -48,6 +50,7 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
   currentUser,
   onAddToPlanner,
   onOpenAuth,
+  onOpenChatWithPrompt,
 }) => {
   if (!initialRecipe) return null;
 
@@ -61,12 +64,15 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
   const [isMarkedCooked, setIsMarkedCooked] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
   const [favLoading, setFavLoading] = useState(false);
+  // Nguyên liệu người dùng đánh dấu là đang có sẵn (theo tên)
+  const [haveIngredients, setHaveIngredients] = useState<Set<string>>(new Set());
 
   // Review state
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState('');
   const [reviewsList, setReviewsList] = useState<CommunityReviewItem[]>([]);
   const [reviewSummary, setReviewSummary] = useState<{ average: number; count: number } | null>(null);
+  const [myRatingId, setMyRatingId] = useState<number | null>(null);
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [reviewMessage, setReviewMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -80,6 +86,13 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
         if (isMounted && detail) {
           setRecipe(detail);
           setServings(detail.servings || 2);
+          setIsFavorite(Boolean(detail.is_favorite));
+          // Người dùng đã đánh giá món này: điền sẵn để sửa (mỗi người chỉ có một đánh giá cho một món)
+          if (detail.my_rating) {
+            setMyRatingId(detail.my_rating.id);
+            setReviewRating(detail.my_rating.stars);
+            setReviewComment(detail.my_rating.comment || '');
+          }
         }
       } catch (err) {
         console.warn('Could not load detailed dish, using preview:', err);
@@ -98,8 +111,8 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
           if (items && Array.isArray(items)) {
             const mapped: CommunityReviewItem[] = items.map((r: any) => ({
               id: r.id,
-              author: r.user?.name || 'Thành viên Culina',
-              avatar: r.user?.avatar,
+              author: r.user?.display_name || r.user?.name || 'Thành viên Culina',
+              avatar: r.user?.avatar_url || r.user?.avatar,
               rating: r.stars || 5,
               comment: r.comment || '',
               timeAgo: new Date(r.created_at).toLocaleDateString('vi-VN'),
@@ -136,6 +149,26 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
 
   // Dynamic ingredient scale factor
   const scale = servings / (recipe.servings || 2);
+
+  const allIngredientNames = (recipe.ingredients || []).map(ing => ing.name).filter(Boolean);
+  const missingIngredients = allIngredientNames.filter(name => !haveIngredients.has(name));
+
+  const toggleHaveIngredient = (name: string) => {
+    setHaveIngredients(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  const handleAskSubstitutes = () => {
+    if (!onOpenChatWithPrompt || missingIngredients.length === 0) return;
+    const have = allIngredientNames.filter(name => haveIngredients.has(name));
+    let prompt = `Mình muốn nấu món "${recipe.title}" nhưng đang thiếu: ${missingIngredients.join(', ')}. Có thể dùng nguyên liệu nào để thay thế?`;
+    if (have.length > 0) prompt += ` Mình đang có sẵn: ${have.join(', ')}.`;
+    onOpenChatWithPrompt(prompt, have);
+  };
 
   const handleSpeechStep = (text: string) => {
     if ('speechSynthesis' in window) {
@@ -187,19 +220,30 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
     try {
       setIsSubmittingReview(true);
       setReviewMessage(null);
-      await apiService.dishes.createRating(recipe.id, reviewRating, reviewComment.trim() || undefined);
+      const comment = reviewComment.trim();
 
-      const newRev: CommunityReviewItem = {
-        id: `rev-${Date.now()}`,
-        author: currentUser.name || 'Bạn',
-        rating: reviewRating,
-        comment: reviewComment.trim() || `Đã chấm ${reviewRating} sao`,
-        timeAgo: 'Vừa xong',
-      };
+      if (myRatingId) {
+        await apiService.dishes.updateRating(myRatingId, reviewRating, comment || null);
+        setReviewsList(prev => prev.map(r => r.id === myRatingId
+          ? { ...r, rating: reviewRating, comment: comment || `Đã chấm ${reviewRating} sao`, timeAgo: 'Vừa cập nhật' }
+          : r));
+        setReviewMessage({ type: 'success', text: 'Đã cập nhật đánh giá của bạn!' });
+      } else {
+        const res = await apiService.dishes.createRating(recipe.id, reviewRating, comment || undefined);
+        const created = res.data?.rating;
+        if (created) setMyRatingId(created.id);
+        if (res.data?.rating_summary) setReviewSummary(res.data.rating_summary);
 
-      setReviewsList([newRev, ...reviewsList]);
-      setReviewComment('');
-      setReviewMessage({ type: 'success', text: 'Cảm ơn bạn đã gửi đánh giá món ăn thành công!' });
+        const newRev: CommunityReviewItem = {
+          id: created?.id ?? `rev-${Date.now()}`,
+          author: currentUser.name || 'Bạn',
+          rating: reviewRating,
+          comment: comment || `Đã chấm ${reviewRating} sao`,
+          timeAgo: 'Vừa xong',
+        };
+        setReviewsList([newRev, ...reviewsList]);
+        setReviewMessage({ type: 'success', text: 'Cảm ơn bạn đã gửi đánh giá món ăn thành công!' });
+      }
     } catch (err: any) {
       setReviewMessage({ type: 'error', text: err.message || 'Lỗi khi gửi đánh giá. Vui lòng thử lại.' });
     } finally {
@@ -435,7 +479,7 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
                     <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
                       Nguyên liệu chuẩn bị
                     </h3>
-                    <p className="text-[11px] text-slate-400">Tự động nhân định lượng theo khẩu phần</p>
+                    <p className="text-[11px] text-slate-400">Tick vào nguyên liệu bạn đang có sẵn</p>
                   </div>
                   {/* Servings Stepper */}
                   <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
@@ -459,10 +503,15 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
                 <div className="space-y-2.5 text-xs">
                   {recipe.ingredients && recipe.ingredients.length > 0 ? (
                     recipe.ingredients.map(ing => (
-                      <div key={ing.id || ing.name} className="flex items-center justify-between py-2 border-b border-slate-50">
+                      <label key={ing.id || ing.name} className="flex items-center justify-between py-2 border-b border-slate-50 cursor-pointer">
                         <div className="flex items-center gap-2">
-                          <span className="w-2 h-2 rounded-full bg-orange-500" />
-                          <span className="text-slate-800 font-medium">{ing.name}</span>
+                          <input
+                            type="checkbox"
+                            checked={haveIngredients.has(ing.name)}
+                            onChange={() => toggleHaveIngredient(ing.name)}
+                            className="accent-emerald-600 w-3.5 h-3.5 cursor-pointer"
+                          />
+                          <span className={`font-medium ${haveIngredients.has(ing.name) ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{ing.name}</span>
                           {ing.allergen && (
                             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-50 text-red-700 border border-red-200">
                               Dị ứng
@@ -472,23 +521,45 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
                         <span className="font-extrabold text-slate-900">
                           {Math.round((ing.amount || 1) * scale * 10) / 10} {ing.unit || 'phần'}
                         </span>
-                      </div>
+                      </label>
                     ))
                   ) : (
                     <p className="text-xs text-slate-400 italic">Nguyên liệu đang được cập nhật từ nhà bếp.</p>
                   )}
                 </div>
 
-                {/* AI Substitution Tip */}
-                <div className="p-3.5 bg-orange-50/70 rounded-2xl border border-orange-200/80 space-y-1 text-xs">
-                  <div className="flex items-center gap-1.5 font-bold text-orange-900">
-                    <Lightbulb className="w-4 h-4 text-orange-600" />
-                    Mẹo Bếp Trưởng ChefAI:
+                {/* AI Substitution */}
+                {allIngredientNames.length > 0 && (
+                  <div className="p-3.5 bg-orange-50/70 rounded-2xl border border-orange-200/80 space-y-2 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 font-bold text-orange-900">
+                        <Lightbulb className="w-4 h-4 text-orange-600" />
+                        Đã có {allIngredientNames.length - missingIngredients.length}/{allIngredientNames.length} nguyên liệu
+                      </div>
+                    </div>
+                    {missingIngredients.length > 0 ? (
+                      <>
+                        <p className="text-[11px] text-slate-600 leading-relaxed">
+                          Còn thiếu: <strong className="text-slate-800">{missingIngredients.join(', ')}</strong>
+                        </p>
+                        {onOpenChatWithPrompt && (
+                          <button
+                            type="button"
+                            onClick={handleAskSubstitutes}
+                            className="w-full px-3 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5" />
+                            Hỏi Trợ lý nguyên liệu thay thế
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <p className="text-[11px] text-emerald-700 font-semibold">
+                        Bạn đã có đủ nguyên liệu, bắt đầu nấu thôi!
+                      </p>
+                    )}
                   </div>
-                  <p className="text-[11px] text-slate-600 leading-relaxed">
-                    Hãy nêm gia vị theo khẩu vị gia đình. Nếu bạn theo chế độ giảm muối, có thể giảm lượng mắm hoặc hạt nêm 30% mà vẫn giữ được độ ngọt tự nhiên từ rau củ.
-                  </p>
-                </div>
+                )}
               </div>
 
               {/* Recommended Utensils */}
@@ -575,12 +646,12 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
                         </div>
                       </div>
 
-                      <p className="text-xs sm:text-sm text-slate-700 leading-relaxed mt-3 pl-11">
+                      <p className="text-sm text-slate-800 leading-relaxed mt-2.5 pl-11">
                         {step.instruction}
                       </p>
 
                       {step.chefTip && (
-                        <div className="mt-3 ml-11 p-3 bg-orange-50/80 rounded-2xl border border-orange-200/60 text-xs text-orange-950 flex items-start gap-2">
+                        <div className="mt-2.5 ml-11 p-3 bg-orange-50/80 rounded-2xl border border-orange-200/60 text-xs sm:text-sm text-orange-950 flex items-start gap-2">
                           <Sparkles className="w-4 h-4 text-orange-600 shrink-0 mt-0.5" />
                           <span>{step.chefTip}</span>
                         </div>
@@ -726,7 +797,7 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
                   className="px-5 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center gap-2"
                 >
                   {isSubmittingReview && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  Gửi Đánh Giá
+                  {myRatingId ? 'Cập Nhật Đánh Giá' : 'Gửi Đánh Giá'}
                 </button>
               </div>
             </form>

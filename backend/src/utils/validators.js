@@ -1,5 +1,5 @@
 // src/utils/validators.js
-// Tập hợp các hàm validate dùng chung cho toàn bộ backend.
+// Các hàm kiểm tra dữ liệu đầu vào dùng chung cho toàn bộ máy chủ.
 
 /**
  * Kiểm tra định dạng email hợp lệ.
@@ -18,8 +18,8 @@ export function isStrongPassword(password) {
 }
 
 /**
- * Làm sạch từ khóa tìm kiếm trước khi truyền vào PostgREST .or() filter
- * Loại bỏ các ký tự đặc biệt có thể thay đổi cú pháp logic truy vấn của PostgREST: , ( ) . % " ' \ { } :
+ * Làm sạch từ khóa tìm kiếm trước khi đưa vào điều kiện lọc .or()
+ * Loại bỏ các ký tự đặc biệt có thể làm thay đổi cú pháp truy vấn: , ( ) . % " ' \ { } :
  */
 export function sanitizeSearchKeyword(str) {
   if (typeof str !== 'string') return '';

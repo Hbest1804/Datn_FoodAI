@@ -43,20 +43,48 @@ import {
 import { Recipe, AdminStats } from '../types';
 import { apiService } from '../services/api';
 import { normalizeDish, formatVND } from '../utils/dishUtils';
-import { toast, showConfirm } from './NotificationModal';
+import { toast, showConfirm, showPrompt } from './NotificationModal';
+import type { DishImportResult } from '../api/admin.api';
+
+// Tên hiển thị của các cột trong file nhập món
+const IMPORT_FIELD_LABELS: Record<string, string> = {
+  name: 'Tên món',
+  description: 'Mô tả',
+  category: 'Danh mục',
+  cook_time_minutes: 'Thời gian nấu',
+  difficulty: 'Độ khó',
+  servings: 'Khẩu phần',
+  est_cost: 'Chi phí',
+  calories: 'Calo',
+  protein_g: 'Đạm',
+  carbs_g: 'Tinh bột',
+  fat_g: 'Chất béo',
+  tags: 'Thẻ',
+  image_url: 'URL ảnh',
+};
+
+const ALLERGEN_GROUP_LABELS: Record<number, string> = {
+  1: 'Dị ứng: Hải sản có vỏ',
+  2: 'Dị ứng: Đậu phộng',
+  3: 'Dị ứng: Sữa bò / Lactose',
+  4: 'Dị ứng: Gluten',
+  5: 'Dị ứng: Trứng',
+  6: 'Dị ứng: Đậu nành',
+  7: 'Dị ứng: Vừng mè',
+};
 
 const DEFAULT_ADMIN_STATS: AdminStats = {
   chatbotInteractions: 0,
-  interactionsGrowth: 0,
+  chatSessions: 0,
   activeUsers: 0,
-  usersGrowth: 0,
+  newUsers: 0,
+  totalUsers: 0,
+  visits: 0,
   dishesCount: 0,
-  pendingDishesCount: 0,
+  hiddenDishesCount: 0,
   aiSuccessRate: 100,
-  hallucinationRate: 0,
-  geminiLatencyMs: 0,
-  allergyBlockCount: 0,
-  flaggedSessionsCount: 0,
+  avgResponseMs: 0,
+  flaggedMessagesCount: 0,
 };
 
 interface AdminStudioViewProps {
@@ -86,6 +114,15 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
   const [loadingDishes, setLoadingDishes] = useState(false);
   const [showAddDishModal, setShowAddDishModal] = useState(false);
   const [reindexingDishId, setReindexingDishId] = useState<string | null>(null);
+
+  // Nhập món từ Excel/CSV
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importResult, setImportResult] = useState<DishImportResult | null>(null);
+  const [importError, setImportError] = useState('');
+  const [isCheckingImport, setIsCheckingImport] = useState(false);
+  const [isSubmittingImport, setIsSubmittingImport] = useState(false);
+  const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false);
 
   // Users state
   const [usersList, setUsersList] = useState<any[]>([]);
@@ -120,10 +157,10 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
   const [selectedRecipeDishId, setSelectedRecipeDishId] = useState<string>('');
   const [recipeServings, setRecipeServings] = useState<number>(2);
   const [recipeIngredients, setRecipeIngredients] = useState<Array<{
+    ingredient_id?: number;
     name: string;
     quantity: string | number;
     unit: string;
-    is_optional: boolean;
     needs_review?: boolean;
     allergen_group_id?: number | null;
     no_allergen?: boolean;
@@ -138,7 +175,6 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
   const [newIngName, setNewIngName] = useState('');
   const [newIngQty, setNewIngQty] = useState('');
   const [newIngUnit, setNewIngUnit] = useState('g');
-  const [newIngOptional, setNewIngOptional] = useState(false);
   const [newIngAllergen, setNewIngAllergen] = useState<string>('');
   const [newStepTitle, setNewStepTitle] = useState('');
   const [newStepInstruction, setNewStepInstruction] = useState('');
@@ -195,23 +231,25 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
   const fetchStats = async (days = statsDays, by = topDishesBy) => {
     setLoadingStats(true);
     try {
-      const [statsRes, topData] = await Promise.all([
+      const [statsRes, topData, chatRes] = await Promise.all([
         apiService.admin.getStats({ days }),
-        apiService.admin.getTopDishes({ by, days })
+        apiService.admin.getTopDishes({ by, days }),
+        apiService.admin.getChatbotOverview({ days }),
       ]);
       if (statsRes) {
+        const errorRate = Number(chatRes?.error_rate) || 0;
         setStats({
-          chatbotInteractions: statsRes.chat?.messages || statsRes.engagement?.chat_queries_in_period || 0,
-          interactionsGrowth: 18.4,
-          activeUsers: statsRes.users?.active || statsRes.users?.total || 0,
-          usersGrowth: 12.6,
-          dishesCount: statsRes.dishes?.total || dishesList.length,
-          pendingDishesCount: Math.max(0, (statsRes.dishes?.total || 0) - (statsRes.dishes?.published || 0)),
-          aiSuccessRate: 98.6,
-          hallucinationRate: 0.6,
-          geminiLatencyMs: 410,
-          allergyBlockCount: 284,
-          flaggedSessionsCount: 0,
+          chatbotInteractions: (statsRes.chat?.messages || 0) + (chatRes?.guest_messages || 0),
+          chatSessions: statsRes.chat?.sessions || 0,
+          activeUsers: statsRes.users?.active || 0,
+          newUsers: statsRes.users?.new || 0,
+          totalUsers: statsRes.users?.total || 0,
+          visits: statsRes.visits || 0,
+          dishesCount: statsRes.dishes?.total || 0,
+          hiddenDishesCount: Math.max(0, (statsRes.dishes?.total || 0) - (statsRes.dishes?.published || 0)),
+          aiSuccessRate: Math.round((1 - errorRate) * 1000) / 10,
+          avgResponseMs: chatRes?.avg_response_ms || 0,
+          flaggedMessagesCount: chatRes?.flagged_count || 0,
         });
       }
       if (topData && Array.isArray(topData)) {
@@ -232,7 +270,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
   const loadAdminDishes = async () => {
     setLoadingDishes(true);
     try {
-      const res = await apiService.admin.getDishes({ q: dishSearch });
+      const res = await apiService.admin.getDishes({ q: dishSearch, limit: 100 });
       if (res && res.data) {
         const normalized = res.data.map(normalizeDish);
         setDishesList(normalized);
@@ -271,7 +309,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
   const loadAdminUsers = async () => {
     setLoadingUsers(true);
     try {
-      const res = await apiService.admin.getUsers({ q: userSearch });
+      const res = await apiService.admin.getUsers({ q: userSearch, limit: 100 });
       if (res && res.data) {
         setUsersList(res.data);
       }
@@ -310,6 +348,79 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
     }
   };
 
+  // Import dishes from Excel/CSV
+  const openImportModal = () => {
+    setImportFile(null);
+    setImportResult(null);
+    setImportError('');
+    setShowImportModal(true);
+  };
+
+  const closeImportModal = () => {
+    if (isCheckingImport || isSubmittingImport) return;
+    setShowImportModal(false);
+  };
+
+  const handleDownloadImportTemplate = async (format: 'xlsx' | 'csv' = 'xlsx') => {
+    setIsDownloadingTemplate(true);
+    try {
+      const blob = await apiService.admin.downloadImportTemplate(format);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `mau-nhap-mon-an.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      toast.error(err.message || 'Không tải được file mẫu');
+    } finally {
+      setIsDownloadingTemplate(false);
+    }
+  };
+
+  // Chọn file xong thì kiểm tra ngay (dry run), chưa ghi dữ liệu
+  const handleImportFileSelect = async (file: File | undefined) => {
+    if (!file) return;
+    setImportFile(file);
+    setImportResult(null);
+    setImportError('');
+    if (!/\.(xlsx|csv)$/i.test(file.name)) {
+      setImportError('Chỉ chấp nhận file .xlsx hoặc .csv.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setImportError('File vượt quá 5 MB.');
+      return;
+    }
+    setIsCheckingImport(true);
+    try {
+      const result = await apiService.admin.importDishes(file, true);
+      setImportResult(result);
+    } catch (err: any) {
+      setImportError(err.message || 'Không kiểm tra được file');
+    } finally {
+      setIsCheckingImport(false);
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    if (!importFile || !importResult || importResult.valid_rows === 0) return;
+    setIsSubmittingImport(true);
+    setImportError('');
+    try {
+      const result = await apiService.admin.importDishes(importFile, false);
+      setImportResult(result);
+      toast.success(`Đã nhập ${result.created_count} món ăn (đang ở trạng thái ẩn).`);
+      loadAdminDishes();
+    } catch (err: any) {
+      setImportError(err.message || 'Lỗi khi nhập món ăn');
+    } finally {
+      setIsSubmittingImport(false);
+    }
+  };
+
   // Recipe methods
   const loadDishRecipe = async (dishId: string) => {
     if (!dishId) return;
@@ -322,10 +433,10 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
       setRecipeServings(data.servings || 2);
       if (Array.isArray(data.ingredients)) {
         setRecipeIngredients(data.ingredients.map((ing: any) => ({
+          ingredient_id: ing.ingredient_id,
           name: ing.name || ing.ingredient?.name || '',
           quantity: ing.quantity || ing.amount || 1,
           unit: ing.unit || '',
-          is_optional: !!ing.is_optional,
           needs_review: !!ing.needs_review,
         })));
       } else {
@@ -342,7 +453,14 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
         setRecipeSteps([]);
       }
     } catch (err: any) {
-      setRecipeError(err.message || 'Món chưa có công thức. Bạn có thể thêm mới bên dưới.');
+      // Món chưa có công thức (RECIPE_NOT_FOUND) không phải lỗi: Admin nhập mới bên dưới
+      if (err?.code === 'RECIPE_NOT_FOUND') {
+        setRecipeNotice('Món chưa có công thức. Bạn có thể thêm mới bên dưới.');
+        const dish = dishesList.find(d => d.id === dishId);
+        if (dish?.servings) setRecipeServings(dish.servings);
+      } else {
+        setRecipeError(err.message || 'Không tải được công thức.');
+      }
       setRecipeIngredients([]);
       setRecipeSteps([]);
     } finally {
@@ -366,10 +484,20 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
     setSavingRecipe(true);
     setRecipeError('');
     try {
+      // Khẩu phần thuộc thông tin món, công thức chỉ gồm nguyên liệu và các bước
+      const dish = dishesList.find(d => d.id === selectedRecipeDishId);
+      if (dish && dish.servings !== recipeServings) {
+        await apiService.admin.updateDish(selectedRecipeDishId, { servings: recipeServings });
+      }
       await apiService.admin.updateRecipe(selectedRecipeDishId, {
-        servings: recipeServings,
-        ingredients: recipeIngredients,
-        steps: recipeSteps,
+        ingredients: recipeIngredients.map(ing => ({
+          ...(ing.ingredient_id ? { ingredient_id: ing.ingredient_id } : { name: ing.name }),
+          quantity: Number(ing.quantity) || 1,
+          unit: ing.unit || undefined,
+          ...(ing.allergen_group_id != null ? { allergen_group_id: ing.allergen_group_id } : {}),
+          ...(ing.no_allergen ? { no_allergen: true } : {}),
+        })),
+        steps: recipeSteps.map((st, idx) => ({ order: idx + 1, content: st.instruction })),
         publish,
       });
       const msg = publish
@@ -436,7 +564,6 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
         name: newIngName.trim(),
         quantity: newIngQty.trim() || 1,
         unit: newIngUnit.trim() || 'g',
-        is_optional: newIngOptional,
         allergen_group_id,
         no_allergen,
         needs_review,
@@ -544,7 +671,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
     try {
       const res = await apiService.admin.getChatSessionDetail(sessionId);
       const session = res.data || res;
-      setSessionMessages(session.messages || []);
+      setSessionMessages((session.messages || []).map((m: any) => ({ ...m, is_flagged: m.flagged ?? m.is_flagged })));
     } catch (err) {
       console.warn('Lỗi tải chi tiết hội thoại:', err);
     } finally {
@@ -621,9 +748,9 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
   // Toggle publish dish
   const handleTogglePublish = async (dish: Recipe) => {
     try {
-      const newStatus = !(dish.isPublished ?? true);
+      const newStatus = !(dish.is_published ?? true);
       await apiService.admin.togglePublishDish(dish.id, newStatus);
-      setDishesList(prev => prev.map(d => d.id === dish.id ? { ...d, isPublished: newStatus } : d));
+      setDishesList(prev => prev.map(d => d.id === dish.id ? { ...d, is_published: newStatus } : d));
       toast.success(`Đã ${newStatus ? 'công khai' : 'ẩn'} món ăn "${dish.title}"`);
     } catch (err: any) {
       toast.error(err.message || 'Không thể cập nhật trạng thái món ăn');
@@ -641,9 +768,15 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
     });
     if (!ok) return;
     try {
-      await apiService.admin.deleteDish(dishId);
-      setDishesList(prev => prev.filter(d => d.id !== dishId));
-      toast.success('Đã xóa món ăn khỏi hệ thống.');
+      const res: any = await apiService.admin.deleteDish(dishId);
+      // Món đã có đánh giá không bị xóa mà chỉ bị ẩn
+      if (res?.data?.hidden) {
+        setDishesList(prev => prev.map(d => d.id === dishId ? { ...d, is_published: false } : d));
+        toast.warning(res.data.reason || 'Món đã có đánh giá nên chỉ được ẩn khỏi người dùng.');
+      } else {
+        setDishesList(prev => prev.filter(d => d.id !== dishId));
+        toast.success('Đã xóa món ăn khỏi hệ thống.');
+      }
     } catch (err: any) {
       toast.error(err.message || 'Không thể xóa món ăn');
     }
@@ -651,9 +784,23 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
 
   // Toggle user status
   const handleToggleUserStatus = async (user: any) => {
-    const nextStatus = user.status === 'active' ? 'inactive' : 'active';
+    const nextStatus: 'active' | 'locked' = user.status === 'active' ? 'locked' : 'active';
+    let reason: string | undefined;
+    if (nextStatus === 'locked') {
+      const input = await showPrompt({
+        title: 'Khóa tài khoản người dùng',
+        message: `Nhập lý do khóa tài khoản "${user.display_name || user.email}":`,
+        placeholder: 'Ví dụ: Bình luận vi phạm nhiều lần',
+        confirmText: 'Khóa tài khoản',
+        cancelText: 'Hủy bỏ',
+        variant: 'danger',
+        required: true,
+      });
+      if (input === null || !input.trim()) return;
+      reason = input.trim();
+    }
     try {
-      await apiService.admin.updateUserStatus(user.id, nextStatus as any);
+      await apiService.admin.updateUserStatus(user.id, nextStatus, reason);
       setUsersList(prev => prev.map(u => u.id === user.id ? { ...u, status: nextStatus } : u));
       toast.success(`Đã chuyển trạng thái sang ${nextStatus === 'active' ? 'hoạt động' : 'tạm khóa'}`);
     } catch (err: any) {
@@ -733,7 +880,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
       await apiService.admin.updateDish(editingDish.id, {
         name: editDishName.trim(),
         description: editDishDesc.trim() || undefined,
-        category_name: editDishCategory.trim() || 'Món chính',
+        category: editDishCategory.trim() || 'Món chính',
         image_url: editDishImageUrl.trim() || undefined,
         cook_time_minutes: parseInt(editDishTime, 10) || 20,
         difficulty: editDishDifficulty,
@@ -769,7 +916,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
       const res = await apiService.admin.createDish({
         name: newDishName.trim(),
         description: newDishDesc.trim() || undefined,
-        category_name: newDishCategory.trim() || 'Món chính',
+        category: newDishCategory.trim() || 'Món chính',
         image_url: newDishImageUrl.trim() || undefined,
         servings: parseInt(newDishServings, 10) || 2,
         cook_time_minutes: parseInt(newDishTime, 10) || 20,
@@ -778,7 +925,6 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
         protein_g: parseFloat(newDishProtein) || 20,
         carbs_g: parseFloat(newDishCarbs) || 30,
         fat_g: parseFloat(newDishFat) || 10,
-        is_published: true,
       });
 
       if (res && res.data) {
@@ -792,7 +938,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
       setNewDishImageUrl('');
       setNewDishCategory('Eat Clean');
       setNewDishServings('2');
-      toast.success('Đã thêm món ăn mới vào kho dữ liệu thành công!');
+      toast.success('Đã thêm món ăn mới. Món sẽ được hiển thị sau khi bạn thêm công thức.');
     } catch (err: any) {
       toast.error(err.message || 'Lỗi khi tạo món ăn mới');
     } finally {
@@ -801,7 +947,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
   };
 
   return (
-    <div className="flex flex-col lg:flex-row gap-6 min-h-[800px] animate-in fade-in duration-300">
+    <div className="admin-studio-view flex flex-col lg:flex-row gap-5 min-h-[800px] animate-in fade-in duration-300">
       {/* Admin Sidebar Navigation */}
       <div className="w-full lg:w-64 bg-white rounded-3xl p-5 border border-slate-200/80 shadow-xs space-y-6 shrink-0 h-fit">
         <div className="space-y-1">
@@ -939,10 +1085,10 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                     <Bot className="w-4 h-4" />
                   </div>
                 </div>
-                <div className="text-2xl font-black text-slate-900">{stats.chatbotInteractions?.toLocaleString() || '14,820'}</div>
+                <div className="text-2xl font-black text-slate-900">{stats.chatbotInteractions.toLocaleString('vi-VN')}</div>
                 <div className="text-[11px] text-emerald-600 font-bold flex items-center gap-1">
-                  <span>↑ +{stats.interactionsGrowth || 18.4}%</span>
-                  <span className="text-slate-400 font-normal">so với tháng trước</span>
+                  <span>{stats.chatSessions.toLocaleString('vi-VN')} phiên hội thoại</span>
+                  <span className="text-slate-400 font-normal">trong {statsDays} ngày</span>
                 </div>
               </div>
 
@@ -953,10 +1099,10 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                     <Users className="w-4 h-4" />
                   </div>
                 </div>
-                <div className="text-2xl font-black text-slate-900">{stats.activeUsers?.toLocaleString() || '3,420'}</div>
+                <div className="text-2xl font-black text-slate-900">{stats.activeUsers.toLocaleString('vi-VN')}</div>
                 <div className="text-[11px] text-emerald-600 font-bold flex items-center gap-1">
-                  <span>↑ +{stats.usersGrowth || 12.6}%</span>
-                  <span className="text-slate-400 font-normal">người dùng tích cực</span>
+                  <span>+{stats.newUsers.toLocaleString('vi-VN')} người dùng mới</span>
+                  <span className="text-slate-400 font-normal">/ {stats.totalUsers.toLocaleString('vi-VN')} tài khoản • {stats.visits.toLocaleString('vi-VN')} lượt truy cập</span>
                 </div>
               </div>
 
@@ -967,22 +1113,22 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                     <UtensilsCrossed className="w-4 h-4" />
                   </div>
                 </div>
-                <div className="text-2xl font-black text-slate-900">{stats.dishesCount || dishesList.length}</div>
+                <div className="text-2xl font-black text-slate-900">{stats.dishesCount}</div>
                 <div className="text-[11px] text-orange-600 font-bold">
-                  {stats.pendingDishesCount || 0} món chờ duyệt
+                  {stats.hiddenDishesCount} món đang ẩn
                 </div>
               </div>
 
               <div className="p-5 bg-white rounded-3xl border border-slate-200/80 shadow-xs space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-slate-400 uppercase">ĐỘ CHÍNH XÁC AI</span>
+                  <span className="text-[11px] font-bold text-slate-400 uppercase">TỈ LỆ TRẢ LỜI THÀNH CÔNG</span>
                   <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center">
                     <ShieldCheck className="w-4 h-4" />
                   </div>
                 </div>
-                <div className="text-2xl font-black text-slate-900">{stats.aiSuccessRate || 98.6}%</div>
+                <div className="text-2xl font-black text-slate-900">{stats.aiSuccessRate}%</div>
                 <div className="text-[11px] text-emerald-600 font-bold">
-                  Độ trễ phản hồi: {stats.geminiLatencyMs || 410}ms
+                  Độ trễ phản hồi: {stats.avgResponseMs}ms
                 </div>
               </div>
             </div>
@@ -1081,7 +1227,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
 
                 <div className="p-3 bg-orange-50 rounded-2xl border border-orange-200/60 text-[11px] text-orange-950 flex items-start gap-2">
                   <Sparkles className="w-4 h-4 text-orange-600 shrink-0 mt-0.5" />
-                  <span>Bộ lọc an toàn dinh dưỡng đã chặn thành công {stats.allergyBlockCount || 284} xung đột dị ứng.</span>
+                  <span>{stats.flaggedMessagesCount > 0 ? `Có ${stats.flaggedMessagesCount} câu trả lời của chatbot bị gắn cờ cần kiểm tra.` : 'Chưa có câu trả lời nào của chatbot bị gắn cờ trong kỳ này.'}</span>
                 </div>
               </div>
             </div>
@@ -1150,8 +1296,8 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                           <span>•</span>
                           <span className="font-bold text-orange-600">
                             {topDishesBy === 'views' && `${item.views || 0} lượt xem`}
-                            {topDishesBy === 'favorites' && `${item.favorite_count || 0} yêu thích`}
-                            {topDishesBy === 'rating' && `★ ${item.avg_rating || 5.0} (${item.rating_count || 0})`}
+                            {topDishesBy === 'favorites' && `${item.favorites ?? item.favorite_count ?? 0} yêu thích`}
+                            {topDishesBy === 'rating' && `★ ${item.avg_rating ?? 0}`}
                           </span>
                         </div>
                       </div>
@@ -1187,6 +1333,14 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                   title="Tải lại"
                 >
                   <RefreshCw className={`w-4 h-4 ${loadingDishes ? 'animate-spin' : ''}`} />
+                </button>
+                <button
+                  onClick={openImportModal}
+                  className="px-4 py-2 bg-white border border-emerald-200 hover:bg-emerald-50 text-emerald-700 text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+                  title="Nhập nhiều món ăn từ file Excel (.xlsx) hoặc CSV"
+                >
+                  <Upload className="w-4 h-4" />
+                  Nhập từ Excel
                 </button>
                 <button
                   onClick={() => setShowAddDishModal(true)}
@@ -1269,8 +1423,9 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                               >
                                 {r.title}
                               </div>
-                              <div className="text-[10px] text-slate-400 font-mono">
-                                #{r.code || r.id.substring(0, 8)} • {r.ingredients?.length || 0} nguyên liệu
+                              <div className="text-[10px] text-slate-400 font-medium">
+                                {r.code ? <span className="font-mono text-slate-500 mr-1">{r.code} •</span> : null}
+                                {r.ingredients?.length || 0} nguyên liệu
                               </div>
                             </div>
                           </td>
@@ -1292,11 +1447,11 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                             </div>
                           </td>
                           <td className="py-4 text-center">
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${(r.isPublished ?? true)
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${(r.is_published ?? true)
                               ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                               : 'bg-slate-100 text-slate-500 border border-slate-200'
                               }`}>
-                              {(r.isPublished ?? true) ? 'Công khai' : 'Đã ẩn'}
+                              {(r.is_published ?? true) ? 'Công khai' : 'Đã ẩn'}
                             </span>
                           </td>
                           <td className="py-4 text-right pr-6">
@@ -1330,9 +1485,9 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                               <button
                                 onClick={() => handleTogglePublish(r)}
                                 className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-slate-900 cursor-pointer transition-colors"
-                                title={(r.isPublished ?? true) ? 'Ẩn món khỏi người dùng' : 'Công khai món'}
+                                title={(r.is_published ?? true) ? 'Ẩn món khỏi người dùng' : 'Công khai món'}
                               >
-                                {(r.isPublished ?? true) ? <EyeOff className="w-4 h-4 text-slate-400" /> : <Eye className="w-4 h-4 text-emerald-600" />}
+                                {(r.is_published ?? true) ? <EyeOff className="w-4 h-4 text-slate-400" /> : <Eye className="w-4 h-4 text-emerald-600" />}
                               </button>
                               <button
                                 onClick={() => handleDeleteDish(r.id)}
@@ -1428,7 +1583,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                 >
                   {dishesList.map(d => (
                     <option key={d.id} value={d.id}>
-                      {d.title} ({d.category || 'Món ăn'} • #{d.id.substring(0, 8)})
+                      {d.title}{d.category ? ` (${d.category})` : ''}
                     </option>
                   ))}
                 </select>
@@ -1502,16 +1657,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                       <option value="7">7. Vừng mè</option>
                     </select>
                   </div>
-                  <div className="flex items-center justify-between pt-1">
-                    <label className="flex items-center gap-1.5 text-xs text-slate-600 font-medium cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={newIngOptional}
-                        onChange={(e) => setNewIngOptional(e.target.checked)}
-                        className="accent-orange-500 rounded"
-                      />
-                      <span>Tùy chọn (không bắt buộc)</span>
-                    </label>
+                  <div className="flex items-center justify-end pt-1">
                     <button
                       type="button"
                       onClick={handleAddIngredient}
@@ -1537,11 +1683,6 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                             {idx + 1}
                           </span>
                           <span className="font-bold text-slate-800">{ing.name}</span>
-                          {ing.is_optional && (
-                            <span className="px-1.5 py-0.5 bg-slate-200 text-slate-600 rounded text-[9px] font-medium">
-                              Tùy chọn
-                            </span>
-                          )}
                           {ing.needs_review && (
                             <span className="px-1.5 py-0.5 bg-amber-100 text-amber-800 border border-amber-300 rounded text-[9px] font-bold">
                               ⚠️ Cần rà soát dị ứng
@@ -1549,7 +1690,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                           )}
                           {ing.allergen_group_id && (
                             <span className="px-1.5 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 rounded text-[9px] font-medium">
-                              Nhóm dị ứng #{ing.allergen_group_id}
+                              {ALLERGEN_GROUP_LABELS[ing.allergen_group_id] || `Nhóm dị ứng ${ing.allergen_group_id}`}
                             </span>
                           )}
                           {ing.no_allergen && (
@@ -1827,7 +1968,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                   CẤU HÌNH BẢO MẬT & GUARD RAILS HIỆN TẠI
                 </span>
                 <span className="text-xs text-emerald-400 font-mono">
-                  {chatbotHealth?.status === 'ok' ? 'Trực tuyến • Sẵn sàng' : 'Hoạt động ổn định'}
+                  {chatbotHealth?.status === 'up' ? 'Trực tuyến • Sẵn sàng' : 'Dịch vụ AI không phản hồi'}
                 </span>
               </div>
               <p className="text-xs text-slate-300 leading-relaxed">
@@ -1893,7 +2034,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                         >
                           <div className="truncate font-semibold">{s.title || 'Hội thoại không tiêu đề'}</div>
                           <div className="text-[10px] text-slate-400 mt-0.5">
-                            {s.user?.display_name || s.user?.email || 'Người dùng'} • {new Date(s.created_at).toLocaleDateString('vi-VN')}
+                            {s.user?.display_name || s.user?.email || 'Người dùng'} • {new Date(s.updated_at || s.created_at).toLocaleDateString('vi-VN')} • {s.message_count ?? 0} tin nhắn
                           </div>
                         </button>
                       ))
@@ -2123,12 +2264,15 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                         </td>
                         <td className="py-2.5 font-bold text-slate-800">
                           {log.action}
+                          {log.actor?.display_name && (
+                            <div className="text-[10px] font-normal text-slate-400">{log.actor.display_name}</div>
+                          )}
                         </td>
                         <td className="py-2.5 text-slate-600">
                           {log.target_type} ({log.target_id ? log.target_id.substring(0, 8) : 'hệ thống'})
                         </td>
                         <td className="py-2.5 pr-3 text-slate-500 text-[11px]">
-                          {typeof log.details === 'object' ? JSON.stringify(log.details) : log.details || '-'}
+                          {log.detail && typeof log.detail === 'object' ? JSON.stringify(log.detail) : log.detail || '-'}
                         </td>
                       </tr>
                     ))
@@ -2144,6 +2288,210 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
               >
                 Đóng
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Import Dishes Modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-3xl w-full max-h-[90vh] overflow-y-auto space-y-5 shadow-2xl text-xs">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div>
+                <span className="text-[11px] font-bold text-orange-600 uppercase tracking-wider">KHO DỮ LIỆU CULINA</span>
+                <h3 className="text-lg font-black text-slate-900">Nhập Món Ăn Từ File Excel</h3>
+              </div>
+              <button
+                type="button"
+                onClick={closeImportModal}
+                className="p-1.5 hover:bg-slate-100 rounded-xl text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Bước 1: tải file mẫu */}
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="font-bold text-slate-900">1. Tải file mẫu</div>
+                <p className="text-slate-500 mt-0.5">
+                  Điền mỗi món một dòng. Bắt buộc: tên món, danh mục, khẩu phần. Tối đa 500 dòng, 5 MB.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleDownloadImportTemplate('xlsx')}
+                  disabled={isDownloadingTemplate}
+                  className="px-3 py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {isDownloadingTemplate ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                  Mẫu .xlsx
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadImportTemplate('csv')}
+                  disabled={isDownloadingTemplate}
+                  className="px-3 py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  Mẫu .csv
+                </button>
+              </div>
+            </div>
+
+            {/* Bước 2: chọn file */}
+            <div className="space-y-2">
+              <div className="font-bold text-slate-900">2. Chọn file đã điền</div>
+              <label
+                className={`flex flex-col items-center justify-center gap-2 p-6 border-2 border-dashed rounded-2xl transition-colors ${isCheckingImport || isSubmittingImport ? 'border-slate-200 bg-slate-50 cursor-wait' : 'border-orange-200 hover:border-orange-400 hover:bg-orange-50/40 cursor-pointer'}`}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (!isCheckingImport && !isSubmittingImport) handleImportFileSelect(e.dataTransfer.files?.[0]);
+                }}
+              >
+                {isCheckingImport ? (
+                  <Loader2 className="w-6 h-6 text-orange-500 animate-spin" />
+                ) : (
+                  <FileText className="w-6 h-6 text-orange-500" />
+                )}
+                <span className="font-bold text-slate-700">
+                  {isCheckingImport
+                    ? 'Đang kiểm tra file...'
+                    : importFile
+                      ? importFile.name
+                      : 'Bấm để chọn hoặc kéo thả file .xlsx / .csv vào đây'}
+                </span>
+                {importFile && !isCheckingImport && (
+                  <span className="text-[11px] text-slate-400">Bấm để chọn file khác</span>
+                )}
+                <input
+                  type="file"
+                  accept=".xlsx,.csv"
+                  className="hidden"
+                  disabled={isCheckingImport || isSubmittingImport}
+                  onChange={(e) => {
+                    handleImportFileSelect(e.target.files?.[0]);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+            </div>
+
+            {importError && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-2xl text-red-700 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{importError}</span>
+              </div>
+            )}
+
+            {/* Bước 3: kết quả kiểm tra / kết quả nhập */}
+            {importResult && (
+              <div className="space-y-3">
+                <div className="font-bold text-slate-900">
+                  {importResult.dry_run ? '3. Kết quả kiểm tra' : 'Kết quả nhập'}
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200/80">
+                    <div className="text-[11px] text-slate-500 font-bold">Tổng số dòng</div>
+                    <div className="text-xl font-black text-slate-900">{importResult.total_rows}</div>
+                  </div>
+                  <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-200/80">
+                    <div className="text-[11px] text-emerald-700 font-bold">
+                      {importResult.dry_run ? 'Hợp lệ' : 'Đã tạo'}
+                    </div>
+                    <div className="text-xl font-black text-emerald-700">
+                      {importResult.dry_run ? importResult.valid_rows : importResult.created_count}
+                    </div>
+                  </div>
+                  <div className={`p-3 rounded-2xl border ${importResult.error_rows > 0 ? 'bg-red-50 border-red-200/80' : 'bg-slate-50 border-slate-200/80'}`}>
+                    <div className={`text-[11px] font-bold ${importResult.error_rows > 0 ? 'text-red-700' : 'text-slate-500'}`}>
+                      Dòng lỗi {importResult.dry_run ? '' : '(bỏ qua)'}
+                    </div>
+                    <div className={`text-xl font-black ${importResult.error_rows > 0 ? 'text-red-700' : 'text-slate-900'}`}>
+                      {importResult.error_rows}
+                    </div>
+                  </div>
+                </div>
+
+                {importResult.warnings.length > 0 && (
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-amber-800 space-y-0.5">
+                    {importResult.warnings.map((w) => <div key={w}>• {w}</div>)}
+                  </div>
+                )}
+
+                {importResult.errors.length > 0 && (
+                  <div className="border border-slate-200 rounded-2xl overflow-hidden">
+                    <div className="max-h-64 overflow-y-auto">
+                      <table className="w-full text-left">
+                        <thead className="bg-slate-50 text-slate-500 sticky top-0">
+                          <tr>
+                            <th className="px-3 py-2 font-bold w-16">Dòng</th>
+                            <th className="px-3 py-2 font-bold w-32">Cột</th>
+                            <th className="px-3 py-2 font-bold">Lỗi</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {importResult.errors.map((e, idx) => (
+                            <tr key={`${e.row}-${e.field}-${idx}`}>
+                              <td className="px-3 py-2 font-mono font-bold text-slate-700">{e.row}</td>
+                              <td className="px-3 py-2 text-slate-600">{IMPORT_FIELD_LABELS[e.field] || e.field}</td>
+                              <td className="px-3 py-2 text-red-700">{e.message}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {!importResult.dry_run && importResult.created && importResult.created.length > 0 && (
+                  <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 space-y-1">
+                    <div className="font-bold flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4" />
+                      Các món vừa tạo đang ở trạng thái ẩn. Hãy bổ sung công thức rồi xuất bản.
+                    </div>
+                    <div className="text-emerald-700">
+                      {importResult.created.map((d) => d.name).join(', ')}
+                    </div>
+                  </div>
+                )}
+
+                {importResult.dry_run && importResult.valid_rows === 0 && (
+                  <div className="text-slate-500">Không có dòng hợp lệ nào. Hãy sửa file rồi chọn lại.</div>
+                )}
+                {importResult.dry_run && importResult.valid_rows > 0 && importResult.error_rows > 0 && (
+                  <div className="text-slate-500">
+                    Các dòng lỗi sẽ bị bỏ qua, chỉ {importResult.valid_rows} dòng hợp lệ được nhập.
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={closeImportModal}
+                disabled={isCheckingImport || isSubmittingImport}
+                className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {importResult && !importResult.dry_run ? 'Đóng' : 'Hủy'}
+              </button>
+              {(!importResult || importResult.dry_run) && (
+                <button
+                  type="button"
+                  onClick={handleConfirmImport}
+                  disabled={!importResult || importResult.valid_rows === 0 || isCheckingImport || isSubmittingImport}
+                  className="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isSubmittingImport ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                  {importResult && importResult.valid_rows > 0
+                    ? `Nhập ${importResult.valid_rows} món`
+                    : 'Nhập món'}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -2423,7 +2771,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div>
                 <span className="text-[11px] font-bold text-orange-600 uppercase tracking-wider">
-                  CHỈNH SỬA MÓN ĂN #{editingDish.code || editingDish.id.substring(0, 8)}
+                  CHỈNH SỬA THÔNG TIN MÓN ĂN
                 </span>
                 <h3 className="text-lg font-black text-slate-900">{editingDish.title}</h3>
               </div>

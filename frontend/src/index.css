@@ -1,1 +1,176 @@
 @import "tailwindcss";
+
+/* ── 1. Giao diện Người dùng (User-facing): Giảm 1px, tỷ lệ chuẩn 16px vừa vặn mắt nhìn ── */
+html {
+  font-size: 15.5px;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+@media (min-width: 640px) {
+  html {
+    font-size: 16px; /* Giảm đúng 1px từ 17px xuống chuẩn 16px: mắt nhìn thoải mái, vừa vặn tự nhiên */
+  }
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Các nhãn nhỏ, thẻ tag và thông số: thanh thoát, rõ dấu tiếng Việt mà không bị to */
+.text-\[9px\],
+[class*="text-[9px]"] {
+  font-size: 0.6875rem !important; /* 11px */
+  line-height: 1.15 !important;
+}
+
+.text-\[10px\],
+[class*="text-[10px]"] {
+  font-size: 0.725rem !important; /* ~11.6px: sắc nét, không bị thô */
+  line-height: 1.2 !important;
+}
+
+.text-\[11px\],
+[class*="text-[11px]"] {
+  font-size: 0.775rem !important; /* ~12.4px */
+  line-height: 1.25 !important;
+}
+
+.text-xs {
+  font-size: 0.785rem; /* ~12.5px */
+  line-height: 1.25rem;
+}
+
+.text-slate-400 {
+  color: #64748b; /* Tăng độ tương phản (slate-500) để mắt dễ đọc tự nhiên */
+}
+
+input, select, textarea, button {
+  font-family: inherit;
+}
+
+/* ── 2. Cổng Quản Trị Viên (Admin Studio): Thiết kế tinh gọn, vừa mắt chuẩn SaaS Dashboard ── */
+.admin-studio-view {
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+/* Tiêu đề trong Admin: Không bị to quá khổ */
+.admin-studio-view h2 {
+  font-size: 1.3rem !important; /* ~22px */
+  line-height: 1.65rem !important;
+  letter-spacing: -0.01em;
+}
+
+.admin-studio-view h3 {
+  font-size: 1.05rem !important; /* ~17px */
+}
+
+.admin-studio-view h4 {
+  font-size: 0.95rem !important; /* ~15px */
+}
+
+/* Các chỉ số thống kê (Cards metric) trong Admin: Gọn gàng, tinh tế */
+.admin-studio-view .text-2xl {
+  font-size: 1.35rem !important; /* ~22px thay vì bị to 28px - 32px */
+  line-height: 1.7rem !important;
+}
+
+.admin-studio-view .text-xl {
+  font-size: 1.15rem !important;
+}
+
+/* Thanh điều hướng bên trái Admin (Sidebar) */
+.admin-studio-view .w-full.lg\:w-64 {
+  width: 15.5rem !important;
+  padding: 1.1rem !important;
+}
+
+.admin-studio-view .w-full.lg\:w-64 button {
+  padding-top: 0.55rem !important;
+  padding-bottom: 0.55rem !important;
+  font-size: 0.775rem !important; /* ~12.5px */
+}
+
+/* Thu gọn đệm padding các thẻ Metric & Khối nội dung trong Admin */
+.admin-studio-view .p-5 {
+  padding: 1.1rem !important;
+}
+
+.admin-studio-view .p-6 {
+  padding: 1.25rem !important;
+}
+
+.admin-studio-view .space-y-6 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 1.1rem !important;
+}
+
+.admin-studio-view .space-y-8 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 1.35rem !important;
+}
+
+/* Bảng dữ liệu quản trị (Dishes, Users, Chatbot, Recipes, Audit logs): Gọn gàng và dễ nhìn */
+.admin-studio-view table {
+  font-size: 13px !important;
+}
+
+.admin-studio-view table th {
+  font-size: 11px !important;
+  padding-top: 0.6rem !important;
+  padding-bottom: 0.6rem !important;
+  padding-left: 0.85rem !important;
+  padding-right: 0.85rem !important;
+}
+
+.admin-studio-view table td {
+  font-size: 13px !important;
+  padding-top: 0.65rem !important;
+  padding-bottom: 0.65rem !important;
+  padding-left: 0.85rem !important;
+  padding-right: 0.85rem !important;
+}
+
+/* Reset lại các nhãn nhỏ trong Admin để không bị thô */
+.admin-studio-view .text-\[10px\],
+.admin-studio-view [class*="text-[10px]"] {
+  font-size: 0.6875rem !important; /* 11px */
+  line-height: 1.15 !important;
+}
+
+.admin-studio-view .text-\[11px\],
+.admin-studio-view [class*="text-[11px]"] {
+  font-size: 0.725rem !important; /* 11.5px */
+  line-height: 1.2 !important;
+}
+
+.admin-studio-view .text-xs {
+  font-size: 0.775rem !important; /* ~12.5px */
+  line-height: 1.25rem !important;
+}
+
+.admin-studio-view .text-sm {
+  font-size: 0.835rem !important; /* ~13.5px */
+}
+
+/* Form input, select, textarea và nút bấm trong Admin */
+.admin-studio-view input,
+.admin-studio-view select,
+.admin-studio-view textarea {
+  font-size: 13px !important;
+  padding-top: 0.45rem !important;
+  padding-bottom: 0.45rem !important;
+}
+
+.admin-studio-view button {
+  font-size: 12.5px;
+}
+
+/* Bo góc các khối Admin vừa phải, thanh thoát */
+.admin-studio-view .rounded-3xl {
+  border-radius: 1.25rem !important;
+}
+

@@ -1,758 +1,288 @@
+// src/controllers/dishesController.js
 //   4.3.1 Tìm kiếm & lọc món ăn (GET /dishes)
 //   4.3.2 Xem chi tiết món ăn & công thức (GET /dishes/:idOrSlug)
+//   5.1.1 Món phổ biến / nổi bật (GET /dishes/popular)
 
 import { supabaseAdmin } from '../config/supabase.js';
-import { matchesSearchKeyword } from '../utils/textUtils.js';
+import { matchesSearchKeyword, normalizeText } from '../utils/textUtils.js';
+import {
+  ApiError,
+  UUID_REGEX,
+  pageMeta,
+  parseIdList,
+  parsePagination,
+  sendError,
+  sendOk,
+} from '../utils/http.js';
+import { toDishSummary } from '../services/recommendationService.js';
+import { recomputeUserVectorsInBackground } from '../services/embeddingService.js';
 
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SORTS = ['relevance', 'match', 'newest', 'rating', 'popular', 'cook_time', 'calories'];
 
-/**
- * Helper phân tích và kiểm tra tính hợp lệ của danh sách số nguyên dạng chuỗi phân cách bởi dấu phẩy
- * Ví dụ: "1,2,5" -> [1, 2, 5]
- * Trả về null nếu định dạng không hợp lệ.
- */
-function parseCommaSeparatedInts(str) {
-  if (!str || typeof str !== 'string') return null;
-  const parts = str.split(',').map((s) => s.trim()).filter(Boolean);
-  if (parts.length === 0) return null;
-  const numbers = [];
-  for (const part of parts) {
-    const num = Number(part);
-    if (!Number.isInteger(num) || num <= 0) return null;
-    numbers.push(num);
-  }
-  return numbers;
+function parseNonNegative(query, key) {
+  if (query[key] === undefined || query[key] === '') return undefined;
+  const n = Number(query[key]);
+  if (!Number.isFinite(n) || n < 0) throw new ApiError(400, 'INVALID_QUERY', `Tham số ${key} không hợp lệ.`);
+  return n;
+}
+
+async function getUserFavoriteSet(userId, dishIds) {
+  if (!userId || dishIds.length === 0) return new Set();
+  const { data } = await supabaseAdmin.from('favorites').select('dish_id').eq('user_id', userId).in('dish_id', dishIds);
+  return new Set((data || []).map((f) => f.dish_id));
+}
+
+function logInteraction(row) {
+  supabaseAdmin.from('interaction_logs').insert(row).then(({ error }) => {
+    if (error) console.warn('[Interaction] Không ghi được interaction_logs:', error.message);
+  });
 }
 
 /**
- * 4.3.1 Tìm kiếm & lọc món ăn
- * GET /dishes hoặc /api/dishes
+ * 4.3.1 Tìm kiếm & lọc món ăn – GET /dishes
  */
-export async function getDishes(req, res, next) {
-  try {
-    const {
-      q,
-      category_id,
-      ingredient_ids,
-      ingredient_match = 'any',
-      min_match_ratio,
-      exclude_ingredient_ids,
-      tag_ids,
-      max_cook_time,
-      difficulty,
-      max_calories,
-      min_protein_g,
-      max_carbs_g,
-      max_fat_g,
-      sort,
-      page = 1,
-      limit = 20
-    } = req.query;
+export async function getDishes(req, res) {
+  const q = req.query;
+  const keyword = typeof q.q === 'string' ? q.q.trim().slice(0, 100) : '';
+  const ingredientIds = parseIdList(q.ingredient_ids, 'ingredient_ids');
+  const excludeIds = parseIdList(q.exclude_ingredient_ids, 'exclude_ingredient_ids');
+  const tagIds = parseIdList(q.tag_ids, 'tag_ids');
+  const ingredientMatch = q.ingredient_match ?? 'any';
+  if (!['any', 'all'].includes(ingredientMatch)) throw new ApiError(400, 'INVALID_QUERY', 'ingredient_match phải là any hoặc all.');
+  const minMatchRatio = parseNonNegative(q, 'min_match_ratio');
+  if (minMatchRatio !== undefined && minMatchRatio > 1) throw new ApiError(400, 'INVALID_QUERY', 'min_match_ratio nằm trong khoảng 0–1.');
+  if (q.difficulty !== undefined && !['easy', 'medium', 'hard'].includes(q.difficulty)) {
+    throw new ApiError(400, 'INVALID_QUERY', 'difficulty phải là easy, medium hoặc hard.');
+  }
+  if (q.sort !== undefined && !SORTS.includes(q.sort)) throw new ApiError(400, 'INVALID_QUERY', 'Giá trị sort không hợp lệ.');
+  const maxCookTime = parseNonNegative(q, 'max_cook_time');
+  const maxCalories = parseNonNegative(q, 'max_calories');
+  const minProtein = parseNonNegative(q, 'min_protein_g');
+  const maxCarbs = parseNonNegative(q, 'max_carbs_g');
+  const maxFat = parseNonNegative(q, 'max_fat_g');
+  const pg = parsePagination(q);
 
-    // ── 1. Validate tham số truy vấn (trả 400 INVALID_QUERY nếu sai) ──────────
+  // 1. Các điều kiện lọc thực hiện ngay trong truy vấn CSDL
+  let query = supabaseAdmin
+    .from('dishes')
+    .select(`id, name, slug, description, image_url, category, cook_time_minutes, difficulty, calories,
+      avg_rating, rating_count, favorite_count, created_at,
+      dish_tags(tag_id),
+      dish_ingredients(is_optional, ingredient:ingredients(id, name, aliases))`)
+    .eq('is_published', true);
+  if (typeof q.category === 'string' && q.category.trim()) query = query.eq('category_normalized', normalizeText(q.category));
+  if (q.difficulty) query = query.eq('difficulty', q.difficulty);
+  if (maxCookTime !== undefined) query = query.lte('cook_time_minutes', maxCookTime);
+  if (maxCalories !== undefined) query = query.lte('calories', maxCalories);
+  if (minProtein !== undefined) query = query.gte('protein_g', minProtein);
+  if (maxCarbs !== undefined) query = query.lte('carbs_g', maxCarbs);
+  if (maxFat !== undefined) query = query.lte('fat_g', maxFat);
+  const { data: rows, error } = await query;
+  if (error) throw error;
 
-    const parsedCategoryId = category_id !== undefined ? Number(category_id) : undefined;
-    if (parsedCategoryId !== undefined && (!Number.isInteger(parsedCategoryId) || parsedCategoryId <= 0)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_QUERY', message: 'Tham số lọc sai kiểu hoặc giá trị không hợp lệ.' }
-      });
+  // 2. Lọc thẻ, nguyên liệu và từ khóa (bỏ dấu) trên kết quả
+  const pantry = new Set(ingredientIds || []);
+  let list = (rows || []).filter((d) => {
+    const ings = d.dish_ingredients || [];
+    const ingIds = ings.map((di) => Number(di.ingredient?.id));
+    const dishTagIds = (d.dish_tags || []).map((t) => t.tag_id);
+    if (tagIds && !tagIds.every((t) => dishTagIds.includes(t))) return false;
+    if (excludeIds && ingIds.some((id) => excludeIds.includes(id))) return false;
+    if (ingredientIds) {
+      const hits = ingIds.filter((id) => pantry.has(id)).length;
+      if (ingredientMatch === 'all' ? !ingredientIds.every((id) => ingIds.includes(id)) : hits === 0) return false;
     }
-
-    let parsedIngredientIds = null;
-    if (ingredient_ids !== undefined) {
-      parsedIngredientIds = parseCommaSeparatedInts(ingredient_ids);
-      if (!parsedIngredientIds) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'INVALID_QUERY', message: 'Tham số lọc sai kiểu hoặc giá trị không hợp lệ.' }
-        });
-      }
+    if (keyword) {
+      const inText = matchesSearchKeyword(d.name, keyword) || matchesSearchKeyword(d.description, keyword);
+      const inIngredients = ings.some((di) =>
+        matchesSearchKeyword(di.ingredient?.name, keyword)
+        || (di.ingredient?.aliases || []).some((a) => matchesSearchKeyword(a, keyword)));
+      if (!inText && !inIngredients) return false;
     }
+    return true;
+  });
 
-    if (ingredient_match !== 'any' && ingredient_match !== 'all') {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_QUERY', message: 'Tham số lọc sai kiểu hoặc giá trị không hợp lệ.' }
-      });
-    }
-
-    let parsedMinMatchRatio = undefined;
-    if (min_match_ratio !== undefined) {
-      parsedMinMatchRatio = Number(min_match_ratio);
-      if (isNaN(parsedMinMatchRatio) || parsedMinMatchRatio < 0 || parsedMinMatchRatio > 1) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'INVALID_QUERY', message: 'Tham số lọc sai kiểu hoặc giá trị không hợp lệ.' }
-        });
-      }
-    }
-
-    let parsedExcludeIngredientIds = null;
-    if (exclude_ingredient_ids !== undefined) {
-      parsedExcludeIngredientIds = parseCommaSeparatedInts(exclude_ingredient_ids);
-      if (!parsedExcludeIngredientIds) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'INVALID_QUERY', message: 'Tham số lọc sai kiểu hoặc giá trị không hợp lệ.' }
-        });
-      }
-    }
-
-    let parsedTagIds = null;
-    if (tag_ids !== undefined) {
-      parsedTagIds = parseCommaSeparatedInts(tag_ids);
-      if (!parsedTagIds) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'INVALID_QUERY', message: 'Tham số lọc sai kiểu hoặc giá trị không hợp lệ.' }
-        });
-      }
-    }
-
-    const parsedMaxCookTime = max_cook_time !== undefined ? Number(max_cook_time) : undefined;
-    if (parsedMaxCookTime !== undefined && (isNaN(parsedMaxCookTime) || parsedMaxCookTime < 0)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_QUERY', message: 'Tham số lọc sai kiểu hoặc giá trị không hợp lệ.' }
-      });
-    }
-
-    if (difficulty !== undefined && !['easy', 'medium', 'hard'].includes(difficulty)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_QUERY', message: 'Tham số lọc sai kiểu hoặc giá trị không hợp lệ.' }
-      });
-    }
-
-    const parsedMaxCalories = max_calories !== undefined ? Number(max_calories) : undefined;
-    if (parsedMaxCalories !== undefined && (isNaN(parsedMaxCalories) || parsedMaxCalories < 0)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_QUERY', message: 'Tham số lọc sai kiểu hoặc giá trị không hợp lệ.' }
-      });
-    }
-
-    const parsedMinProtein = min_protein_g !== undefined ? Number(min_protein_g) : undefined;
-    if (parsedMinProtein !== undefined && (isNaN(parsedMinProtein) || parsedMinProtein < 0)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_QUERY', message: 'Tham số lọc sai kiểu hoặc giá trị không hợp lệ.' }
-      });
-    }
-
-    const parsedMaxCarbs = max_carbs_g !== undefined ? Number(max_carbs_g) : undefined;
-    if (parsedMaxCarbs !== undefined && (isNaN(parsedMaxCarbs) || parsedMaxCarbs < 0)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_QUERY', message: 'Tham số lọc sai kiểu hoặc giá trị không hợp lệ.' }
-      });
-    }
-
-    const parsedMaxFat = max_fat_g !== undefined ? Number(max_fat_g) : undefined;
-    if (parsedMaxFat !== undefined && (isNaN(parsedMaxFat) || parsedMaxFat < 0)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_QUERY', message: 'Tham số lọc sai kiểu hoặc giá trị không hợp lệ.' }
-      });
-    }
-
-    const validSorts = ['relevance', 'match', 'newest', 'rating', 'popular', 'cook_time', 'calories'];
-    if (sort !== undefined && !validSorts.includes(sort)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_QUERY', message: 'Tham số lọc sai kiểu hoặc giá trị không hợp lệ.' }
-      });
-    }
-
-    const pageNum = Number(page);
-    if (!Number.isInteger(pageNum) || pageNum < 1) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_QUERY', message: 'Tham số lọc sai kiểu hoặc giá trị không hợp lệ.' }
-      });
-    }
-
-    const limitNum = Number(limit);
-    if (!Number.isInteger(limitNum) || limitNum < 1 || limitNum > 100) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_QUERY', message: 'Tham số lọc sai kiểu hoặc giá trị không hợp lệ.' }
-      });
-    }
-
-    // ── 2. Truy vấn dữ liệu món ăn xuất bản cùng quan hệ qua SQL ─────────────
-    let query = supabaseAdmin
-      .from('dishes')
-      .select(`
-        id,
-        name,
-        slug,
-        description,
-        image_url,
-        category,
-        category_normalized,
-        cook_time_minutes,
-        difficulty,
-        servings,
-        est_cost,
-        calories,
-        protein_g,
-        carbs_g,
-        fat_g,
-        is_published,
-        created_at,
-        updated_at,
-        dish_tags(tag:tags(id, name)),
-        dish_ingredients(
-          quantity,
-          unit,
-          is_optional,
-          ingredient:ingredients(
-            id,
-            name,
-            aliases,
-            allergen_group:allergen_groups(id, name)
-          )
-        )
-      `)
-      .eq('is_published', true);
-
-    // Chuyển trực tiếp các điều kiện lọc sang SQL
-    if (parsedCategoryId !== undefined) {
-      const { data: cat } = await supabaseAdmin
-        .from('categories')
-        .select('name')
-        .eq('id', parsedCategoryId)
-        .maybeSingle();
-      if (cat) {
-        query = query.eq('category', cat.name);
-      }
-    }
-    if (difficulty !== undefined) {
-      query = query.eq('difficulty', difficulty);
-    }
-    if (parsedMaxCookTime !== undefined) {
-      query = query.lte('cook_time_minutes', parsedMaxCookTime);
-    }
-    if (parsedMaxCalories !== undefined) {
-      query = query.lte('calories', parsedMaxCalories);
-    }
-    if (parsedMinProtein !== undefined) {
-      query = query.gte('protein_g', parsedMinProtein);
-    }
-    if (parsedMaxCarbs !== undefined) {
-      query = query.lte('carbs_g', parsedMaxCarbs);
-    }
-    if (parsedMaxFat !== undefined) {
-      query = query.lte('fat_g', parsedMaxFat);
-    }
-
-    if (sort === 'cook_time') {
-      query = query.order('cook_time_minutes', { ascending: true });
-    } else if (sort === 'calories') {
-      query = query.order('calories', { ascending: true });
-    } else if (sort === 'newest') {
-      query = query.order('created_at', { ascending: false });
-    }
-
-    const { data: rawDishes, error: dishesErr } = await query;
-    if (dishesErr) throw dishesErr;
-
-    // ── 3. Lấy thông tin ratings và favorites cho người dùng (nếu có) ─────────
-    const allDishIds = (rawDishes || []).map((d) => d.id);
-    const [ratingsRes, favsRes] = await Promise.all([
-      allDishIds.length > 0
-        ? supabaseAdmin.from('ratings').select('dish_id, stars').in('dish_id', allDishIds)
-        : { data: [] },
-      allDishIds.length > 0
-        ? supabaseAdmin.from('favorites').select('dish_id, user_id').in('dish_id', allDishIds)
-        : { data: [] }
-    ]);
-
-    const ratingsMap = new Map();
-    (ratingsRes.data || []).forEach((r) => {
-      if (!ratingsMap.has(r.dish_id)) {
-        ratingsMap.set(r.dish_id, { count: 0, sum: 0 });
-      }
-      const entry = ratingsMap.get(r.dish_id);
-      entry.count += 1;
-      entry.sum += r.stars;
-    });
-
-    const favsMap = new Map();
-    const userFavSet = new Set();
-    const currentUserId = req.user?.id;
-
-    (favsRes.data || []).forEach((f) => {
-      favsMap.set(f.dish_id, (favsMap.get(f.dish_id) || 0) + 1);
-      if (currentUserId && f.user_id === currentUserId) {
-        userFavSet.add(f.dish_id);
-      }
-    });
-
-    // ── 4. Áp dụng các bộ lọc còn lại (chỉ những gì không thể push xuống SQL) ──
-    // Lưu ý: region, category, difficulty, cook_time, calories, protein, carbs, fat
-    // đã được lọc bằng .eq()/.lte()/.gte() ở bước 2 → không lặp lại ở đây.
-    const keyword = typeof q === 'string' ? q.trim() : '';
-
-    const filtered = (rawDishes || []).filter((dish) => {
-      // Lọc theo tags (khẩu vị, đặc sản...) — không hỗ trợ trực tiếp trên Supabase filter
-      const dishTagIds = (dish.dish_tags || []).map((dt) => dt.tag?.id).filter(Boolean);
-      if (parsedTagIds && parsedTagIds.length > 0) {
-        const hasAllTags = parsedTagIds.every((tid) => dishTagIds.includes(tid));
-        if (!hasAllTags) return false;
-      }
-
-      // Lọc loại trừ nguyên liệu (NOT IN trên nested relation — cần xử lý ở JS)
-      const dishIngredients = dish.dish_ingredients || [];
-      if (parsedExcludeIngredientIds && parsedExcludeIngredientIds.length > 0) {
-        const hasExcluded = dishIngredients.some((di) =>
-          parsedExcludeIngredientIds.includes(di.ingredient?.id)
-        );
-        if (hasExcluded) return false;
-      }
-
-      // Tìm kiếm từ khóa q: tên món, mô tả, hoặc tên/bí danh nguyên liệu (bỏ dấu)
-      if (keyword) {
-        const matchName = matchesSearchKeyword(dish.name, keyword);
-        const matchDesc = matchesSearchKeyword(dish.description, keyword);
-        const matchIng = dishIngredients.some((di) => {
-          const ingName = di.ingredient?.name;
-          if (matchesSearchKeyword(ingName, keyword)) return true;
-          const aliases = di.ingredient?.aliases || [];
-          return aliases.some((al) => matchesSearchKeyword(al, keyword));
-        });
-
-        if (!matchName && !matchDesc && !matchIng) return false;
-      }
-
-      // Lọc theo tủ lạnh / danh sách nguyên liệu có sẵn
-      if (parsedIngredientIds && parsedIngredientIds.length > 0) {
-        const dishIngIds = dishIngredients.map((di) => di.ingredient?.id).filter(Boolean);
-        const matchedIngIds = dishIngIds.filter((id) => parsedIngredientIds.includes(id));
-
-        if (ingredient_match === 'all') {
-          const hasAll = parsedIngredientIds.every((id) => dishIngIds.includes(id));
-          if (!hasAll) return false;
-        } else {
-          if (matchedIngIds.length === 0) return false;
-        }
-      }
-
-      return true;
-    });
-
-    // ── 5. Tính toán match (cho Tủ lạnh thông minh) & gắn rating/favorite ─────
-    const hasIngredientFilter = Boolean(parsedIngredientIds && parsedIngredientIds.length > 0);
-
-    const enrichedDishes = filtered.map((dish) => {
-      const rInfo = ratingsMap.get(dish.id) || { count: 0, sum: 0 };
-      const avg_rating = rInfo.count > 0 ? Math.round((rInfo.sum / rInfo.count) * 10) / 10 : 0;
-      const rating_count = rInfo.count;
-      const favorite_count = favsMap.get(dish.id) || 0;
-      const is_favorite = userFavSet.has(dish.id);
-
-      let matchData = null;
-      if (hasIngredientFilter) {
-        const dishIngredients = dish.dish_ingredients || [];
-        const matched = dishIngredients.filter((di) =>
-          parsedIngredientIds.includes(di.ingredient?.id)
-        );
-        const matched_count = matched.length;
-
-        // Các nguyên liệu bắt buộc (is_optional = false) bị thiếu
-        const essentialMissing = dishIngredients.filter(
-          (di) => !di.is_optional && !parsedIngredientIds.includes(di.ingredient?.id)
-        );
-        const missing_ingredients = essentialMissing
-          .map((di) => di.ingredient?.name)
-          .filter(Boolean);
-        const missing_count = missing_ingredients.length;
-
-        const essentialCount = dishIngredients.filter((di) => !di.is_optional).length;
-        const matchedEssentialCount = dishIngredients.filter(
-          (di) => !di.is_optional && parsedIngredientIds.includes(di.ingredient?.id)
-        ).length;
-
-        const ratio =
-          essentialCount > 0
-            ? Math.round((matchedEssentialCount / essentialCount) * 100) / 100
-            : 1;
-
-        matchData = {
-          matched_count,
-          missing_count,
-          ratio,
-          missing_ingredients
-        };
-      }
-
+  // 3. Độ khớp nguyên liệu có sẵn (nguyên liệu is_optional không tính là thiếu)
+  if (ingredientIds) {
+    list = list.map((d) => {
+      const ings = d.dish_ingredients || [];
+      const required = ings.filter((di) => !di.is_optional);
+      const missing = required.filter((di) => !pantry.has(Number(di.ingredient?.id)));
+      const matched = ings.filter((di) => pantry.has(Number(di.ingredient?.id)));
+      const ratio = required.length > 0 ? (required.length - missing.length) / required.length : 1;
       return {
-        id: dish.id,
-        name: dish.name,
-        slug: dish.slug,
-        description: dish.description,
-        image_url: dish.image_url,
-        region: dish.region ? { id: dish.region.id, name: dish.region.name } : null,
-        category: typeof dish.category === 'object' ? dish.category : (dish.category ? { name: dish.category } : null),
-        cook_time_minutes: dish.cook_time_minutes,
-        difficulty: dish.difficulty,
-        calories: dish.calories,
-        avg_rating,
-        rating_count,
-        favorite_count,
-        is_favorite,
-        ...(matchData ? { match: matchData } : {}),
-        created_at: dish.created_at
+        ...d,
+        match: {
+          matched_count: matched.length,
+          missing_count: missing.length,
+          ratio: Math.round(ratio * 100) / 100,
+          missing_ingredients: missing.map((di) => ({ id: Number(di.ingredient?.id), name: di.ingredient?.name })),
+        },
       };
     });
-
-    // Lọc theo min_match_ratio nếu có
-    let finalDishes = enrichedDishes;
-    if (hasIngredientFilter && parsedMinMatchRatio !== undefined) {
-      finalDishes = finalDishes.filter((d) => d.match && d.match.ratio >= parsedMinMatchRatio);
-    }
-
-    // ── 6. Sắp xếp kết quả ───────────────────────────────────────────────────
-    let activeSort = sort;
-    if (!activeSort) {
-      if (keyword) {
-        activeSort = 'relevance';
-      } else if (hasIngredientFilter) {
-        activeSort = 'match';
-      } else {
-        activeSort = 'newest';
-      }
-    }
-
-    finalDishes.sort((a, b) => {
-      if (activeSort === 'match') {
-        const ratioDiff = (b.match?.ratio || 0) - (a.match?.ratio || 0);
-        if (ratioDiff !== 0) return ratioDiff;
-        return (b.match?.matched_count || 0) - (a.match?.matched_count || 0);
-      }
-      if (activeSort === 'rating') {
-        const rDiff = b.avg_rating - a.avg_rating;
-        if (rDiff !== 0) return rDiff;
-        return b.rating_count - a.rating_count;
-      }
-      if (activeSort === 'popular') {
-        const popA = a.rating_count + a.favorite_count;
-        const popB = b.rating_count + b.favorite_count;
-        return popB - popA;
-      }
-      if (activeSort === 'cook_time') {
-        return (a.cook_time_minutes ?? 999) - (b.cook_time_minutes ?? 999);
-      }
-      if (activeSort === 'calories') {
-        return (a.calories ?? 9999) - (b.calories ?? 9999);
-      }
-      if (activeSort === 'relevance') {
-        if (keyword) {
-          const aNameMatch = matchesSearchKeyword(a.name, keyword);
-          const bNameMatch = matchesSearchKeyword(b.name, keyword);
-          if (aNameMatch && !bNameMatch) return -1;
-          if (!aNameMatch && bNameMatch) return 1;
-        }
-        if (hasIngredientFilter) {
-          const ratioDiff = (b.match?.ratio || 0) - (a.match?.ratio || 0);
-          if (ratioDiff !== 0) return ratioDiff;
-        }
-        return new Date(b.created_at) - new Date(a.created_at);
-      }
-      // Mặc định: newest
-      return new Date(b.created_at) - new Date(a.created_at);
-    });
-
-    // ── 7. Phân trang ────────────────────────────────────────────────────────
-    const total = finalDishes.length;
-    const totalPages = Math.ceil(total / limitNum);
-    const paginatedData = finalDishes.slice((pageNum - 1) * limitNum, pageNum * limitNum);
-
-    // Chuẩn bị suggestions và suggest_ai
-    let suggestions = [];
-    if (total === 0) {
-      const { data: sqlSuggestions } = await supabaseAdmin
-        .from('dishes')
-        .select('name')
-        .eq('is_published', true)
-        .order('created_at', { ascending: false })
-        .limit(4);
-      suggestions = (sqlSuggestions || []).map((d) => d.name);
-    }
-
-    const suggestAi = Boolean(hasIngredientFilter && total === 0);
-
-    // Cache ngắn 30 giây cho các request lọc giống nhau (không cache khi có ingredient filter do cá nhân hóa)
-    if (!hasIngredientFilter) {
-      res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
-    } else {
-      res.set('Cache-Control', 'private, no-store');
-    }
-
-    return res.json({
-      success: true,
-      data: paginatedData,
-      meta: {
-        page: pageNum,
-        limit: limitNum,
-        total,
-        total_pages: totalPages,
-        suggestions,
-        suggest_ai: suggestAi
-      }
-    });
-  } catch (err) {
-    next(err);
+    if (minMatchRatio !== undefined) list = list.filter((d) => d.match.ratio >= minMatchRatio);
   }
+
+  // 4. Sắp xếp
+  const sort = q.sort || (keyword ? 'relevance' : ingredientIds ? 'match' : 'newest');
+  const byNewest = (a, b) => new Date(b.created_at) - new Date(a.created_at);
+  const comparators = {
+    relevance: (a, b) => (Number(matchesSearchKeyword(b.name, keyword)) - Number(matchesSearchKeyword(a.name, keyword))) || byNewest(a, b),
+    match: (a, b) => ((b.match?.ratio ?? 0) - (a.match?.ratio ?? 0)) || ((b.match?.matched_count ?? 0) - (a.match?.matched_count ?? 0)),
+    newest: byNewest,
+    rating: (a, b) => (Number(b.avg_rating) - Number(a.avg_rating)) || (b.rating_count - a.rating_count),
+    popular: (a, b) => (b.favorite_count + b.rating_count) - (a.favorite_count + a.rating_count),
+    cook_time: (a, b) => (a.cook_time_minutes ?? Infinity) - (b.cook_time_minutes ?? Infinity),
+    calories: (a, b) => (Number(a.calories ?? Infinity)) - (Number(b.calories ?? Infinity)),
+  };
+  list.sort(comparators[sort]);
+
+  // 5. Phân trang và dữ liệu cá nhân
+  const total = list.length;
+  const pageItems = list.slice(pg.from, pg.to + 1);
+  const favSet = await getUserFavoriteSet(req.user?.id, pageItems.map((d) => d.id));
+  const data = pageItems.map((d) => ({
+    ...toDishSummary(d, favSet.has(d.id)),
+    ...(d.match ? { match: d.match } : {}),
+  }));
+
+  // Không có kết quả: gợi ý mở rộng tìm kiếm; có nguyên liệu mà không khớp thì mời chuyển sang chatbot (luồng 2a, 4a)
+  let suggestions = [];
+  if (total === 0) {
+    suggestions = ['Bỏ bớt bộ lọc', 'Thử từ khóa ngắn hơn hoặc không dấu'];
+    if (ingredientIds) suggestions.push('Hỏi Chatbot AI với các nguyên liệu này');
+  }
+
+  if (keyword && pg.page === 1) {
+    logInteraction({ user_id: req.user?.id || null, event_type: 'search', context: { query: keyword, results: total } });
+  }
+
+  res.set('Cache-Control', req.user ? 'private, no-store' : 'public, max-age=30');
+  return sendOk(res, data, {
+    meta: pageMeta(pg, total, { suggestions, suggest_ai: Boolean(ingredientIds) && total === 0 }),
+  });
 }
 
 /**
- * 4.3.2 Xem chi tiết món ăn & công thức
- * GET /dishes/:idOrSlug hoặc /api/dishes/:idOrSlug
+ * 5.1.1 Món phổ biến / nổi bật – GET /dishes/popular?limit=&category=
+ * Xếp theo lượt xem, lượt yêu thích và điểm đánh giá.
  */
-export async function getDishDetail(req, res, next) {
-  try {
-    const { idOrSlug } = req.params;
-    if (!idOrSlug) {
-      return res.status(404).json({
-        success: false,
-        error: { code: 'DISH_NOT_FOUND', message: 'Món không tồn tại hoặc đã bị ẩn' }
-      });
-    }
+export async function getPopularDishes(req, res) {
+  const limit = req.query.limit === undefined ? 12 : Number(req.query.limit);
+  if (!Number.isInteger(limit) || limit < 1) throw new ApiError(400, 'INVALID_QUERY', 'Tham số limit không hợp lệ.');
 
-    const isUuid = UUID_REGEX.test(idOrSlug);
+  let query = supabaseAdmin
+    .from('dishes')
+    .select('id, name, slug, description, image_url, category, cook_time_minutes, difficulty, calories, avg_rating, rating_count, favorite_count')
+    .eq('is_published', true);
+  if (typeof req.query.category === 'string' && req.query.category.trim()) {
+    query = query.eq('category_normalized', normalizeText(req.query.category));
+  }
+  const [{ data: dishes, error }, { data: views }] = await Promise.all([
+    query,
+    supabaseAdmin.from('view_history').select('dish_id, view_count'),
+  ]);
+  if (error) throw error;
 
-    // ── 1. Tìm món theo id (uuid) hoặc slug ──────────────────────────────────
-    let query = supabaseAdmin
-      .from('dishes')
-      .select(`
-        id,
-        name,
-        slug,
-        description,
-        image_url,
-        category,
-        category_normalized,
-        cook_time_minutes,
-        difficulty,
-        servings,
-        est_cost,
-        calories,
-        protein_g,
-        carbs_g,
-        fat_g,
-        is_published,
-        created_at,
-        updated_at,
-        recipe_steps(step_order, content),
-        dish_tags(tag:tags(id, name)),
-        dish_ingredients(
-          quantity,
-          unit,
-          is_optional,
-          ingredient:ingredients(
-            id,
-            name,
-            allergen_group:allergen_groups(id, name)
-          )
-        )
-      `)
-      .eq('is_published', true);
+  const viewCount = new Map();
+  (views || []).forEach((v) => viewCount.set(v.dish_id, (viewCount.get(v.dish_id) || 0) + v.view_count));
+  const score = (d) => Math.log1p(viewCount.get(d.id) || 0) + 2 * Math.log1p(d.favorite_count || 0)
+    + Number(d.avg_rating || 0) * Math.log1p(d.rating_count || 0);
 
-    if (isUuid) {
-      query = query.eq('id', idOrSlug);
-    } else {
-      query = query.eq('slug', idOrSlug);
-    }
+  const top = (dishes || []).sort((a, b) => score(b) - score(a)).slice(0, Math.min(limit, 50));
+  const favSet = await getUserFavoriteSet(req.user?.id, top.map((d) => d.id));
+  return sendOk(res, top.map((d) => toDishSummary(d, favSet.has(d.id))));
+}
 
-    const { data: dish, error: dishErr } = await query.maybeSingle();
+/**
+ * 4.3.2 Xem chi tiết món ăn & công thức – GET /dishes/:idOrSlug
+ */
+export async function getDishDetail(req, res) {
+  const { idOrSlug } = req.params;
+  const column = UUID_REGEX.test(idOrSlug) ? 'id' : 'slug';
 
-    if (dishErr) throw dishErr;
+  const { data: dish, error } = await supabaseAdmin
+    .from('dishes')
+    .select(`id, name, slug, description, image_url, category, cook_time_minutes, difficulty, servings, est_cost,
+      calories, protein_g, carbs_g, fat_g, avg_rating, rating_count, favorite_count, created_at, updated_at,
+      recipe_steps(step_order, content),
+      dish_tags(tag:tags(id, name)),
+      dish_ingredients(quantity, unit, is_optional, ingredient:ingredients(id, name, allergen_group:allergen_groups(id, name)))`)
+    .eq('is_published', true)
+    .eq(column, idOrSlug)
+    .maybeSingle();
+  if (error) throw error;
+  if (!dish) return sendError(res, 404, 'DISH_NOT_FOUND', 'Món không tồn tại hoặc đã bị ẩn.');
 
-    if (!dish) {
-      return res.status(404).json({
-        success: false,
-        error: { code: 'DISH_NOT_FOUND', message: 'Món không tồn tại hoặc đã bị ẩn' }
-      });
-    }
+  const userId = req.user?.id;
+  const [ratingsRes, relatedRes, favRes] = await Promise.all([
+    supabaseAdmin.from('ratings').select('id, user_id, stars, comment').eq('dish_id', dish.id),
+    supabaseAdmin.from('dishes').select('id, name, slug, image_url')
+      .eq('is_published', true).eq('category', dish.category).neq('id', dish.id).limit(6),
+    userId
+      ? supabaseAdmin.from('favorites').select('dish_id').eq('user_id', userId).eq('dish_id', dish.id).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+  if (ratingsRes.error) throw ratingsRes.error;
 
-    const currentUserId = req.user?.id;
+  const distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  (ratingsRes.data || []).forEach((r) => { distribution[r.stars] += 1; });
+  const mine = userId ? (ratingsRes.data || []).find((r) => r.user_id === userId) : null;
 
-    // ── 2. Cập nhật view_history và interaction_logs nếu người dùng đã đăng nhập
-    if (currentUserId) {
-      (async () => {
-        try {
-          const { data: existingHistory } = await supabaseAdmin
-            .from('view_history')
-            .select('view_count')
-            .match({ user_id: currentUserId, dish_id: dish.id })
-            .maybeSingle();
+  // Ghi nhận lượt xem cho người dùng đã đăng nhập (ngoại lệ có chủ đích của GET, mục 2.7)
+  if (userId) recordView(userId, dish.id);
 
-          const newCount = (existingHistory?.view_count || 0) + 1;
-          await supabaseAdmin.from('view_history').upsert({
-            user_id: currentUserId,
-            dish_id: dish.id,
-            view_count: newCount,
-            last_viewed_at: new Date().toISOString()
-          });
-
-          await supabaseAdmin.from('interaction_logs').insert({
-            user_id: currentUserId,
-            dish_id: dish.id,
-            event_type: 'view',
-            context: { source: 'dish_detail_api' }
-          });
-        } catch (logErr) {
-          console.error('Lỗi ghi nhận lịch sử xem:', logErr.message);
-        }
-      })();
-    }
-
-    // ── 3. Lấy ratings và tính rating_summary, my_rating ─────────────────────
-    const { data: ratingsData, error: ratingsErr } = await supabaseAdmin
-      .from('ratings')
-      .select('id, user_id, stars, comment, created_at')
-      .eq('dish_id', dish.id);
-
-    if (ratingsErr) throw ratingsErr;
-
-    const ratingsList = ratingsData || [];
-    const ratingCount = ratingsList.length;
-    const ratingAvg =
-      ratingCount > 0
-        ? Math.round((ratingsList.reduce((acc, r) => acc + r.stars, 0) / ratingCount) * 10) / 10
-        : 0;
-
-    const distribution = { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 };
-    ratingsList.forEach((r) => {
-      const key = String(r.stars);
-      if (distribution[key] !== undefined) {
-        distribution[key] += 1;
-      }
-    });
-
-    const ratingSummary = {
-      average: ratingAvg,
-      count: ratingCount,
-      distribution
-    };
-
-    let myRating = null;
-    if (currentUserId) {
-      const userRating = ratingsList.find((r) => r.user_id === currentUserId);
-      if (userRating) {
-        myRating = {
-          id: userRating.id,
-          stars: userRating.stars,
-          comment: userRating.comment
-        };
-      }
-    }
-
-    // ── 4. Lấy số lượng yêu thích (favorite_count) và is_favorite ────────────
-    const { count: favoriteCount, error: favCountErr } = await supabaseAdmin
-      .from('favorites')
-      .select('user_id', { count: 'exact', head: true })
-      .eq('dish_id', dish.id);
-
-    if (favCountErr) throw favCountErr;
-
-    let isFavorite = false;
-    if (currentUserId) {
-      const { data: userFav } = await supabaseAdmin
-        .from('favorites')
-        .select('user_id')
-        .match({ user_id: currentUserId, dish_id: dish.id })
-        .maybeSingle();
-      isFavorite = Boolean(userFav);
-    }
-
-    // ── 5. Lấy danh sách món liên quan (cùng danh mục hoặc cùng vùng miền) ────
-    let relatedQuery = supabaseAdmin
-      .from('dishes')
-      .select('id, name, slug, image_url')
-      .eq('is_published', true)
-      .neq('id', dish.id)
-      .limit(6);
-
-    if (dish.category) {
-      relatedQuery = relatedQuery.eq('category', dish.category);
-    }
-
-    const { data: relatedDishesData } = await relatedQuery;
-
-    // ── 6. Chuẩn hóa cấu trúc dữ liệu trả về theo đặc tả ─────────────────────
-    const formattedIngredients = (dish.dish_ingredients || []).map((di) => ({
-      ingredient_id: di.ingredient?.id,
+  return sendOk(res, {
+    ...toDishSummary(dish, Boolean(favRes.data)),
+    servings: dish.servings,
+    est_cost: dish.est_cost != null ? Number(dish.est_cost) : null,
+    nutrition: {
+      calories: dish.calories != null ? Number(dish.calories) : null,
+      protein_g: dish.protein_g != null ? Number(dish.protein_g) : null,
+      carbs_g: dish.carbs_g != null ? Number(dish.carbs_g) : null,
+      fat_g: dish.fat_g != null ? Number(dish.fat_g) : null,
+    },
+    ingredients: (dish.dish_ingredients || []).map((di) => ({
+      ingredient_id: Number(di.ingredient?.id),
       name: di.ingredient?.name,
       quantity: Number(di.quantity),
       unit: di.unit,
       is_optional: di.is_optional,
-      allergen_group: di.ingredient?.allergen_group
-        ? {
-          id: di.ingredient.allergen_group.id,
-          name: di.ingredient.allergen_group.name
-        }
-        : null
-    }));
-
-    const rawSteps = (Array.isArray(dish.recipe_steps) && dish.recipe_steps.length > 0)
-      ? dish.recipe_steps.map(s => ({ order: s.step_order, content: s.content }))
-      : (Array.isArray(dish.steps) ? dish.steps : []);
-    const formattedSteps = rawSteps.map((step, idx) => ({
-      order: step.order ?? idx + 1,
-      content: step.content || step.instruction || '',
-      ...(step.duration_minutes !== undefined ? { duration_minutes: step.duration_minutes } : {})
-    }));
-
-    const formattedTags = (dish.dish_tags || [])
-      .map((dt) => dt.tag)
-      .filter(Boolean)
-      .map((t) => ({ id: t.id, name: t.name }));
-
-    const nutrition = {
-      calories: dish.calories != null ? Number(dish.calories) : null,
-      protein_g: dish.protein_g != null ? Number(dish.protein_g) : null,
-      carbs_g: dish.carbs_g != null ? Number(dish.carbs_g) : null,
-      fat_g: dish.fat_g != null ? Number(dish.fat_g) : null
-    };
-
-    const responseData = {
-      id: dish.id,
-      name: dish.name,
-      slug: dish.slug,
-      description: dish.description,
-      image_url: dish.image_url,
-      region: dish.region ? { id: dish.region.id, name: dish.region.name } : null,
-      category: typeof dish.category === 'object' ? dish.category : (dish.category ? { name: dish.category } : null),
-      cook_time_minutes: dish.cook_time_minutes,
-      difficulty: dish.difficulty,
-      calories: dish.calories,
-      avg_rating: ratingSummary.average,
-      rating_count: ratingSummary.count,
-      favorite_count: favoriteCount || 0,
-      is_favorite: isFavorite,
-      servings: dish.servings,
-      est_cost: dish.est_cost != null ? Number(dish.est_cost) : null,
-      nutrition,
-      ingredients: formattedIngredients,
-      steps: formattedSteps,
-      tags: formattedTags,
-      rating_summary: ratingSummary,
-      my_rating: myRating,
-      related_dishes: relatedDishesData || [],
-      created_at: dish.created_at,
-      updated_at: dish.updated_at
-    };
-
-    return res.json({
-      success: true,
-      data: responseData
-    });
-  } catch (err) {
-    next(err);
-  }
+      allergen_group: di.ingredient?.allergen_group || null,
+    })),
+    steps: (dish.recipe_steps || [])
+      .sort((a, b) => a.step_order - b.step_order)
+      .map((s) => ({ order: s.step_order, content: s.content })),
+    tags: (dish.dish_tags || []).map((dt) => dt.tag).filter(Boolean),
+    rating_summary: {
+      average: Number(dish.avg_rating) || 0,
+      count: dish.rating_count || 0,
+      distribution,
+    },
+    my_rating: mine ? { id: mine.id, stars: mine.stars, comment: mine.comment } : null,
+    related_dishes: relatedRes.data || [],
+    created_at: dish.created_at,
+    updated_at: dish.updated_at,
+  });
 }
 
+async function recordView(userId, dishId) {
+  try {
+    const { data: existing } = await supabaseAdmin
+      .from('view_history')
+      .select('view_count')
+      .eq('user_id', userId)
+      .eq('dish_id', dishId)
+      .maybeSingle();
+    await supabaseAdmin.from('view_history').upsert({
+      user_id: userId,
+      dish_id: dishId,
+      view_count: (existing?.view_count || 0) + 1,
+      last_viewed_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,dish_id' });
+    logInteraction({ user_id: userId, dish_id: dishId, event_type: 'view', context: { source: 'dish_detail' } });
+    recomputeUserVectorsInBackground(userId);
+  } catch (err) {
+    console.warn('[View] Không ghi được lịch sử xem:', err.message);
+  }
+}

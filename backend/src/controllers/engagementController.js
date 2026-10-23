@@ -1,675 +1,232 @@
 // src/controllers/engagementController.js
-// Xử lý Yêu thích, Đánh giá & Bình luận món ăn theo mục 4.8 của tài liệu đặc tả API
+// Yêu thích, đánh giá & bình luận – mục 4.8 của tài liệu API
+// avg_rating, rating_count, favorite_count trên bảng dishes được CSDL tự cập nhật ngay khi ratings/favorites thay đổi.
 
 import { supabaseAdmin } from '../config/supabase.js';
 import { containsBannedWords } from '../utils/bannedWords.js';
 import { invalidateRecommendationCache } from '../services/recommendationService.js';
+import { recomputeUserVectorsInBackground } from '../services/embeddingService.js';
+import { pageMeta, parseBool, parsePagination, sendError, sendOk } from '../utils/http.js';
 
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_COMMENT_LENGTH = 1000;
 
-/**
- * 4.8.1 Thêm vào yêu thích
- * PUT /dishes/:dishId/favorite hoặc /api/dishes/:dishId/favorite
- * Idempotent: gọi lại khi đã yêu thích vẫn trả 200
- */
-export async function addFavorite(req, res, next) {
-  try {
-    const userId = req.user.id;
-    const { dishId } = req.params;
-
-    if (!dishId || !UUID_REGEX.test(dishId)) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: 'DISH_NOT_FOUND',
-          message: 'Món ăn không tồn tại hoặc đã bị ẩn.',
-        },
-      });
-    }
-
-    // Kiểm tra món tồn tại và đang hiển thị
-    const { data: dish, error: dishErr } = await supabaseAdmin
-      .from('dishes')
-      .select('id, is_published')
-      .eq('id', dishId)
-      .maybeSingle();
-
-    if (dishErr) throw dishErr;
-
-    if (!dish || dish.is_published === false) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: 'DISH_NOT_FOUND',
-          message: 'Món ăn không tồn tại hoặc đã bị ẩn.',
-        },
-      });
-    }
-
-    // Thêm vào bảng favorites (upsert/idempotent)
-    const { error: insertErr } = await supabaseAdmin
-      .from('favorites')
-      .upsert(
-        { user_id: userId, dish_id: dishId },
-        { onConflict: 'user_id,dish_id', ignoreDuplicates: true }
-      );
-
-    if (insertErr) throw insertErr;
-
-    // Hủy cache gợi ý của user vì yêu thích đã thay đổi (Quy tắc 3 mục 4.7.1)
-    invalidateRecommendationCache(userId);
-
-    // Đếm lại tổng số lượt yêu thích của món
-    const { count, error: countErr } = await supabaseAdmin
-      .from('favorites')
-      .select('*', { count: 'exact', head: true })
-      .eq('dish_id', dishId);
-
-    if (countErr) throw countErr;
-
-    return res.status(200).json({
-      success: true,
-      data: {
-        dish_id: dishId,
-        is_favorite: true,
-        favorite_count: count || 0,
-      },
-    });
-  } catch (err) {
-    next(err);
-  }
+function dishNotFound(res) {
+  return sendError(res, 404, 'DISH_NOT_FOUND', 'Món không tồn tại hoặc đã bị ẩn.');
 }
 
-/**
- * 4.8.2 Bỏ yêu thích
- * DELETE /dishes/:dishId/favorite hoặc /api/dishes/:dishId/favorite
- */
-export async function removeFavorite(req, res, next) {
-  try {
-    const userId = req.user.id;
-    const { dishId } = req.params;
-
-    if (!dishId || !UUID_REGEX.test(dishId)) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: 'DISH_NOT_FOUND',
-          message: 'Món ăn không tồn tại hoặc đã bị ẩn.',
-        },
-      });
-    }
-
-    // Kiểm tra món tồn tại
-    const { data: dish, error: dishErr } = await supabaseAdmin
-      .from('dishes')
-      .select('id')
-      .eq('id', dishId)
-      .maybeSingle();
-
-    if (dishErr) throw dishErr;
-
-    if (!dish) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: 'DISH_NOT_FOUND',
-          message: 'Món ăn không tồn tại hoặc đã bị ẩn.',
-        },
-      });
-    }
-
-    // Xóa khỏi bảng favorites
-    const { error: deleteErr } = await supabaseAdmin
-      .from('favorites')
-      .delete()
-      .eq('user_id', userId)
-      .eq('dish_id', dishId);
-
-    if (deleteErr) throw deleteErr;
-
-    // Hủy cache gợi ý của user
-    invalidateRecommendationCache(userId);
-
-    // Đếm lại số lượt yêu thích
-    const { count, error: countErr } = await supabaseAdmin
-      .from('favorites')
-      .select('*', { count: 'exact', head: true })
-      .eq('dish_id', dishId);
-
-    if (countErr) throw countErr;
-
-    return res.status(200).json({
-      success: true,
-      data: {
-        dish_id: dishId,
-        is_favorite: false,
-        favorite_count: count || 0,
-      },
-    });
-  } catch (err) {
-    next(err);
-  }
+async function findPublishedDish(dishId) {
+  const { data, error } = await supabaseAdmin
+    .from('dishes')
+    .select('id, is_published, avg_rating, rating_count, favorite_count')
+    .eq('id', dishId)
+    .maybeSingle();
+  if (error) throw error;
+  return data && data.is_published ? data : null;
 }
 
-/**
- * 4.8.3 Danh sách đánh giá & bình luận của món
- * GET /dishes/:dishId/ratings hoặc /api/dishes/:dishId/ratings
- */
-export async function getDishRatings(req, res, next) {
-  try {
-    const { dishId } = req.params;
-    const {
-      sort = 'newest',
-      has_comment,
-      page = 1,
-      limit = 20,
-    } = req.query;
+async function readDishCounters(dishId) {
+  const { data, error } = await supabaseAdmin
+    .from('dishes')
+    .select('avg_rating, rating_count, favorite_count')
+    .eq('id', dishId)
+    .single();
+  if (error) throw error;
+  return data;
+}
 
-    if (!dishId || !UUID_REGEX.test(dishId)) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: 'DISH_NOT_FOUND',
-          message: 'Món ăn không tồn tại.',
-        },
-      });
+function onPreferenceChanged(userId) {
+  invalidateRecommendationCache(userId);
+  recomputeUserVectorsInBackground(userId);
+}
+
+/** Kiểm tra stars (bắt buộc khi tạo) và comment theo quy tắc 4.8.4. Trả về lỗi để gửi hoặc dữ liệu đã làm sạch. */
+async function validateRatingInput({ stars: rawStars, comment }, { requireStars }) {
+  const out = {};
+  const stars = typeof rawStars === 'string' && rawStars.trim() !== '' ? Number(rawStars) : rawStars;
+  if (stars !== undefined || requireStars) {
+    if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
+      return { error: [422, 'VALIDATION_ERROR', 'Số sao phải là số nguyên từ 1 đến 5.', [
+        { field: 'stars', code: 'OUT_OF_RANGE', message: 'Số sao từ 1 đến 5.' },
+      ]] };
     }
-
-    // Kiểm tra món tồn tại
-    const { data: dish, error: dishErr } = await supabaseAdmin
-      .from('dishes')
-      .select('id')
-      .eq('id', dishId)
-      .maybeSingle();
-
-    if (dishErr) throw dishErr;
-    if (!dish) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: 'DISH_NOT_FOUND',
-          message: 'Món ăn không tồn tại.',
-        },
-      });
-    }
-
-    const currentPage = Math.max(1, parseInt(page, 10) || 1);
-    const pageLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
-
-    // Lấy toàn bộ ratings của món để tính thống kê summary { average, count, distribution }
-    const { data: allRatings, error: allRatingsErr } = await supabaseAdmin
-      .from('ratings')
-      .select('stars')
-      .eq('dish_id', dishId);
-
-    if (allRatingsErr) throw allRatingsErr;
-
-    const totalRatingsCount = allRatings ? allRatings.length : 0;
-    const distribution = { '5': 0, '4': 0, '3': 0, '2': 0, '1': 0 };
-    let starsSum = 0;
-
-    (allRatings || []).forEach((r) => {
-      starsSum += r.stars;
-      const sKey = String(r.stars);
-      if (distribution[sKey] !== undefined) {
-        distribution[sKey] += 1;
-      }
-    });
-
-    const averageRating = totalRatingsCount > 0
-      ? Math.round((starsSum / totalRatingsCount) * 10) / 10
-      : 0;
-
-    const summary = {
-      average: averageRating,
-      count: totalRatingsCount,
-      distribution,
-    };
-
-    // Truy vấn danh sách đánh giá phân trang
-    let query = supabaseAdmin
-      .from('ratings')
-      .select(`
-        id,
-        stars,
-        comment,
-        created_at,
-        updated_at,
-        users (
-          id,
-          display_name
-        )
-      `, { count: 'exact' })
-      .eq('dish_id', dishId);
-
-    // Bộ lọc có bình luận
-    const onlyWithComment = has_comment === true || has_comment === 'true' || has_comment === '1';
-    if (onlyWithComment) {
-      query = query.not('comment', 'is', null).neq('comment', '');
-    }
-
-    // Sắp xếp
-    if (sort === 'highest') {
-      query = query.order('stars', { ascending: false }).order('created_at', { ascending: false });
-    } else if (sort === 'lowest') {
-      query = query.order('stars', { ascending: true }).order('created_at', { ascending: false });
+    out.stars = stars;
+  }
+  if (comment !== undefined) {
+    if (comment === null) {
+      out.comment = null;
     } else {
-      // Mặc định: newest
-      query = query.order('created_at', { ascending: false });
+      const trimmed = typeof comment === 'string' ? comment.trim() : '';
+      if (!trimmed) return { error: [422, 'CONTENT_REJECTED', 'Bình luận không được để trống.'] };
+      if (trimmed.length > MAX_COMMENT_LENGTH) return { error: [422, 'CONTENT_REJECTED', `Bình luận tối đa ${MAX_COMMENT_LENGTH} ký tự.`] };
+      if (await containsBannedWords(trimmed)) return { error: [422, 'CONTENT_REJECTED', 'Bình luận chứa từ ngữ không phù hợp.'] };
+      out.comment = trimmed;
     }
-
-    const fromIndex = (currentPage - 1) * pageLimit;
-    const toIndex = fromIndex + pageLimit - 1;
-    query = query.range(fromIndex, toIndex);
-
-    const { data: itemsData, count: filteredCount, error: itemsErr } = await query;
-    if (itemsErr) throw itemsErr;
-
-    const items = (itemsData || []).map((item) => {
-      const userName = item.users?.display_name || 'Người dùng Culina';
-      return {
-        id: item.id,
-        stars: item.stars,
-        comment: item.comment,
-        user: {
-          id: item.users?.id || null,
-          name: userName,
-          avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=0D9488&color=fff`,
-        },
-        created_at: item.created_at,
-        updated_at: item.updated_at,
-      };
-    });
-
-    const total = filteredCount !== null ? filteredCount : 0;
-    const totalPages = Math.ceil(total / pageLimit) || 1;
-
-    return res.status(200).json({
-      success: true,
-      data: {
-        summary,
-        items,
-      },
-      meta: {
-        page: currentPage,
-        limit: pageLimit,
-        total,
-        total_pages: totalPages,
-      },
-    });
-  } catch (err) {
-    next(err);
   }
+  return { value: out };
 }
 
 /**
- * 4.8.4 Đánh giá & bình luận món
- * POST /dishes/:dishId/ratings hoặc /api/dishes/:dishId/ratings
+ * 4.8.1 Thêm vào yêu thích – PUT /dishes/:dishId/favorite (idempotent)
  */
-export async function createDishRating(req, res, next) {
-  try {
-    const userId = req.user.id;
-    const { dishId } = req.params;
-    const { stars, comment } = req.body || {};
+export async function addFavorite(req, res) {
+  const { dishId } = req.params;
+  if (!(await findPublishedDish(dishId))) return dishNotFound(res);
 
-    if (!dishId || !UUID_REGEX.test(dishId)) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: 'DISH_NOT_FOUND',
-          message: 'Món ăn không tồn tại.',
-        },
-      });
-    }
+  const { error } = await supabaseAdmin
+    .from('favorites')
+    .upsert({ user_id: req.user.id, dish_id: dishId }, { onConflict: 'user_id,dish_id', ignoreDuplicates: true });
+  if (error) throw error;
 
-    // 1. Kiểm tra số sao hợp lệ (Quy tắc 1: số nguyên 1–5, bắt buộc)
-    const numStars = Number(stars);
-    if (!Number.isInteger(numStars) || numStars < 1 || numStars > 5) {
-      return res.status(422).json({
-        success: false,
-        error: {
-          code: 'CONTENT_REJECTED',
-          message: 'Số sao đánh giá phải là số nguyên từ 1 đến 5.',
-        },
-      });
-    }
-
-    // 2. Kiểm tra bình luận (Quy tắc 2: không bắt buộc; nếu có thì không rỗng sau trim, tối đa 1000 ký tự và không chứa từ cấm)
-    let processedComment = null;
-    if (comment !== undefined && comment !== null) {
-      if (typeof comment !== 'string') {
-        return res.status(422).json({
-          success: false,
-          error: {
-            code: 'CONTENT_REJECTED',
-            message: 'Nội dung bình luận phải là dạng chuỗi.',
-          },
-        });
-      }
-      const trimmed = comment.trim();
-      if (trimmed.length === 0) {
-        return res.status(422).json({
-          success: false,
-          error: {
-            code: 'CONTENT_REJECTED',
-            message: 'Bình luận không được để trống khi nhập.',
-          },
-        });
-      }
-      if (trimmed.length > 1000) {
-        return res.status(422).json({
-          success: false,
-          error: {
-            code: 'CONTENT_REJECTED',
-            message: 'Bình luận không được vượt quá 1000 ký tự.',
-          },
-        });
-      }
-      if (containsBannedWords(trimmed)) {
-        return res.status(422).json({
-          success: false,
-          error: {
-            code: 'CONTENT_REJECTED',
-            message: 'Bình luận chứa từ ngữ không phù hợp với tiêu chuẩn cộng đồng.',
-          },
-        });
-      }
-      processedComment = trimmed;
-    }
-
-    // 3. Kiểm tra món ăn tồn tại
-    const { data: dish, error: dishErr } = await supabaseAdmin
-      .from('dishes')
-      .select('id')
-      .eq('id', dishId)
-      .maybeSingle();
-
-    if (dishErr) throw dishErr;
-    if (!dish) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: 'DISH_NOT_FOUND',
-          message: 'Món ăn không tồn tại.',
-        },
-      });
-    }
-
-    // 4. Kiểm tra người dùng đã đánh giá món này chưa (Quy tắc 3: mỗi người chỉ đánh giá 1 lần cho mỗi món)
-    const { data: existingRating, error: existErr } = await supabaseAdmin
-      .from('ratings')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('dish_id', dishId)
-      .maybeSingle();
-
-    if (existErr) throw existErr;
-
-    if (existingRating) {
-      return res.status(409).json({
-        success: false,
-        error: {
-          code: 'RATING_ALREADY_EXISTS',
-          message: 'Bạn đã đánh giá món ăn này rồi. Vui lòng chỉnh sửa đánh giá hiện tại nếu muốn thay đổi.',
-        },
-      });
-    }
-
-    // 5. Thêm mới đánh giá
-    const { data: newRating, error: insertErr } = await supabaseAdmin
-      .from('ratings')
-      .insert({
-        user_id: userId,
-        dish_id: dishId,
-        stars: numStars,
-        comment: processedComment,
-      })
-      .select('id, dish_id, stars, comment, created_at')
-      .single();
-
-    if (insertErr) throw insertErr;
-
-    // Hủy cache gợi ý của user
-    invalidateRecommendationCache(userId);
-
-    // 6. Tính lại rating_summary của món
-    const { data: allRatings, error: calcErr } = await supabaseAdmin
-      .from('ratings')
-      .select('stars')
-      .eq('dish_id', dishId);
-
-    if (calcErr) throw calcErr;
-
-    const totalCount = allRatings ? allRatings.length : 0;
-    const sum = (allRatings || []).reduce((acc, r) => acc + r.stars, 0);
-    const avg = totalCount > 0 ? Math.round((sum / totalCount) * 10) / 10 : numStars;
-
-    return res.status(201).json({
-      success: true,
-      data: {
-        rating: {
-          id: newRating.id,
-          dish_id: newRating.dish_id,
-          stars: newRating.stars,
-          comment: newRating.comment,
-          created_at: newRating.created_at,
-        },
-        rating_summary: {
-          average: avg,
-          count: totalCount,
-        },
-      },
-    });
-  } catch (err) {
-    next(err);
-  }
+  onPreferenceChanged(req.user.id);
+  const counters = await readDishCounters(dishId);
+  return sendOk(res, { dish_id: dishId, is_favorite: true, favorite_count: counters.favorite_count });
 }
 
 /**
- * 4.8.5 Sửa đánh giá của mình
- * PATCH /ratings/:ratingId hoặc /api/ratings/:ratingId
+ * 4.8.2 Bỏ yêu thích – DELETE /dishes/:dishId/favorite
  */
-export async function updateRating(req, res, next) {
-  try {
-    const userId = req.user.id;
-    const { ratingId } = req.params;
-    const parsedRatingId = parseInt(ratingId, 10);
+export async function removeFavorite(req, res) {
+  const { dishId } = req.params;
+  const { error } = await supabaseAdmin.from('favorites').delete().eq('user_id', req.user.id).eq('dish_id', dishId);
+  if (error) throw error;
 
-    if (isNaN(parsedRatingId) || parsedRatingId <= 0) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: 'RATING_NOT_FOUND',
-          message: 'Đánh giá không tồn tại.',
-        },
-      });
-    }
+  const { data: dish } = await supabaseAdmin.from('dishes').select('favorite_count').eq('id', dishId).maybeSingle();
+  if (!dish) return dishNotFound(res);
 
-    // 1. Kiểm tra tồn tại và quyền sở hữu (Quy tắc: Chủ đánh giá)
-    const { data: rating, error: fetchErr } = await supabaseAdmin
-      .from('ratings')
-      .select('id, user_id, dish_id, stars, comment')
-      .eq('id', parsedRatingId)
-      .maybeSingle();
-
-    if (fetchErr) throw fetchErr;
-
-    if (!rating) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: 'RATING_NOT_FOUND',
-          message: 'Đánh giá không tồn tại.',
-        },
-      });
-    }
-
-    if (rating.user_id !== userId) {
-      return res.status(403).json({
-        success: false,
-        error: {
-          code: 'NOT_OWNER',
-          message: 'Không phải đánh giá của bạn. Bạn chỉ có thể sửa đánh giá của chính mình.',
-        },
-      });
-    }
-
-    const { stars, comment } = req.body || {};
-    const updates = {
-      updated_at: new Date().toISOString(),
-    };
-
-    // 2. Validate stars nếu có cập nhật
-    if (stars !== undefined) {
-      const numStars = Number(stars);
-      if (!Number.isInteger(numStars) || numStars < 1 || numStars > 5) {
-        return res.status(422).json({
-          success: false,
-          error: {
-            code: 'CONTENT_REJECTED',
-            message: 'Số sao đánh giá phải là số nguyên từ 1 đến 5.',
-          },
-        });
-      }
-      updates.stars = numStars;
-    }
-
-    // 3. Validate comment nếu có cập nhật
-    if (comment !== undefined) {
-      if (comment === null) {
-        updates.comment = null;
-      } else {
-        if (typeof comment !== 'string') {
-          return res.status(422).json({
-            success: false,
-            error: {
-              code: 'CONTENT_REJECTED',
-              message: 'Nội dung bình luận phải là dạng chuỗi.',
-            },
-          });
-        }
-        const trimmed = comment.trim();
-        if (trimmed.length === 0) {
-          return res.status(422).json({
-            success: false,
-            error: {
-              code: 'CONTENT_REJECTED',
-              message: 'Nội dung bình luận không được để trống khi gửi.',
-            },
-          });
-        }
-        if (trimmed.length > 1000) {
-          return res.status(422).json({
-            success: false,
-            error: {
-              code: 'CONTENT_REJECTED',
-              message: 'Bình luận không được vượt quá 1000 ký tự.',
-            },
-          });
-        }
-        if (containsBannedWords(trimmed)) {
-          return res.status(422).json({
-            success: false,
-            error: {
-              code: 'CONTENT_REJECTED',
-              message: 'Bình luận chứa từ ngữ không phù hợp với tiêu chuẩn cộng đồng.',
-            },
-          });
-        }
-        updates.comment = trimmed;
-      }
-    }
-
-    // 4. Cập nhật vào DB
-    const { data: updated, error: updateErr } = await supabaseAdmin
-      .from('ratings')
-      .update(updates)
-      .eq('id', parsedRatingId)
-      .select('id, stars, comment, updated_at')
-      .single();
-
-    if (updateErr) throw updateErr;
-
-    // Hủy cache gợi ý của user
-    invalidateRecommendationCache(userId);
-
-    return res.status(200).json({
-      success: true,
-      data: {
-        id: updated.id,
-        stars: updated.stars,
-        comment: updated.comment,
-        updated_at: updated.updated_at,
-      },
-    });
-  } catch (err) {
-    next(err);
-  }
+  onPreferenceChanged(req.user.id);
+  return sendOk(res, { dish_id: dishId, is_favorite: false, favorite_count: dish.favorite_count });
 }
 
 /**
- * 4.8.6 Xóa đánh giá của mình
- * DELETE /ratings/:ratingId hoặc /api/ratings/:ratingId
+ * 4.8.3 Danh sách đánh giá & bình luận của món – GET /dishes/:dishId/ratings
  */
-export async function deleteRating(req, res, next) {
-  try {
-    const userId = req.user.id;
-    const { ratingId } = req.params;
-    const parsedRatingId = parseInt(ratingId, 10);
-
-    if (isNaN(parsedRatingId) || parsedRatingId <= 0) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: 'RATING_NOT_FOUND',
-          message: 'Đánh giá không tồn tại.',
-        },
-      });
-    }
-
-    // 1. Kiểm tra tồn tại và quyền sở hữu (Quy tắc: Chủ đánh giá)
-    const { data: rating, error: fetchErr } = await supabaseAdmin
-      .from('ratings')
-      .select('id, user_id, dish_id')
-      .eq('id', parsedRatingId)
-      .maybeSingle();
-
-    if (fetchErr) throw fetchErr;
-
-    if (!rating) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: 'RATING_NOT_FOUND',
-          message: 'Đánh giá không tồn tại.',
-        },
-      });
-    }
-
-    if (rating.user_id !== userId) {
-      return res.status(403).json({
-        success: false,
-        error: {
-          code: 'NOT_OWNER',
-          message: 'Không phải đánh giá của bạn. Bạn không có quyền xóa đánh giá của người khác.',
-        },
-      });
-    }
-
-    // 2. Xóa khỏi DB
-    const { error: delErr } = await supabaseAdmin
-      .from('ratings')
-      .delete()
-      .eq('id', parsedRatingId);
-
-    if (delErr) throw delErr;
-
-    // Hủy cache gợi ý của user
-    invalidateRecommendationCache(userId);
-
-    // Trả về 204 No Content
-    return res.status(204).send();
-  } catch (err) {
-    next(err);
+export async function getDishRatings(req, res) {
+  const { dishId } = req.params;
+  const sort = req.query.sort ?? 'newest';
+  if (!['newest', 'highest', 'lowest'].includes(sort)) {
+    return sendError(res, 400, 'INVALID_QUERY', 'sort phải là newest, highest hoặc lowest.');
   }
+  const pg = parsePagination(req.query);
+
+  const dish = await findPublishedDish(dishId);
+  if (!dish) return sendError(res, 404, 'DISH_NOT_FOUND', 'Món không tồn tại.');
+
+  const { data: allStars, error: starsErr } = await supabaseAdmin.from('ratings').select('stars').eq('dish_id', dishId);
+  if (starsErr) throw starsErr;
+  const distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  (allStars || []).forEach((r) => { distribution[r.stars] += 1; });
+
+  let query = supabaseAdmin
+    .from('ratings')
+    .select('id, stars, comment, created_at, updated_at, user:users(id, display_name, avatar_url)', { count: 'exact' })
+    .eq('dish_id', dishId);
+  if (parseBool(req.query.has_comment) === true) query = query.not('comment', 'is', null);
+  if (sort === 'highest') query = query.order('stars', { ascending: false });
+  if (sort === 'lowest') query = query.order('stars', { ascending: true });
+  query = query.order('created_at', { ascending: false }).range(pg.from, pg.to);
+
+  const { data, count, error } = await query;
+  if (error) throw error;
+
+  return sendOk(res, {
+    summary: { average: Number(dish.avg_rating) || 0, count: dish.rating_count, distribution },
+    items: (data || []).map((r) => ({
+      id: r.id,
+      stars: r.stars,
+      comment: r.comment,
+      // Đánh giá của tài khoản đã xóa được ẩn danh hóa (user_id = NULL)
+      user: r.user
+        ? { id: r.user.id, display_name: r.user.display_name, avatar_url: r.user.avatar_url }
+        : { id: null, display_name: 'Người dùng đã xóa', avatar_url: null },
+      created_at: r.created_at,
+      updated_at: r.updated_at,
+    })),
+  }, { meta: pageMeta(pg, count) });
+}
+
+/**
+ * 4.8.4 Đánh giá & bình luận món – POST /dishes/:dishId/ratings
+ */
+export async function createDishRating(req, res) {
+  const { dishId } = req.params;
+  const checked = await validateRatingInput(req.body || {}, { requireStars: true });
+  if (checked.error) return sendError(res, ...checked.error);
+  if (!(await findPublishedDish(dishId))) return dishNotFound(res);
+
+  const { data: rating, error } = await supabaseAdmin
+    .from('ratings')
+    .insert({ user_id: req.user.id, dish_id: dishId, stars: checked.value.stars, comment: checked.value.comment ?? null })
+    .select('id, dish_id, stars, comment, created_at')
+    .single();
+  if (error) {
+    if (error.code === '23505') {
+      return sendError(res, 409, 'RATING_ALREADY_EXISTS', 'Bạn đã đánh giá món này. Hãy sửa đánh giá hiện có nếu muốn thay đổi.');
+    }
+    throw error;
+  }
+
+  onPreferenceChanged(req.user.id);
+  const counters = await readDishCounters(dishId);
+  return sendOk(res, {
+    rating,
+    rating_summary: { average: Number(counters.avg_rating) || 0, count: counters.rating_count },
+  }, { status: 201 });
+}
+
+async function findOwnRating(req, res) {
+  const ratingId = Number(req.params.ratingId);
+  if (!Number.isInteger(ratingId) || ratingId <= 0) {
+    sendError(res, 404, 'RATING_NOT_FOUND', 'Đánh giá không tồn tại.');
+    return null;
+  }
+  const { data, error } = await supabaseAdmin.from('ratings').select('id, user_id').eq('id', ratingId).maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    sendError(res, 404, 'RATING_NOT_FOUND', 'Đánh giá không tồn tại.');
+    return null;
+  }
+  if (data.user_id !== req.user.id) {
+    sendError(res, 403, 'NOT_OWNER', 'Bạn chỉ có thể thao tác trên đánh giá của chính mình.');
+    return null;
+  }
+  return data;
+}
+
+/**
+ * 4.8.5 Sửa đánh giá của mình – PATCH /ratings/:ratingId
+ */
+export async function updateRating(req, res) {
+  const rating = await findOwnRating(req, res);
+  if (!rating) return undefined;
+
+  const checked = await validateRatingInput(req.body || {}, { requireStars: false });
+  if (checked.error) return sendError(res, ...checked.error);
+  if (Object.keys(checked.value).length === 0) {
+    return sendError(res, 422, 'VALIDATION_ERROR', 'Cần gửi stars hoặc comment để cập nhật.');
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('ratings')
+    .update(checked.value)
+    .eq('id', rating.id)
+    .select('id, stars, comment, updated_at')
+    .single();
+  if (error) throw error;
+
+  onPreferenceChanged(req.user.id);
+  return sendOk(res, data);
+}
+
+/**
+ * 4.8.6 Xóa đánh giá của mình – DELETE /ratings/:ratingId
+ */
+export async function deleteRating(req, res) {
+  const rating = await findOwnRating(req, res);
+  if (!rating) return undefined;
+
+  const { error } = await supabaseAdmin.from('ratings').delete().eq('id', rating.id);
+  if (error) throw error;
+
+  onPreferenceChanged(req.user.id);
+  return res.status(204).send();
 }
