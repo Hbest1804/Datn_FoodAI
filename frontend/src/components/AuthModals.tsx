@@ -41,7 +41,6 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -86,6 +85,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
         id: user.id,
         name: user.display_name || user.email.split('@')[0],
         email: user.email,
+        ...(user.avatar_url ? { avatar: user.avatar_url, avatar_url: user.avatar_url } : {}),
         role: user.role,
         roleLabel: user.role === 'admin' ? 'Super Admin' : 'Đầu bếp tại gia',
         isPro: true,
@@ -109,7 +109,6 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
         email: email.trim(),
         password,
         displayName: name.trim(),
-        phone: phone.trim(),
       });
       const user = data.user;
       onLoginSuccess({

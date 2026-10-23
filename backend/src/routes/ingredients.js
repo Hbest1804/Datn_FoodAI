@@ -1,8 +1,12 @@
-import express from 'express';
+// src/routes/ingredients.js
+// 4.2.2 Tìm nguyên liệu (gợi ý khi gõ)
+
+import { Router } from 'express';
 import { getIngredients } from '../controllers/ingredientsController.js';
+import { publicReadLimiter } from '../middlewares/rateLimiter.js';
 
-const router = express.Router();
+const router = Router();
 
-router.get('/', getIngredients);
+router.get('/', publicReadLimiter, getIngredients);
 
 export default router;

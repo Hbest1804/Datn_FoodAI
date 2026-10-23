@@ -1,270 +1,128 @@
 // src/controllers/authController.js
-// Xử lý HTTP request/response cho các API xác thực
+// API xác thực – mục 4.1 của tài liệu API
 
 import {
-  registerUser,
   loginUser,
   logoutUser,
-  getMe,
   refreshSession,
+  registerUser,
   requestPasswordReset as requestPasswordResetService,
-  verifyResetToken,
   resetPassword as resetPasswordService,
+  verifyResetToken,
 } from '../services/authService.js';
-import { env } from '../config/appConfig.js';
-import { isValidEmail, isStrongPassword } from '../utils/validators.js';
+import { isStrongPassword, isValidEmail } from '../utils/validators.js';
+import { sendError, sendOk } from '../utils/http.js';
 
-// Thời gian hiệu lực của reset token (phút) — đồng bộ với config Supabase Auth
-const RESET_TOKEN_EXPIRES_MINUTES = 15;
+const WEAK_PASSWORD_MSG = 'Mật khẩu tối thiểu 8 ký tự, gồm chữ hoa, chữ thường và chữ số.';
 
-// ── POST /api/auth/register ───────────────────────────────────────────────────
+/** Kiểm tra mật khẩu mới + xác nhận; trả về danh sách lỗi theo trường. */
+export function passwordErrors(password, confirm, field = 'password') {
+  const details = [];
+  if (!isStrongPassword(password)) details.push({ field, code: 'WEAK_PASSWORD', message: WEAK_PASSWORD_MSG });
+  if (password !== confirm) details.push({ field: 'confirm_password', code: 'PASSWORD_MISMATCH', message: 'Mật khẩu xác nhận không khớp.' });
+  return details;
+}
+
+function bearerToken(req) {
+  const header = req.headers.authorization;
+  return header?.startsWith('Bearer ') ? header.slice(7) : null;
+}
+
+/**
+ * 4.1.1 Đăng ký – POST /auth/register
+ */
 export async function register(req, res) {
-  const { email, password, displayName, phone } = req.body;
+  const body = req.body || {};
+  const email = typeof body.email === 'string' ? body.email.trim() : '';
+  const displayName = String(body.display_name ?? body.displayName ?? '').trim();
+  // Giao diện cũ không gửi confirm_password thì coi như trùng mật khẩu
+  const confirm = body.confirm_password ?? body.password;
 
-  // Validate đầu vào
-  if (!email || !password) {
-    return res.status(400).json({
-      success: false,
-      error: { code: 'VALIDATION_ERROR', message: 'Email và mật khẩu là bắt buộc.' },
-    });
-  }
+  const details = [];
+  if (!displayName) details.push({ field: 'display_name', code: 'REQUIRED', message: 'Vui lòng nhập tên hiển thị.' });
+  else if (displayName.length > 100) details.push({ field: 'display_name', code: 'TOO_LONG', message: 'Tên hiển thị tối đa 100 ký tự.' });
+  if (!isValidEmail(email)) details.push({ field: 'email', code: 'INVALID_EMAIL', message: 'Email không đúng định dạng.' });
+  details.push(...passwordErrors(body.password, confirm));
+  if (details.length > 0) return sendError(res, 422, 'VALIDATION_ERROR', 'Dữ liệu không hợp lệ.', details);
 
-  if (!isValidEmail(email)) {
-    return res.status(400).json({
-      success: false,
-      error: { code: 'VALIDATION_ERROR', message: 'Email không đúng định dạng.' },
-    });
-  }
-
-  // Thống nhất quy tắc mật khẩu mạnh dùng chung isStrongPassword
-  if (!isStrongPassword(password)) {
-    return res.status(422).json({
-      success: false,
-      error: {
-        code: 'WEAK_PASSWORD',
-        message: 'Mật khẩu phải có ít nhất 8 ký tự, bao gồm ít nhất 1 chữ hoa, 1 chữ thường và 1 chữ số.',
-        details: [{ field: 'password', code: 'WEAK_PASSWORD', message: 'Mật khẩu phải có ít nhất 8 ký tự, gồm ít nhất 1 chữ hoa, 1 chữ thường và 1 chữ số.' }],
-      },
-    });
-  }
-
-  try {
-    const result = await registerUser({ email, password, displayName, phone });
-
-    return res.status(201).json({
-      success: true,
-      message: 'Đăng ký thành công!',
-      user: result.user,
-      // Trả token nếu Supabase auto-confirm (không cần verify email)
-      accessToken: result.session?.access_token ?? null,
-      refreshToken: result.session?.refresh_token ?? null,
-    });
-  } catch (err) {
-    if (err.message === 'EMAIL_EXISTS') {
-      return res.status(409).json({
-        success: false,
-        error: { code: 'EMAIL_EXISTS', message: 'Email này đã được đăng ký. Vui lòng đăng nhập hoặc dùng email khác.' },
-      });
-    }
-    console.error('Register error:', err);
-    return res.status(500).json({
-      success: false,
-      error: { code: 'INTERNAL_ERROR', message: 'Đăng ký thất bại. Vui lòng thử lại sau.' },
-    });
-  }
+  const { user, session } = await registerUser({ email, password: body.password, displayName });
+  return sendOk(res, {
+    ...user,
+    // Kèm phiên đăng nhập để giao diện vào hệ thống ngay sau khi đăng ký
+    ...(session ? { access_token: session.access_token, refresh_token: session.refresh_token, token_type: 'bearer', expires_in: session.expires_in } : {}),
+  }, { status: 201 });
 }
 
-// ── POST /api/auth/login ──────────────────────────────────────────────────────
+/**
+ * 4.1.2 Đăng nhập – POST /auth/login
+ */
 export async function login(req, res) {
-  const { email, password } = req.body;
-
-  if (!email || !password) {
-    return res.status(400).json({
-      success: false,
-      error: { code: 'VALIDATION_ERROR', message: 'Email và mật khẩu là bắt buộc.' },
-    });
+  const { email, password } = req.body || {};
+  if (typeof email !== 'string' || !email.trim() || typeof password !== 'string' || !password) {
+    return sendError(res, 422, 'VALIDATION_ERROR', 'Vui lòng nhập email và mật khẩu.', [
+      ...(!email ? [{ field: 'email', code: 'REQUIRED', message: 'Vui lòng nhập email.' }] : []),
+      ...(!password ? [{ field: 'password', code: 'REQUIRED', message: 'Vui lòng nhập mật khẩu.' }] : []),
+    ]);
   }
-
-  try {
-    const result = await loginUser({ email, password });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Đăng nhập thành công!',
-      user: result.user,
-      accessToken: result.accessToken,
-      refreshToken: result.refreshToken,
-      expiresAt: result.expiresAt,
-    });
-  } catch (err) {
-    if (err.message === 'INVALID_CREDENTIALS') {
-      return res.status(401).json({
-        success: false,
-        error: { code: 'INVALID_CREDENTIALS', message: 'Email hoặc mật khẩu không chính xác.' },
-      });
-    }
-    if (err.message === 'ACCOUNT_LOCKED') {
-      return res.status(403).json({
-        success: false,
-        error: { code: 'ACCOUNT_LOCKED', message: 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.' },
-      });
-    }
-    console.error('Login error:', err);
-    return res.status(500).json({
-      success: false,
-      error: { code: 'INTERNAL_ERROR', message: 'Đăng nhập thất bại. Vui lòng thử lại sau.' },
-    });
-  }
+  return sendOk(res, await loginUser({ email, password }));
 }
 
-// ── POST /api/auth/logout ─────────────────────────────────────────────────────
+/**
+ * 4.1.3 Đăng xuất – POST /auth/logout → 204
+ */
 export async function logout(req, res) {
-  const authHeader = req.headers.authorization;
-  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
-
-  try {
-    await logoutUser(token);
-    return res.status(200).json({ message: 'Đăng xuất thành công.' });
-  } catch (err) {
-    console.error('Logout error:', err);
-    // Vẫn trả 200 — client nên xóa token dù server có lỗi
-    return res.status(200).json({ message: 'Đã đăng xuất.' });
-  }
+  await logoutUser(bearerToken(req));
+  return res.status(204).send();
 }
 
-// ── GET /api/auth/me ──────────────────────────────────────────────────────────
-// Lấy thông tin người dùng đang đăng nhập (cần Bearer token)
+/**
+ * GET /auth/me – thông tin người dùng hiện tại (tiện ích cho giao diện, tương đương GET /me nhưng không kèm số liệu)
+ */
 export async function me(req, res) {
-  // req.user được gắn bởi authenticate middleware
-  return res.status(200).json({ user: req.user });
+  const { accessToken: _token, ...user } = req.user;
+  return sendOk(res, user);
 }
 
-// ── POST /api/auth/refresh ────────────────────────────────────────────────────
+/**
+ * 4.1.4 Làm mới mã truy cập – POST /auth/refresh
+ */
 export async function refresh(req, res) {
-  const { refreshToken } = req.body;
-
-  if (!refreshToken) {
-    return res.status(400).json({ error: 'Refresh token là bắt buộc.' });
+  const token = req.body?.refresh_token ?? req.body?.refreshToken;
+  if (typeof token !== 'string' || !token) {
+    return sendError(res, 401, 'INVALID_REFRESH_TOKEN', 'Thiếu refresh token. Vui lòng đăng nhập lại.');
   }
-
-  try {
-    const result = await refreshSession(refreshToken);
-    return res.status(200).json(result);
-  } catch (err) {
-    if (err.message === 'REFRESH_FAILED') {
-      return res.status(401).json({ error: 'Refresh token không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại.' });
-    }
-    console.error('Refresh error:', err);
-    return res.status(500).json({ error: 'Không thể làm mới phiên.' });
-  }
+  return sendOk(res, await refreshSession(token));
 }
 
-// ── POST /api/auth/forgot-password ───────────────────────────────────────────
+/**
+ * 4.1.5 Yêu cầu đặt lại mật khẩu – POST /auth/forgot-password
+ */
 export async function requestPasswordReset(req, res) {
-  const { email } = req.body;
-
-  if (!email || !isValidEmail(email)) {
-    return res.status(422).json({
-      success: false,
-      error: { code: 'VALIDATION_ERROR', message: 'Email sai định dạng.' }
-    });
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
+  if (!isValidEmail(email)) {
+    return sendError(res, 422, 'VALIDATION_ERROR', 'Email sai định dạng.', [
+      { field: 'email', code: 'INVALID_EMAIL', message: 'Email sai định dạng.' },
+    ]);
   }
-
-  try {
-    const redirectTo = `${env.corsOrigin}/reset-password`;
-    await requestPasswordResetService(email, redirectTo);
-    return res.status(200).json({
-      success: true,
-      data: { message: 'Nếu email tồn tại, hướng dẫn đặt lại mật khẩu đã được gửi.' }
-    });
-  } catch (err) {
-    console.error('Request password reset error:', err);
-    return res.status(200).json({
-      success: true,
-      data: { message: 'Nếu email tồn tại, hướng dẫn đặt lại mật khẩu đã được gửi.' }
-    });
-  }
+  await requestPasswordResetService(email);
+  return sendOk(res, { message: 'Nếu email đã được đăng ký, mã đặt lại mật khẩu đã được gửi tới hộp thư của bạn.' });
 }
 
-// ── POST /api/auth/reset-password/verify ──────────────────────────────────────
+/**
+ * 4.1.6 Kiểm tra liên kết/mã đặt lại – POST /auth/reset-password/verify
+ */
 export async function verifyPasswordReset(req, res) {
-  const { token } = req.body;
-
-  if (!token) {
-    return res.status(400).json({
-      success: false,
-      error: { code: 'INVALID_OR_EXPIRED_TOKEN', message: 'Token không hợp lệ hoặc hết hạn.' }
-    });
-  }
-
-  try {
-    const result = await verifyResetToken(token);
-    // Tính expires_at (thực tế tuỳ vào token JWT chứa gì, nhưng có thể ước tính 15 phút nếu cần, 
-    // hoặc chỉ trả về valid: true)
-    return res.status(200).json({
-      success: true,
-      data: {
-        valid: result.valid,
-        expires_at: new Date(Date.now() + RESET_TOKEN_EXPIRES_MINUTES * 60_000).toISOString(),
-      }
-    });
-  } catch (err) {
-    return res.status(400).json({
-      success: false,
-      error: { code: 'INVALID_OR_EXPIRED_TOKEN', message: 'Token không hợp lệ hoặc đã hết hạn.' }
-    });
-  }
+  return sendOk(res, await verifyResetToken(req.body?.token));
 }
 
-// ── POST /api/auth/reset-password ─────────────────────────────────────────────
+/**
+ * 4.1.7 Đặt mật khẩu mới – POST /auth/reset-password
+ */
 export async function resetPassword(req, res) {
-  const { token, new_password, confirm_password } = req.body;
+  const { token, new_password: newPassword, confirm_password: confirm } = req.body || {};
+  const details = passwordErrors(newPassword, confirm, 'new_password');
+  if (details.length > 0) return sendError(res, 422, 'VALIDATION_ERROR', 'Mật khẩu yếu hoặc không khớp phần xác nhận.', details);
 
-  if (!token) {
-    return res.status(400).json({
-      success: false,
-      error: { code: 'INVALID_OR_EXPIRED_TOKEN', message: 'Token không hợp lệ hoặc hết hạn.' }
-    });
-  }
-
-  // Validate mật khẩu mới: tối thiểu 8 ký tự, gồm chữ hoa, chữ thường và chữ số
-  if (!new_password || !isStrongPassword(new_password)) {
-    return res.status(422).json({
-      success: false,
-      error: {
-        code: 'VALIDATION_ERROR',
-        message: 'Mật khẩu yếu hoặc không khớp phần xác nhận.',
-        details: [
-          { field: 'new_password', code: 'WEAK_PASSWORD', message: 'Mật khẩu phải có ít nhất 8 ký tự, gồm chữ hoa, chữ thường và chữ số.' },
-        ]
-      }
-    });
-  }
-
-  if (new_password !== confirm_password) {
-    return res.status(422).json({
-      success: false,
-      error: {
-        code: 'VALIDATION_ERROR',
-        message: 'Mật khẩu xác nhận không khớp.',
-        details: [
-          { field: 'confirm_password', code: 'PASSWORD_MISMATCH', message: 'Mật khẩu xác nhận không khớp.' },
-        ]
-      }
-    });
-  }
-
-  try {
-    await resetPasswordService(token, new_password);
-    return res.status(200).json({
-      success: true,
-      data: { message: 'Đặt lại mật khẩu thành công. Vui lòng đăng nhập lại.' }
-    });
-  } catch (err) {
-    console.error('Reset password error:', err);
-    return res.status(400).json({
-      success: false,
-      error: { code: 'INVALID_OR_EXPIRED_TOKEN', message: 'Token không hợp lệ hoặc đã hết hạn.' }
-    });
-  }
+  await resetPasswordService(token, newPassword);
+  return sendOk(res, { message: 'Đặt lại mật khẩu thành công. Vui lòng đăng nhập lại.' });
 }

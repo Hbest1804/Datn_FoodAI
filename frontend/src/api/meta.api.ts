@@ -15,15 +15,7 @@ export const metaApi = {
     } catch (err) {
       console.warn('Fallback meta filters:', err);
       return {
-        categories: [
-          { id: 1, name: 'Món nước', slug: 'mon-nuoc' },
-          { id: 2, name: 'Món xào', slug: 'mon-xao' },
-          { id: 3, name: 'Món kho', slug: 'mon-kho' },
-          { id: 4, name: 'Món canh', slug: 'mon-canh' },
-          { id: 5, name: 'Món nướng / chiên', slug: 'mon-nuong-chien' },
-          { id: 6, name: 'Món gỏi / nộm', slug: 'mon-goi-nom' },
-          { id: 7, name: 'Món tráng miệng', slug: 'mon-trang-mieng' },
-        ],
+        categories: ['Món canh', 'Món gỏi / nộm', 'Món kho', 'Món nướng / chiên', 'Món nước', 'Món tráng miệng', 'Món xào'],
         tags: [
           { id: 1, name: 'Cay' },
           { id: 2, name: 'Chua ngọt' },

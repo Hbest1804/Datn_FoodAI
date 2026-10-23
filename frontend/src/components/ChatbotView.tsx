@@ -178,15 +178,19 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
               category: 'Món gợi ý AI',
               description: `Món ăn dinh dưỡng chuẩn vị được Bếp Trưởng ChefAI tư vấn riêng cho bữa ăn của bạn.`,
               ingredients: [
-                { name: 'Nguyên liệu tươi sạch', amount: 'Theo khẩu phần gia đình' },
-                { name: 'Gia vị cơ bản', amount: 'Vừa đủ' }
+                { name: 'Nguyên liệu tươi sạch', unit: 'theo khẩu phần gia đình' },
+                { name: 'Gia vị cơ bản', unit: 'vừa đủ' }
               ],
               steps: [
-                { step: 1, instruction: 'Sơ chế sạch nguyên liệu và để ráo nước.' },
-                { step: 2, instruction: `Chế biến món ${candidate} trong khoảng ${cookingTime} phút theo hướng dẫn.` },
-                { step: 3, instruction: 'Trình bày ra đĩa, nêm nếm vừa miệng và thưởng thức khi còn nóng.' }
+                { order: 1, instruction: 'Sơ chế sạch nguyên liệu và để ráo nước.' },
+                { order: 2, instruction: `Chế biến món ${candidate} trong khoảng ${cookingTime} phút theo hướng dẫn.` },
+                { order: 3, instruction: 'Trình bày ra đĩa, nêm nếm vừa miệng và thưởng thức khi còn nóng.' }
               ],
               macros: { calories: 380, protein: 22, carbs: 35, fat: 12 },
+              servings: 2,
+              rating: 0,
+              reviewCount: 0,
+              tags: [],
             });
           }
         }
@@ -509,12 +513,13 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
     } catch (err: any) {
       console.error('Chat error:', err);
       if (err.code === 'GUEST_LIMIT_EXCEEDED') {
+        setGuestQuota(prev => ({ ...prev, used: prev.limit, remaining: 0, resets_at: err.details?.resets_at || prev.resets_at }));
         const errorMsg: ChatMessage = {
           id: `limit-${Date.now()}`,
           role: 'assistant',
           sender: 'assistant',
           timestamp: 'Vừa xong',
-          content: '⚠️ Bạn đã sử dụng hết 5/5 lượt hỏi ở Chế độ Khách hôm nay. Vui lòng đăng ký hoặc đăng nhập tài khoản để tiếp tục trò chuyện không giới hạn!',
+          content: `⚠️ ${err.message || 'Bạn đã dùng hết lượt hỏi ở chế độ khách. Vui lòng đăng ký hoặc đăng nhập để tiếp tục.'}`,
         };
         setMessages(prev => [...prev, errorMsg]);
       } else {
@@ -740,8 +745,8 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
 
                 <div className={`space-y-3 max-w-[85%] ${msg.sender === 'user' || msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                   {/* Sender & Timestamp */}
-                  <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                    <span className="font-bold text-slate-600">
+                  <div className="flex items-center gap-2 text-xs text-slate-500">
+                    <span className="font-bold text-slate-700">
                       {(msg.sender === 'user' || msg.role === 'user') ? currentUser.name : 'Bếp trưởng ChefAI'}
                     </span>
                     <span>{msg.timestamp || 'Vừa xong'}</span>
@@ -749,7 +754,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
 
                   {/* Message Bubble */}
                   <div
-                    className={`p-4 rounded-3xl text-xs sm:text-sm leading-relaxed ${
+                    className={`p-4 rounded-3xl text-sm leading-relaxed ${
                       (msg.sender === 'user' || msg.role === 'user')
                         ? 'bg-slate-900 text-white rounded-tr-xs shadow-xs'
                         : 'bg-slate-50 text-slate-800 rounded-tl-xs border border-slate-200/60'
@@ -937,7 +942,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
                     ? `Nhập câu hỏi ẩm thực (Còn ${guestQuota.remaining} lượt hôm nay)...`
                     : "Nhập câu hỏi ẩm thực, nguyên liệu có sẵn, calo mong muốn..."
                 }
-                className="flex-1 px-4 py-3 bg-white border border-slate-200 focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 rounded-2xl text-xs sm:text-sm font-medium outline-none shadow-2xs transition-all"
+                className="flex-1 px-4 py-3 bg-white border border-slate-200 focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 rounded-2xl text-sm sm:text-base font-medium outline-none shadow-2xs transition-all"
               />
 
               <button
@@ -948,7 +953,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
                 <Send className="w-4 h-4" />
               </button>
             </form>
-            <p className="text-[10px] text-slate-400 mt-2 text-center">
+            <p className="text-xs text-slate-500 mt-2 text-center">
               ChefAI tích hợp dữ liệu dinh dưỡng chuẩn cùng ẩm thực Việt Nam, kiểm tra an toàn dị ứng trước khi gợi ý.
             </p>
           </div>

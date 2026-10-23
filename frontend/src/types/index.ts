@@ -52,7 +52,7 @@ export interface DishMatch {
   matched_count: number;
   missing_count: number;
   ratio: number;
-  missing_ingredients: string[];
+  missing_ingredients: Array<{ id: number; name: string }>;
 }
 
 export interface Recipe {
@@ -133,19 +133,20 @@ export interface TasteSensoryProfile {
   herbAroma?: number; // 0-5
 }
 
+// GET /me/taste-profile: mức vị và household_size là null khi người dùng chưa khai báo
 export interface BackendTasteProfile {
   preferred_region_id?: number | null;
   taste_prefs: {
-    spicy_level: number;
-    salty_level: number;
-    sweet_level: number;
-    sour_level: number;
+    spicy_level: number | null;
+    salty_level: number | null;
+    sweet_level: number | null;
+    sour_level: number | null;
     liked_ingredient_ids: number[];
   };
   calorie_goal: number | null;
   budget_min: number | null;
   budget_max: number | null;
-  household_size: number;
+  household_size: number | null;
   diet_type_ids: number[];
   allergen_group_ids: number[];
   disliked_ingredient_ids: number[];
@@ -159,7 +160,8 @@ export interface BackendTasteProfile {
 
 export interface MetaFilters {
   regions?: Array<{ id: number; code: string; name: string }>;
-  categories: Array<{ id: number; name: string; slug: string }>;
+  // Tên danh mục do Admin nhập ở từng món (GET /meta/filters)
+  categories: string[];
   tags: Array<{ id: number; name: string }>;
   diet_types: Array<{ id: number; code: string; name: string }>;
   allergen_groups: Array<{ id: number; code: string; name: string }>;
@@ -175,7 +177,7 @@ export interface UserProfile {
   roleLabel: string;
   isPro?: boolean;
   phone?: string;
-  status?: 'active' | 'inactive' | 'locked';
+  status?: 'active' | 'locked';
   joinedDate: string;
   lastActive: string;
   dietPreference: string;
@@ -287,16 +289,17 @@ export interface ReviewItem {
   images?: string[];
 }
 
+// Số liệu tổng hợp từ GET /admin/stats/overview và GET /admin/chatbot/overview
 export interface AdminStats {
   chatbotInteractions: number;
-  interactionsGrowth: number;
+  chatSessions: number;
   activeUsers: number;
-  usersGrowth: number;
+  newUsers: number;
+  totalUsers: number;
+  visits: number;
   dishesCount: number;
-  pendingDishesCount: number;
+  hiddenDishesCount: number;
   aiSuccessRate: number;
-  hallucinationRate: number;
-  geminiLatencyMs: number;
-  allergyBlockCount: number;
-  flaggedSessionsCount: number;
+  avgResponseMs: number;
+  flaggedMessagesCount: number;
 }

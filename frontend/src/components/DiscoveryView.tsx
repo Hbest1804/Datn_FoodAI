@@ -451,14 +451,14 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                       <h3 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-snug group-hover:text-orange-600 transition-colors">
                         {currentGoldenMeal.title}
                       </h3>
-                      <p className="text-xs text-slate-500 mt-1 line-clamp-2 leading-relaxed">
+                      <p className="text-sm text-slate-600 mt-1 line-clamp-2 leading-relaxed">
                         {currentGoldenMeal.description}
                       </p>
                     </div>
 
                     <div className="flex flex-wrap gap-1.5">
                       {currentGoldenMeal.tags && currentGoldenMeal.tags.map(tag => (
-                        <span key={tag} className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
+                        <span key={tag} className="text-xs font-semibold px-2.5 py-1 rounded-md bg-slate-100 text-slate-700">
                           #{tag}
                         </span>
                       ))}
@@ -488,14 +488,14 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                     <div className="flex flex-wrap items-center gap-2 pt-1">
                       <button
                         onClick={() => onSelectRecipe(currentGoldenMeal)}
-                        className="px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-bold shadow-md shadow-orange-500/20 transition-all flex items-center gap-1.5 cursor-pointer"
+                        className="px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-sm font-bold shadow-md shadow-orange-500/20 transition-all flex items-center gap-1.5 cursor-pointer"
                       >
-                        <Utensils className="w-3.5 h-3.5" />
+                        <Utensils className="w-4 h-4" />
                         Bắt đầu nấu ngay
                       </button>
                       <button
                         onClick={onGoToPlanner}
-                        className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                        className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-sm font-bold transition-colors cursor-pointer"
                       >
                         + Thêm vào thực đơn
                       </button>

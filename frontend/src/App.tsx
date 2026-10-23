@@ -151,6 +151,16 @@ export default function App() {
       }
     };
 
+    // Ghi nhận một lượt truy cập cho mỗi phiên trình duyệt (dùng cho thống kê lượt truy cập của Admin)
+    try {
+      if (!sessionStorage.getItem('culina_visit_logged')) {
+        sessionStorage.setItem('culina_visit_logged', '1');
+        apiService.dishes.trackInteraction('page_view', undefined, { path: window.location.pathname });
+      }
+    } catch {
+      // sessionStorage không khả dụng: bỏ qua
+    }
+
     fetchInitialDishes();
     checkUserSession();
 
@@ -275,7 +285,7 @@ export default function App() {
       />
 
       {/* Main Content View Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+      <main className={`flex-1 w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 ${isAdminMode || currentTab === 'admin' ? 'max-w-[1520px]' : 'max-w-7xl'}`}>
         {currentTab === 'discovery' && (
           <DiscoveryView
             currentUser={currentUser}
@@ -395,6 +405,11 @@ export default function App() {
           onOpenAuth={() => {
             setAuthModalType('login');
             setIsAuthModalOpen(true);
+          }}
+          onOpenChatWithPrompt={(prompt, fridgeContext) => {
+            setSelectedRecipeForModal(null);
+            setIsAdminMode(false);
+            handleOpenChatWithPrompt(prompt, fridgeContext);
           }}
         />
       )}

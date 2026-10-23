@@ -1,7 +1,7 @@
 // frontend/src/api/chat.api.ts
 // AI Culinary Chatbot API module
 
-import { apiClient, getGuestId } from './client';
+import { apiClient } from './client';
 import { ChatSession, ChatMessage, GuestQuota } from '../types';
 
 export interface SendGuestMessageResponse {
@@ -29,22 +29,12 @@ export interface ChatFridgeOptions {
 
 export const chatApi = {
   async getGuestQuota(): Promise<GuestQuota> {
-    try {
-      const gid = getGuestId();
-      const res = await apiClient<{
-        success: boolean;
-        data: GuestQuota;
-      }>(`/chat/guest/quota?guest_id=${gid}`);
-      return res.data;
-    } catch {
-      return {
-        used: 0,
-        limit: 5,
-        remaining: 5,
-        resets_at: new Date(Date.now() + 86400000).toISOString(),
-        resets_in_seconds: 86400,
-      };
-    }
+    // Khách được nhận diện qua header X-Guest-Id (apiClient tự gắn)
+    const res = await apiClient<{
+      success: boolean;
+      data: GuestQuota;
+    }>('/chat/guest/quota');
+    return res.data;
   },
 
   async sendGuestMessage(
@@ -91,13 +81,14 @@ export const chatApi = {
     }>(`/chat/sessions?page=${page}&limit=${limit}`);
   },
 
+  // Không truyền title thì máy chủ tự đặt tiêu đề theo câu hỏi đầu tiên
   async createSession(title?: string): Promise<ChatSession> {
     const res = await apiClient<{
       success: boolean;
       data: ChatSession;
     }>('/chat/sessions', {
       method: 'POST',
-      body: JSON.stringify({ title: title || 'Hội thoại nấu ăn mới' }),
+      body: JSON.stringify(title ? { title } : {}),
     });
     return res.data;
   },
@@ -184,5 +175,12 @@ export const chatApi = {
     return apiClient(`/chat/sessions/${sessionId}`, {
       method: 'DELETE',
     });
+  },
+
+  async deleteAllSessions(): Promise<{ deleted_sessions: number }> {
+    const res = await apiClient<{ success: boolean; data: { deleted_sessions: number } }>('/chat/sessions?confirm=true', {
+      method: 'DELETE',
+    });
+    return res.data;
   },
 };

@@ -1,5 +1,5 @@
 // src/config/appConfig.js
-// Load và validate tất cả biến môi trường từ .env
+// Đọc và kiểm tra tất cả biến môi trường từ tệp .env
 
 import 'dotenv/config';
 
@@ -16,7 +16,7 @@ for (const key of required) {
 }
 
 function normalizeGeminiModel(m) {
-  if (!m) return 'gemini-3.8-flash';
+  if (!m) return 'gemini-3.5-flash-lite';
   const cleaned = m.trim().toLowerCase().replace(/\s+/g, '-');
   return cleaned;
 }
@@ -43,7 +43,18 @@ export const env = {
     embeddingModel: normalizeGeminiEmbeddingModel(process.env.GEMINI_EMBEDDING_MODEL),
   },
 
-  guestChatLimit: parseInt(process.env.GUEST_CHAT_LIMIT ?? '5', 10),
+  // Địa chỉ giao diện dùng cho liên kết trong email: địa chỉ đầu tiên trong CORS_ORIGIN
+  frontendUrl: (process.env.CORS_ORIGIN ?? 'http://localhost:3000').split(',')[0].trim().replace(/\/+$/, ''),
+
+  smtp: {
+    host: process.env.SMTP_HOST ?? '',
+    port: parseInt(process.env.SMTP_PORT ?? '587', 10),
+    // true khi dùng cổng 465 (SSL); không đặt thì tự suy ra theo cổng
+    secure: process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : process.env.SMTP_PORT === '465',
+    user: process.env.SMTP_USER ?? '',
+    pass: process.env.SMTP_PASS ?? '',
+    from: process.env.SMTP_FROM || process.env.SMTP_USER || 'no-reply@localhost',
+  },
 
   adminSeed: {
     email: (process.env.ADMIN_EMAIL || process.env.ADMIN_USER || process.env.Admin_User || '').trim(),

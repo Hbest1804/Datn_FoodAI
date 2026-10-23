@@ -100,7 +100,7 @@ export const Header: React.FC<HeaderProps> = ({
                     </span>
                   )}
                 </div>
-                <p className="text-[11px] font-medium text-slate-500 -mt-0.5">
+                <p className="text-xs font-semibold text-slate-500 mt-0.5">
                   {isAdminMode ? 'CỔNG QUẢN TRỊ HỆ THỐNG' : 'Trợ lý ẩm thực & Dinh dưỡng'}
                 </p>
               </div>
@@ -204,19 +204,19 @@ export const Header: React.FC<HeaderProps> = ({
           ) : null}
 
           {/* Right Action Elements */}
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
             {!currentUser.isLoggedIn ? (
               /* When not logged in: ONLY show Login & Register buttons */
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0 whitespace-nowrap">
                 <button
                   onClick={onOpenLoginModal}
-                  className="px-4 py-2 text-xs sm:text-sm font-bold text-slate-700 hover:text-orange-600 hover:bg-orange-50/80 rounded-xl transition-all cursor-pointer"
+                  className="px-4 py-2 text-xs sm:text-sm font-bold text-slate-700 hover:text-orange-600 hover:bg-orange-50/80 rounded-xl transition-all cursor-pointer whitespace-nowrap"
                 >
                   Đăng nhập
                 </button>
                 <button
                   onClick={onOpenRegisterModal}
-                  className="px-4 py-2 text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 rounded-xl shadow-xs transition-all cursor-pointer"
+                  className="px-4 py-2 text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 rounded-xl shadow-xs transition-all cursor-pointer whitespace-nowrap"
                 >
                   Đăng ký
                 </button>
@@ -235,39 +235,40 @@ export const Header: React.FC<HeaderProps> = ({
                         onTabChange('discovery');
                       }
                     }}
-                    className={`text-xs font-semibold px-3 py-1.5 rounded-xl border transition-all cursor-pointer flex items-center gap-1.5 ${
+                    className={`text-xs font-semibold px-3 py-1.5 rounded-xl border transition-all cursor-pointer flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
                       isAdminMode
                         ? 'bg-slate-900 text-white border-slate-900 hover:bg-slate-800 shadow-sm'
                         : 'bg-slate-100 hover:bg-slate-200/80 text-slate-700 border-slate-200'
                     }`}
                   >
-                    <ShieldCheck className="w-3.5 h-3.5 text-orange-500" />
-                    <span className="hidden sm:inline">
+                    <ShieldCheck className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+                    <span className="hidden sm:inline whitespace-nowrap">
                       {isAdminMode ? 'Về trang người dùng' : 'Cổng Quản Trị'}
                     </span>
                   </button>
                 )}
 
                 {/* User Profile Dropdown */}
-                <div className="relative">
+                <div className="relative shrink-0">
                   <button
                     onClick={() => setShowUserDropdown(!showUserDropdown)}
-                    className="flex items-center gap-2 p-1 pl-2 sm:pr-3 rounded-full border border-slate-200 hover:border-orange-300 bg-white shadow-2xs transition-all cursor-pointer"
+                    className="flex items-center gap-2 p-1 pl-1.5 pr-2.5 rounded-full border border-slate-200/90 hover:border-orange-300 bg-white shadow-2xs hover:shadow-xs transition-all cursor-pointer shrink-0 whitespace-nowrap h-10 select-none"
+                    title={currentUser.name}
                   >
                     <img
                       src={(currentUser.avatar && !currentUser.avatar.includes('images.unsplash.com/photo-')) ? currentUser.avatar : DEFAULT_AVATAR}
                       alt={currentUser.name}
-                      className="w-8 h-8 rounded-full object-cover ring-2 ring-orange-500/20 bg-slate-200"
+                      className="w-8 h-8 rounded-full object-cover ring-2 ring-orange-500/20 bg-slate-200 shrink-0"
                     />
-                    <div className="text-left hidden md:block">
-                      <div className="text-xs font-bold text-slate-900 leading-tight">
+                    <div className="text-left hidden md:flex flex-col justify-center whitespace-nowrap shrink-0">
+                      <div className="text-xs font-bold text-slate-900 leading-tight whitespace-nowrap">
                         {currentUser.name}
                       </div>
-                      <div className="text-[10px] text-slate-500 font-medium leading-tight">
+                      <div className="text-[10px] text-slate-500 font-medium leading-tight whitespace-nowrap">
                         {currentUser.roleLabel}
                       </div>
                     </div>
-                    <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                    <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-0.5" />
                   </button>
 
                   {/* Dropdown Menu */}

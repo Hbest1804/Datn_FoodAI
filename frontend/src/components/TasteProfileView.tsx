@@ -32,12 +32,38 @@ interface TasteProfileViewProps {
   onUpdateUser: (updated: Partial<UserProfile>) => void;
 }
 
+// Dữ liệu biểu mẫu: mọi mức vị và số người luôn có giá trị (máy chủ trả null khi chưa khai báo)
+type TasteProfileForm = Omit<BackendTasteProfile, 'taste_prefs' | 'household_size'> & {
+  taste_prefs: {
+    spicy_level: number;
+    salty_level: number;
+    sweet_level: number;
+    sour_level: number;
+    liked_ingredient_ids: number[];
+  };
+  household_size: number;
+};
+
+function toForm(p: BackendTasteProfile, fallback: TasteProfileForm): TasteProfileForm {
+  return {
+    ...p,
+    taste_prefs: {
+      spicy_level: p.taste_prefs?.spicy_level ?? fallback.taste_prefs.spicy_level,
+      salty_level: p.taste_prefs?.salty_level ?? fallback.taste_prefs.salty_level,
+      sweet_level: p.taste_prefs?.sweet_level ?? fallback.taste_prefs.sweet_level,
+      sour_level: p.taste_prefs?.sour_level ?? fallback.taste_prefs.sour_level,
+      liked_ingredient_ids: p.taste_prefs?.liked_ingredient_ids ?? [],
+    },
+    household_size: p.household_size ?? fallback.household_size,
+  };
+}
+
 export const TasteProfileView: React.FC<TasteProfileViewProps> = ({
   currentUser,
   onUpdateUser,
 }) => {
   // Backend Taste Profile State
-  const [profile, setProfile] = useState<BackendTasteProfile>({
+  const [profile, setProfile] = useState<TasteProfileForm>({
     preferred_region_id: null,
     taste_prefs: {
       spicy_level: 0,
@@ -95,7 +121,8 @@ export const TasteProfileView: React.FC<TasteProfileViewProps> = ({
     ]).then(([backendProf, filters, ingredientsData]) => {
       if (!isMounted) return;
       if (backendProf) {
-        setProfile(backendProf);
+        // Trường chưa khai báo (null) giữ giá trị mặc định của biểu mẫu
+        setProfile(prev => toForm(backendProf, prev));
       }
       if (filters) {
         setMetaFilters(filters);
@@ -138,25 +165,23 @@ export const TasteProfileView: React.FC<TasteProfileViewProps> = ({
     return () => clearTimeout(timer);
   }, [ingSearchInput]);
 
-  // Real-time completeness score calculation
+  // Độ hoàn thiện tính như máy chủ: mức vị 20, nguyên liệu thích 10, chế độ ăn 15, dị ứng 15, calo 20, ngân sách 20
   const completenessScore = useMemo(() => {
     let score = 0;
-    // 1. Sensory (20%)
-    if (profile.taste_prefs) {
-      if (typeof profile.taste_prefs.spicy_level === 'number') score += 5;
-      if (typeof profile.taste_prefs.salty_level === 'number') score += 5;
-      if (typeof profile.taste_prefs.sweet_level === 'number') score += 5;
-      if (typeof profile.taste_prefs.sour_level === 'number') score += 5;
+    const prefs = profile.taste_prefs;
+    if (prefs) {
+      if (typeof prefs.spicy_level === 'number') score += 5;
+      if (typeof prefs.salty_level === 'number') score += 5;
+      if (typeof prefs.sweet_level === 'number') score += 5;
+      if (typeof prefs.sour_level === 'number') score += 5;
     }
-    // 2. Nutrition & Budget (30%)
-    if (profile.calorie_goal && profile.calorie_goal > 0) score += 15;
-    if (profile.budget_min || profile.budget_max) score += 15;
-    // 3. Portion & Diets (50%)
-    if (profile.household_size && profile.household_size > 0) score += 20;
+    if (likedIngredients.length > 0 || (prefs?.liked_ingredient_ids?.length ?? 0) > 0) score += 10;
     if (profile.diet_type_ids && profile.diet_type_ids.length > 0) score += 15;
     if (profile.allergen_group_ids && profile.allergen_group_ids.length > 0) score += 15;
-    return Math.min(100, Math.max(profile.completeness || 0, score));
-  }, [profile]);
+    if (profile.calorie_goal && profile.calorie_goal > 0) score += 20;
+    if (profile.budget_min != null || profile.budget_max != null) score += 20;
+    return Math.min(100, score);
+  }, [profile, likedIngredients]);
 
   // Handle Save Taste Profile (Single Form Submit)
   const handleSave = async (e?: React.FormEvent) => {
@@ -173,7 +198,7 @@ export const TasteProfileView: React.FC<TasteProfileViewProps> = ({
 
     try {
       const updated = await apiService.me.updateTasteProfile(profile);
-      setProfile(updated);
+      setProfile(prev => toForm(updated, prev));
       setSaveSuccessNotice(true);
       onUpdateUser({
         tasteAccuracy: Math.max(90, updated.completeness || completenessScore),
