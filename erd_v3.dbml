@@ -1,0 +1,359 @@
+// =====================================================
+// Hệ thống trợ lý ẩm thực thông minh tích hợp chatbot AI
+// ERD v3 — 26 bảng. DBML dán trực tiếp vào https://dbdiagram.io
+// Khớp schema_v3.sql, SRS v1.4 (mục 5), HLD v1.4 (mục 7)
+// =====================================================
+
+Project tro_ly_am_thuc {
+  database_type: 'PostgreSQL'
+  Note: 'Hệ thống trợ lý ẩm thực thông minh tích hợp chatbot AI (PostgreSQL 15+ / Supabase, pgvector, pg_trgm, unaccent, RLS)'
+}
+
+// -----------------------------------------------------
+// Nhóm 1: Bảng tra cứu
+// -----------------------------------------------------
+
+Table diet_types {
+  id   smallint [pk]
+  code text     [not null, unique, note: 'vegetarian, low_carb, ...']
+  name text     [not null]
+}
+
+Table allergen_groups {
+  id   smallint [pk]
+  code text     [not null, unique, note: 'seafood, peanut, dairy, gluten, egg, fish, sesame, ...']
+  name text     [not null]
+}
+
+Table tags {
+  id   smallint [pk]
+  name text     [not null, unique]
+}
+
+// -----------------------------------------------------
+// Nhóm 2: Người dùng & hồ sơ khẩu vị (UC01, UC05, UC06, UC10, UC15)
+// -----------------------------------------------------
+
+Table users {
+  id                 uuid        [pk, note: 'tham chiếu auth.users(id) của Supabase, on delete cascade']
+  email              text        [not null, unique]
+  display_name       text
+  avatar_url         text
+  role               text        [not null, default: 'user', note: "check: 'user' | 'admin'"]
+  status             text        [not null, default: 'active', note: "check: 'active' | 'locked'"]
+  failed_login_count smallint    [not null, default: 0, note: 'số lần sai mật khẩu liên tiếp (check >= 0)']
+  locked_until       timestamptz [note: 'khóa đăng nhập 15 phút sau 5 lần sai']
+  created_at         timestamptz [not null, default: `now()`]
+  updated_at         timestamptz [not null, default: `now()`]
+}
+
+Table user_profiles {
+  user_id                 uuid          [pk, ref: - users.id]
+  taste_prefs             jsonb         [not null, default: `'{}'`, note: '{"spicy":4,"salty":3,"sweet":2,"sour":2,"liked_ingredient_ids":[7,21]}']
+  calorie_goal            numeric(6,1)  [note: 'kcal/ngày, check > 0']
+  budget_min              numeric(12,0) [note: 'VND / người / bữa']
+  budget_max              numeric(12,0) [note: 'VND / người / bữa, check budget_min <= budget_max']
+  household_size          smallint      [not null, default: 1, note: 'check 1..20']
+  profile_vector          vector(768)   [note: 'embedding câu mô tả hồ sơ (gemini-embedding-2)']
+  taste_vector            vector(768)   [note: 'vector khẩu vị, cùng không gian với dish_embeddings']
+  taste_vector_updated_at timestamptz
+  created_at              timestamptz   [not null, default: `now()`]
+  updated_at              timestamptz   [not null, default: `now()`]
+}
+
+Table user_diets {
+  user_id      uuid     [ref: > users.id]
+  diet_type_id smallint [ref: > diet_types.id]
+
+  indexes {
+    (user_id, diet_type_id) [pk]
+  }
+}
+
+Table user_allergies {
+  user_id           uuid     [ref: > users.id]
+  allergen_group_id smallint [ref: > allergen_groups.id]
+
+  indexes {
+    (user_id, allergen_group_id) [pk]
+  }
+}
+
+Table user_disliked_ingredients {
+  user_id       uuid   [ref: > users.id]
+  ingredient_id bigint [ref: > ingredients.id]
+
+  indexes {
+    (user_id, ingredient_id) [pk]
+  }
+}
+
+// -----------------------------------------------------
+// Nhóm 3: Món ăn, công thức, nguyên liệu (UC02, UC04, UC11, UC16)
+// -----------------------------------------------------
+
+Table ingredients {
+  id                bigint      [pk, increment]
+  name              text        [not null, unique]
+  normalized_name   text        [not null, unique, note: 'tự sinh: lower(unaccent(name)), gộp khoảng trắng']
+  default_unit      text        [not null]
+  allergen_group_id smallint    [ref: > allergen_groups.id, note: 'on delete set null']
+  aliases           text[]      [not null, default: `'{}'`]
+  is_common         boolean     [not null, default: false, note: 'nguyên liệu phổ biến, ưu tiên gợi ý khi chọn "nguyên liệu có sẵn"']
+  needs_review      boolean     [not null, default: false, note: 'nguyên liệu tạo nhanh, chưa xác nhận nhóm dị ứng']
+  created_by        uuid        [ref: > users.id, note: 'on delete set null']
+  created_at        timestamptz [not null, default: `now()`]
+
+  indexes {
+    allergen_group_id          [name: 'ingredients_allergen_group_id_idx']
+    `immutable_unaccent(name)` [name: 'ingredients_name_trgm_idx', note: 'GIN gin_trgm_ops — gợi ý nguyên liệu khi gõ']
+  }
+}
+
+Table dishes {
+  id                  uuid          [pk, default: `gen_random_uuid()`]
+  name                text          [not null]
+  slug                text          [not null, unique]
+  description         text
+  image_url           text
+  category            varchar(100)  [not null, note: 'danh mục do Admin tự nhập, tối đa 100 ký tự']
+  category_normalized varchar(100)  [not null, note: 'tự sinh: lower(unaccent(category)), gộp khoảng trắng']
+  cook_time_minutes   smallint      [note: 'check > 0']
+  difficulty          text          [note: "check: 'easy' | 'medium' | 'hard'"]
+  servings            smallint      [not null, note: 'check > 0']
+  est_cost            numeric(12,0) [note: 'chi phí ước tính (VND) cho cả công thức, check >= 0']
+  calories            numeric(6,1)  [note: 'kcal / khẩu phần, NULL = chưa có dữ liệu']
+  protein_g           numeric(6,1)  [note: 'g / khẩu phần']
+  carbs_g             numeric(6,1)  [note: 'g / khẩu phần']
+  fat_g               numeric(6,1)  [note: 'g / khẩu phần']
+  avg_rating          numeric(3,2)  [not null, default: 0, note: 'trigger cập nhật từ ratings']
+  rating_count        integer       [not null, default: 0, note: 'trigger cập nhật từ ratings']
+  favorite_count      integer       [not null, default: 0, note: 'trigger cập nhật từ favorites']
+  source_url          text          [note: 'nguồn tham khảo công thức']
+  is_published        boolean       [not null, default: false, note: 'chỉ true khi có ít nhất 1 nguyên liệu và 1 bước (constraint trigger)']
+  created_by          uuid          [ref: > users.id, note: 'on delete set null']
+  created_at          timestamptz   [not null, default: `now()`]
+  updated_at          timestamptz   [not null, default: `now()`]
+
+  indexes {
+    `immutable_unaccent(name)` [name: 'dishes_name_trgm_idx', note: 'GIN gin_trgm_ops — tìm kiếm không dấu, chịu lỗi chính tả']
+    category_normalized        [name: 'dishes_published_category_idx', note: 'partial: where is_published']
+    updated_at                 [name: 'dishes_published_updated_idx', note: 'partial: where is_published']
+  }
+}
+
+Table recipe_steps {
+  dish_id    uuid     [ref: > dishes.id]
+  step_order smallint [note: 'check > 0']
+  content    text     [not null]
+
+  indexes {
+    (dish_id, step_order) [pk]
+  }
+
+  Note: 'DAT-15: thay cột dishes.steps'
+}
+
+Table dish_ingredients {
+  dish_id       uuid          [ref: > dishes.id]
+  ingredient_id bigint        [ref: > ingredients.id, note: 'on delete restrict']
+  quantity      numeric(10,2) [not null, note: 'check > 0']
+  unit          text          [not null]
+  is_optional   boolean       [not null, default: false]
+
+  indexes {
+    (dish_id, ingredient_id) [pk]
+    ingredient_id            [name: 'dish_ingredients_ingredient_id_idx']
+  }
+}
+
+Table dish_tags {
+  dish_id uuid     [ref: > dishes.id]
+  tag_id  smallint [ref: > tags.id]
+
+  indexes {
+    (dish_id, tag_id) [pk]
+    tag_id            [name: 'dish_tags_tag_id_idx']
+  }
+}
+
+// -----------------------------------------------------
+// Nhóm 4: Embedding & tìm kiếm ngữ nghĩa (RAG, gợi ý)
+// -----------------------------------------------------
+
+Table dish_embeddings {
+  dish_id      uuid        [pk, ref: - dishes.id]
+  embedding    vector(768) [not null, note: 'gemini-embedding-2, index HNSW vector_cosine_ops']
+  content_hash text        [not null, note: 'SHA-256 văn bản đầu vào; chỉ gọi lại API khi hash đổi']
+  model        text        [not null, note: 'gemini-embedding-2']
+  updated_at   timestamptz [not null, default: `now()`]
+
+  indexes {
+    embedding [name: 'dish_embeddings_embedding_hnsw', note: 'HNSW vector_cosine_ops']
+  }
+}
+
+// -----------------------------------------------------
+// Nhóm 5: Tương tác người dùng (UC08, UC09, UC10, UC14)
+// -----------------------------------------------------
+
+Table favorites {
+  user_id    uuid        [ref: > users.id]
+  dish_id    uuid        [ref: > dishes.id]
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (user_id, dish_id) [pk]
+    dish_id            [name: 'favorites_dish_id_idx']
+  }
+}
+
+Table collections {
+  id         uuid        [pk, default: `gen_random_uuid()`]
+  user_id    uuid        [not null, ref: > users.id]
+  name       text        [not null]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    user_id [name: 'collections_user_id_idx']
+  }
+}
+
+Table collection_dishes {
+  collection_id uuid        [ref: > collections.id]
+  dish_id       uuid        [ref: > dishes.id]
+  added_at      timestamptz [not null, default: `now()`]
+
+  indexes {
+    (collection_id, dish_id) [pk]
+  }
+}
+
+Table ratings {
+  id         bigint      [pk, increment]
+  user_id    uuid        [ref: > users.id, note: 'on delete set null (ẩn danh khi xóa tài khoản)']
+  dish_id    uuid        [not null, ref: > dishes.id]
+  stars      smallint    [not null, note: 'check 1..5']
+  comment    text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (user_id, dish_id) [unique, name: 'ratings_user_id_dish_id_key']
+    dish_id            [name: 'ratings_dish_id_idx']
+  }
+}
+
+Table view_history {
+  user_id        uuid        [ref: > users.id]
+  dish_id        uuid        [ref: > dishes.id]
+  view_count     integer     [not null, default: 1]
+  last_viewed_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (user_id, dish_id)        [pk]
+    (user_id, last_viewed_at) [name: 'view_history_user_id_last_viewed_at_idx']
+  }
+}
+
+Table interaction_logs {
+  id         bigint      [pk, increment]
+  user_id    uuid        [ref: > users.id, note: 'on delete set null']
+  dish_id    uuid        [ref: > dishes.id, note: 'on delete set null']
+  event_type text        [not null, note: 'check: view | click | search | chat_card_click | recommendation_click | share | page_view']
+  context    jsonb       [not null, default: `'{}'`, note: 'từ khóa tìm kiếm, nguồn sự kiện, ...']
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (user_id, created_at)    [name: 'interaction_logs_user_id_created_at_idx']
+    (dish_id, created_at)    [name: 'interaction_logs_dish_id_created_at_idx']
+    (event_type, created_at) [name: 'interaction_logs_event_type_created_at_idx']
+  }
+}
+
+// -----------------------------------------------------
+// Nhóm 6: Chatbot AI (UC03, UC07, UC13)
+// -----------------------------------------------------
+
+Table chat_sessions {
+  id         uuid        [pk, default: `gen_random_uuid()`]
+  user_id    uuid        [not null, ref: > users.id]
+  title      text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (user_id, updated_at) [name: 'chat_sessions_user_id_updated_at_idx']
+  }
+}
+
+Table chat_messages {
+  id                  uuid        [pk, default: `gen_random_uuid()`]
+  session_id          uuid        [not null, ref: > chat_sessions.id]
+  role                text        [not null, note: "check: 'user' | 'assistant'"]
+  content             text        [not null]
+  referenced_dish_ids uuid[]      [not null, default: `'{}'`]
+  feedback            text        [note: "check: 'like' | 'dislike'"]
+  feedback_reason     text
+  outcome             text        [note: "check: 'answered' | 'no_match' | 'out_of_scope' | 'error' (role = assistant)"]
+  tokens              integer
+  latency_ms          integer     [note: 'thời gian phản hồi, check >= 0']
+  flagged             boolean     [not null, default: false, note: 'Admin gắn cờ câu trả lời không phù hợp']
+  flag_reason         text
+  flagged_by          uuid        [ref: > users.id, note: 'on delete set null']
+  flagged_at          timestamptz
+  created_at          timestamptz [not null, default: `now()`]
+
+  indexes {
+    (session_id, created_at) [name: 'chat_messages_session_id_created_at_idx']
+    (outcome, created_at)    [name: 'chat_messages_outcome_idx', note: "partial: where outcome is not null and outcome <> 'answered'"]
+    created_at               [name: 'chat_messages_flagged_idx', note: 'partial: where flagged']
+  }
+}
+
+// -----------------------------------------------------
+// Nhóm 7: Hệ thống & quản trị (UC12, UC13, UC15)
+// -----------------------------------------------------
+
+Table app_settings {
+  key        text        [pk, note: 'guest_message_limit, guest_window_hours, system_prompt, max_context_dishes, recommendation_weights, topic_threshold_low, topic_threshold_high']
+  value      jsonb       [not null]
+  updated_by uuid        [ref: > users.id, note: 'on delete set null']
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table audit_logs {
+  id          bigint      [pk, increment]
+  actor_id    uuid        [ref: > users.id, note: 'on delete set null']
+  action      text        [not null, note: 'user.lock, user.role_change, user.delete, dish.import, ...']
+  target_type text        [not null]
+  target_id   text
+  detail      jsonb       [not null, default: `'{}'`]
+  created_at  timestamptz [not null, default: `now()`]
+
+  indexes {
+    (actor_id, created_at) [name: 'audit_logs_actor_id_created_at_idx']
+    action                 [name: 'audit_logs_action_idx']
+  }
+}
+
+Table password_reset_tokens {
+  id         uuid        [pk, default: `gen_random_uuid()`]
+  user_id    uuid        [not null, ref: > users.id]
+  token_hash text        [not null, unique, note: 'SHA-256 của mã, không lưu mã gốc']
+  expires_at timestamptz [not null, note: 'tạo + 15 phút']
+  used_at    timestamptz [note: 'dùng một lần']
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    user_id               [name: 'password_reset_tokens_user_id_idx']
+    (user_id, expires_at) [name: 'password_reset_tokens_active_idx', note: 'partial: where used_at is null']
+  }
+}
+
+Table banned_words {
+  id         integer     [pk, increment]
+  word       text        [not null, unique]
+  created_at timestamptz [not null, default: `now()`]
+}

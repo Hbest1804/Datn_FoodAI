@@ -289,8 +289,7 @@ export async function getMyFavorites(req, res, next) {
       .select(`
         dish_id,
         created_at,
-        dishes(id, name, slug, image_url, calories, cook_time_minutes, difficulty,
-          category:categories(id, name))
+        dishes(id, name, slug, image_url, calories, cook_time_minutes, difficulty, category)
       `, { count: 'exact' })
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
@@ -377,16 +376,19 @@ export async function adminGetDishes(req, res, next) {
         id, name, slug, description, image_url, is_published,
         cook_time_minutes, difficulty, calories, servings, est_cost,
         protein_g, carbs_g, fat_g, created_at, updated_at,
-        category:categories(id, name),
+        category,
         dish_tags(tag:tags(id, name)),
         dish_ingredients(count),
         ratings(stars),
         favorites(user_id),
-        steps
+        recipe_steps(step_order, content)
       `, { count: 'exact' });
 
     if (q) query = query.ilike('name', `%${q}%`);
-    if (category_id) query = query.eq('category_id', parseInt(category_id));
+    if (category_id) {
+      const { data: cat } = await supabaseAdmin.from('categories').select('name').eq('id', parseInt(category_id)).maybeSingle();
+      if (cat) query = query.eq('category', cat.name);
+    }
     if (is_published !== undefined && is_published !== '') {
       query = query.eq('is_published', is_published === 'true');
     }
@@ -406,9 +408,9 @@ export async function adminGetDishes(req, res, next) {
     if (error) throw error;
 
     let items = (dishes || []).map(d => {
-      const hasRecipe = Array.isArray(d.steps) ? d.steps.length > 0 : false;
+      const hasRecipe = (Array.isArray(d.recipe_steps) && d.recipe_steps.length > 0) || (Array.isArray(d.steps) && d.steps.length > 0);
       const hasIngredients = (d.dish_ingredients?.[0]?.count || 0) > 0;
-      const categoryName = d.category?.name || '';
+      const categoryName = typeof d.category === 'string' ? d.category : (d.category?.name || '');
 
       const ratingsList = d.ratings || [];
       const ratingCount = ratingsList.length;
@@ -600,7 +602,7 @@ export async function adminCreateDish(req, res, next) {
         name, description, image_url, cook_time_minutes,
         difficulty, servings, est_cost, calories, protein_g,
         carbs_g, fat_g, is_published,
-        category:categories(id, name)
+        category
       `)
       .single();
 
@@ -734,8 +736,8 @@ export async function adminUpdateDish(req, res, next) {
         id, slug, created_by, created_at, updated_at,
         name, description, image_url, cook_time_minutes,
         difficulty, servings, est_cost, calories, protein_g,
-        carbs_g, fat_g, is_published, steps,
-        category:categories(id, name),
+        carbs_g, fat_g, is_published, category,
+        recipe_steps(step_order, content),
         dish_ingredients(count),
         dish_tags(tag:tags(id, name))
       `)
@@ -1251,7 +1253,6 @@ export async function adminReindexDish(req, res, next) {
       .from('dishes')
       .select(`
         id, name, slug, description, category,
-        categories (id, name),
         dish_ingredients (
           ingredients (id, name)
         ),
@@ -2628,16 +2629,16 @@ export async function adminGetDishDetail(req, res, next) {
       .from('dishes')
       .select(`
         id, slug, name, description, image_url,
-        region_id, category_id, cook_time_minutes, difficulty,
+        cook_time_minutes, difficulty,
         servings, est_cost, calories, protein_g, carbs_g, fat_g,
         is_published, created_at, updated_at,
-        category:categories(id, name),
+        category,
         dish_tags(tag:tags(id, name)),
         dish_ingredients(
           ingredient_id, quantity, unit, is_optional,
           ingredient:ingredients(id, name, default_unit)
         ),
-        steps
+        recipe_steps(step_order, content)
       `)
       .eq('id', dishId)
       .maybeSingle();
@@ -2647,7 +2648,7 @@ export async function adminGetDishDetail(req, res, next) {
       return res.status(404).json({ success: false, error: { code: 'DISH_NOT_FOUND', message: 'Món ăn không tồn tại.' } });
     }
 
-    const hasRecipe = Array.isArray(dish.steps) ? dish.steps.length > 0 : false;
+    const hasRecipe = (Array.isArray(dish.recipe_steps) && dish.recipe_steps.length > 0) || (Array.isArray(dish.steps) && dish.steps.length > 0);
     const hasIngredients = Array.isArray(dish.dish_ingredients) ? dish.dish_ingredients.length > 0 : false;
 
     return res.json({
@@ -2658,8 +2659,8 @@ export async function adminGetDishDetail(req, res, next) {
         name: dish.name,
         description: dish.description,
         image_url: dish.image_url,
-        region_id: dish.region_id,
-        category_id: dish.category_id,
+        region_id: dish.region_id || null,
+        category_id: dish.category_id || null,
         cook_time_minutes: dish.cook_time_minutes,
         difficulty: dish.difficulty,
         servings: dish.servings,
@@ -2668,13 +2669,15 @@ export async function adminGetDishDetail(req, res, next) {
         protein_g: dish.protein_g,
         carbs_g: dish.carbs_g,
         fat_g: dish.fat_g,
-        category: dish.category,
-        region: dish.region,
+        category: typeof dish.category === 'object' ? dish.category : (dish.category ? { name: dish.category } : null),
+        region: dish.region || null,
         tags: (dish.dish_tags || []).map(dt => dt.tag).filter(Boolean),
         tag_ids: (dish.dish_tags || []).map(dt => dt.tag?.id).filter(Boolean),
         has_recipe: hasRecipe && hasIngredients,
         is_published: dish.is_published,
-        steps: Array.isArray(dish.steps) ? dish.steps : [],
+        steps: (Array.isArray(dish.recipe_steps) && dish.recipe_steps.length > 0)
+          ? dish.recipe_steps.map(s => ({ step_number: s.step_order, instruction: s.content, content: s.content }))
+          : (Array.isArray(dish.steps) ? dish.steps : []),
         ingredients: (dish.dish_ingredients || []).map(di => ({
           ingredient_id: di.ingredient_id,
           name: di.ingredient?.name || '',
@@ -2815,7 +2818,7 @@ export async function adminGetStatsTopDishes(req, res, next) {
     if (by === 'favorites') {
       const { data: favs } = await supabaseAdmin
         .from('favorites')
-        .select('dish_id, dishes(id, name, slug, image_url, category:categories(name))')
+        .select('dish_id, dishes(id, name, slug, image_url, category)')
         .gte('created_at', fromDate)
         .lte('created_at', toDate);
 
@@ -2833,7 +2836,7 @@ export async function adminGetStatsTopDishes(req, res, next) {
           name: val.dish?.name || 'Món ăn',
           slug: val.dish?.slug,
           image_url: val.dish?.image_url,
-          category: val.dish?.category?.name || '',
+          category: typeof val.dish?.category === 'object' ? val.dish?.category?.name : (val.dish?.category || ''),
           favorite_count: val.count,
           dish: val.dish,
         }))
@@ -2846,7 +2849,7 @@ export async function adminGetStatsTopDishes(req, res, next) {
     if (by === 'rating') {
       const { data: ratings } = await supabaseAdmin
         .from('ratings')
-        .select('dish_id, stars, dishes(id, name, slug, image_url, category:categories(name))')
+        .select('dish_id, stars, dishes(id, name, slug, image_url, category)')
         .gte('created_at', fromDate)
         .lte('created_at', toDate);
 
@@ -2865,7 +2868,7 @@ export async function adminGetStatsTopDishes(req, res, next) {
           name: val.dish?.name || 'Món ăn',
           slug: val.dish?.slug,
           image_url: val.dish?.image_url,
-          category: val.dish?.category?.name || '',
+          category: typeof val.dish?.category === 'object' ? val.dish?.category?.name : (val.dish?.category || ''),
           avg_rating: +(val.totalStars / val.count).toFixed(1),
           rating_count: val.count,
           dish: val.dish,
@@ -2879,7 +2882,7 @@ export async function adminGetStatsTopDishes(req, res, next) {
     // Mặc định by = 'views'
     const { data: views } = await supabaseAdmin
       .from('interaction_logs')
-      .select('dish_id, dishes(id, name, slug, image_url, category:categories(name))')
+      .select('dish_id, dishes(id, name, slug, image_url, category)')
       .eq('interaction_type', 'view')
       .gte('created_at', fromDate)
       .lte('created_at', toDate);
@@ -2898,7 +2901,7 @@ export async function adminGetStatsTopDishes(req, res, next) {
         name: val.dish?.name || 'Món ăn',
         slug: val.dish?.slug,
         image_url: val.dish?.image_url,
-        category: val.dish?.category?.name || '',
+        category: typeof val.dish?.category === 'object' ? val.dish?.category?.name : (val.dish?.category || ''),
         views: val.count,
         dish: val.dish,
       }))
@@ -2909,7 +2912,7 @@ export async function adminGetStatsTopDishes(req, res, next) {
     if (items.length === 0) {
       const { data: dishesList } = await supabaseAdmin
         .from('dishes')
-        .select('id, name, slug, image_url, category:categories(name)')
+        .select('id, name, slug, image_url, category')
         .eq('is_published', true)
         .limit(limitNum);
 
@@ -2918,7 +2921,7 @@ export async function adminGetStatsTopDishes(req, res, next) {
         name: d.name,
         slug: d.slug,
         image_url: d.image_url,
-        category: d.category?.name || '',
+        category: typeof d.category === 'object' ? d.category?.name : (d.category || ''),
         views: Math.max(12, 100 - idx * 7),
         dish: d,
       }));

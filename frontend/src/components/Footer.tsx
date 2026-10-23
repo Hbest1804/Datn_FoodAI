@@ -1,4 +1,4 @@
-import React from 'react';
+ import React from 'react';
 import { UtensilsCrossed, Sparkles, Shield, HeartHandshake } from 'lucide-react';
 import { ChefLogo3D } from './ChefLogo3D';
 
