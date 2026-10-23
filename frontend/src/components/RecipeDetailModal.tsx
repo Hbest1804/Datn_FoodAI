@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { Recipe, UserProfile } from '../types';
 import { apiService } from '../services/api';
-import { formatVND } from '../utils/dishUtils';
+import { formatVND, addRecipeToShoppingList } from '../utils/dishUtils';
 import { toast } from './NotificationModal';
 
 interface RecipeDetailModalProps {
@@ -32,6 +32,7 @@ interface RecipeDetailModalProps {
   currentUser: UserProfile;
   onAddToPlanner: (recipe: Recipe) => void;
   onOpenAuth?: () => void;
+  onGoToPlanner?: () => void;
 }
 
 interface CommunityReviewItem {
@@ -49,10 +50,12 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
   currentUser,
   onAddToPlanner,
   onOpenAuth,
+  onGoToPlanner,
 }) => {
   if (!initialRecipe) return null;
 
   const [recipe, setRecipe] = useState<Recipe>(initialRecipe);
+  const [isAddedToShopping, setIsAddedToShopping] = useState<boolean>(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [servings, setServings] = useState(initialRecipe.servings || 2);
   const [activeStep, setActiveStep] = useState(1);
@@ -493,11 +496,27 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
 
                 {/* Add to grocery button */}
                 <button
-                  onClick={() => toast.success(`Đã thêm ${recipe.ingredients?.length || 0} nguyên liệu của món ${recipe.title} vào danh sách đi chợ!`, 'Đi chợ')}
-                  className="w-full py-2.5 bg-orange-50 hover:bg-orange-100 text-orange-700 font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                  onClick={() => {
+                    if (isAddedToShopping && onGoToPlanner) {
+                      onClose();
+                      onGoToPlanner();
+                      return;
+                    }
+                    const count = addRecipeToShoppingList(recipe);
+                    setIsAddedToShopping(true);
+                    toast.success(
+                      `Đã thêm ${count} nguyên liệu của món "${recipe.title}" vào Danh sách đi chợ! Hãy mở tab Thực đơn tuần để xem.`,
+                      'Danh sách đi chợ'
+                    );
+                  }}
+                  className={`w-full py-2.5 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                    isAddedToShopping
+                      ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 shadow-2xs'
+                      : 'bg-orange-50 hover:bg-orange-100 text-orange-700'
+                  }`}
                 >
                   <ShoppingCart className="w-4 h-4" />
-                  Đưa vào Danh sách đi chợ
+                  {isAddedToShopping ? '✓ Đã đưa vào danh sách • Bấm để xem' : 'Đưa vào Danh sách đi chợ'}
                 </button>
               </div>
 

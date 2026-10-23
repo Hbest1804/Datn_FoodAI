@@ -14,7 +14,13 @@ import {
 } from 'lucide-react';
 import { Recipe, UserProfile, FridgeItem } from '../types';
 import { apiService } from '../services/api';
-import { toast, showPrompt } from './NotificationModal';
+import { toast, showPrompt, showConfirm } from './NotificationModal';
+import { 
+  getShoppingList, 
+  saveShoppingList, 
+  addRecipeToShoppingList, 
+  ShoppingItem 
+} from '../utils/dishUtils';
 
 interface MealPlannerViewProps {
   currentUser: UserProfile;
@@ -40,7 +46,20 @@ export const MealPlannerView: React.FC<MealPlannerViewProps> = ({
     return [];
   });
 
-  const [checkedGrocery, setCheckedGrocery] = useState<string[]>([]);
+  const [shoppingList, setShoppingList] = useState<ShoppingItem[]>(() => getShoppingList());
+
+  // Đồng bộ danh sách đi chợ khi có thay đổi từ các modal công thức khác
+  useEffect(() => {
+    const handleUpdate = () => {
+      setShoppingList(getShoppingList());
+    };
+    window.addEventListener('culina_shopping_updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+    return () => {
+      window.removeEventListener('culina_shopping_updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
+  }, []);
 
   // Persist fridge items
   useEffect(() => {
@@ -90,29 +109,112 @@ export const MealPlannerView: React.FC<MealPlannerViewProps> = ({
     return dailySchedule.reduce((sum, item) => sum + (item.recipe?.macros?.calories || 400), 0);
   }, [dailySchedule]);
 
-  // Dynamically extract real ingredients from recipes to build grocery shopping list
-  const dynamicGrocery = useMemo(() => {
-    if (!recipes || recipes.length === 0) return [];
+  // Các thao tác với danh sách đi chợ
+  const toggleShoppingItem = (id: string) => {
+    const updated = shoppingList.map(item =>
+      item.id === id ? { ...item, checked: !item.checked } : item
+    );
+    setShoppingList(updated);
+    saveShoppingList(updated);
+  };
 
-    const map = new Map<string, string>();
-    recipes.slice(0, 5).forEach(r => {
-      (r.ingredients || []).forEach(ing => {
-        if (ing.name && !map.has(ing.name)) {
-          const amountStr = ing.amount ? `${ing.amount} ${ing.unit || 'phần'}` : 'Vừa đủ';
-          map.set(ing.name, `${ing.name} (${amountStr})`);
-        }
-      });
+  const removeShoppingItem = (id: string, name: string) => {
+    const updated = shoppingList.filter(item => item.id !== id);
+    setShoppingList(updated);
+    saveShoppingList(updated);
+    toast.info(`Đã xóa "${name}" khỏi danh sách đi chợ`, 'Danh sách đi chợ');
+  };
+
+  const handleAddCustomShoppingItem = async () => {
+    const name = await showPrompt({
+      title: 'Thêm món cần mua',
+      message: 'Nhập tên thực phẩm / nguyên liệu cần đi chợ:',
+      placeholder: 'VD: Dầu hào, Nước mắm, Rau cải cúc...',
+      confirmText: 'Tiếp tục',
+      required: true,
     });
+    if (!name || !name.trim()) return;
 
-    return Array.from(map.values());
-  }, [recipes]);
+    const amount = await showPrompt({
+      title: 'Số lượng / Khối lượng',
+      message: `Nhập định lượng cho "${name.trim()}":`,
+      placeholder: 'VD: 1 chai, 500g, 2 mớ...',
+      defaultValue: 'Vừa đủ',
+      confirmText: 'Thêm vào giỏ',
+    });
+    if (amount === null) return;
 
-  const toggleGroceryCheck = (item: string) => {
-    if (checkedGrocery.includes(item)) {
-      setCheckedGrocery(checkedGrocery.filter(i => i !== item));
-    } else {
-      setCheckedGrocery([...checkedGrocery, item]);
+    const newItem: ShoppingItem = {
+      id: `shop-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      name: name.trim(),
+      amount: amount.trim() || 'Vừa đủ',
+      recipeTitle: 'Tự thêm',
+      checked: false,
+      addedAt: Date.now(),
+    };
+
+    const updated = [newItem, ...shoppingList];
+    setShoppingList(updated);
+    saveShoppingList(updated);
+    toast.success(`Đã thêm "${newItem.name}" vào danh sách đi chợ!`, 'Danh sách đi chợ');
+  };
+
+  const handleClearChecked = () => {
+    const remaining = shoppingList.filter(item => !item.checked);
+    const count = shoppingList.length - remaining.length;
+    if (count === 0) return;
+    setShoppingList(remaining);
+    saveShoppingList(remaining);
+    toast.success(`Đã dọn dẹp ${count} món đã mua xong!`, 'Danh sách đi chợ');
+  };
+
+  const handleClearAllShopping = async () => {
+    if (shoppingList.length === 0) return;
+    const ok = await showConfirm({
+      title: 'Xóa toàn bộ danh sách đi chợ?',
+      message: 'Bạn có chắc chắn muốn xóa tất cả nguyên liệu trong danh sách đi chợ không?',
+      confirmText: 'Xóa tất cả',
+      cancelText: 'Giữ lại',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    setShoppingList([]);
+    saveShoppingList([]);
+    toast.info('Đã xóa sạch danh sách đi chợ.', 'Danh sách đi chợ');
+  };
+
+  const handleLoadFromWeeklyPlan = () => {
+    if (!recipes || recipes.length === 0) {
+      toast.warning('Chưa có công thức nào để nạp nguyên liệu.', 'Danh sách đi chợ');
+      return;
     }
+    const candidateRecipes = recipes.slice(0, 7);
+    let totalAdded = 0;
+    candidateRecipes.forEach(r => {
+      totalAdded += addRecipeToShoppingList(r);
+    });
+    setShoppingList(getShoppingList());
+    toast.success(`Đã nạp nguyên liệu từ các món thực đơn tuần vào danh sách đi chợ!`, 'Nạp thành công');
+  };
+
+  const handleShareShoppingList = () => {
+    if (shoppingList.length === 0) {
+      toast.warning('Chưa có nguyên liệu nào để chia sẻ.', 'Danh sách đi chợ');
+      return;
+    }
+    const lines = [
+      '🛒 DANH SÁCH ĐI CHỢ - CHEFAI',
+      '─────────────────────────',
+      ...shoppingList.map((item, idx) => {
+        const mark = item.checked ? '[x]' : '[ ]';
+        const dishInfo = item.recipeTitle ? ` (Món: ${item.recipeTitle})` : '';
+        return `${idx + 1}. ${mark} ${item.name} - ${item.amount}${dishInfo}`;
+      }),
+      '─────────────────────────',
+      `Tổng cộng: ${shoppingList.length} món (${shoppingList.filter(i => i.checked).length} đã mua)`
+    ];
+    navigator.clipboard?.writeText(lines.join('\n'));
+    toast.success('Đã sao chép danh sách mua sắm vào clipboard!', 'Chia sẻ thành công');
   };
 
   const handleAddFridgeItem = async () => {
@@ -355,56 +457,149 @@ export const MealPlannerView: React.FC<MealPlannerViewProps> = ({
           </div>
 
           {/* Grocery Shopping List Box */}
-          <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+          <div id="shopping-list-section" className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4 scroll-mt-24">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
-                <ShoppingCart className="w-5 h-5 text-emerald-600" />
-                <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                  Đi Chợ Từ Công Thức Thực
-                </h4>
+                <div className="w-8 h-8 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600">
+                  <ShoppingCart className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                    Danh Sách Đi Chợ
+                  </h4>
+                  <p className="text-[11px] text-slate-400">
+                    {shoppingList.length > 0 
+                      ? `${shoppingList.filter(i => i.checked).length}/${shoppingList.length} món đã mua`
+                      : 'Chưa có món nào'}
+                  </p>
+                </div>
               </div>
-              <button
-                onClick={() => {
-                  if (dynamicGrocery.length === 0) {
-                    toast.warning('Chưa có nguyên liệu nào để chia sẻ.', 'Danh sách đi chợ');
-                    return;
-                  }
-                  navigator.clipboard?.writeText(dynamicGrocery.join('\n'));
-                  toast.success('Đã sao chép danh sách mua sắm vào clipboard!', 'Chia sẻ thành công');
-                }}
-                className="text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
-                title="Chia sẻ danh sách"
-              >
-                <Share2 className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={handleAddCustomShoppingItem}
+                  className="p-1.5 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                  title="Thêm món cần mua"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={handleShareShoppingList}
+                  className="p-1.5 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                  title="Sao chép danh sách"
+                >
+                  <Share2 className="w-4 h-4" />
+                </button>
+                {shoppingList.some(i => i.checked) && (
+                  <button
+                    onClick={handleClearChecked}
+                    className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors text-[11px] font-semibold cursor-pointer"
+                    title="Dọn các món đã mua"
+                  >
+                    <Check className="w-4 h-4" />
+                  </button>
+                )}
+                {shoppingList.length > 0 && (
+                  <button
+                    onClick={handleClearAllShopping}
+                    className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                    title="Xóa toàn bộ giỏ"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
             </div>
 
-            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-              {dynamicGrocery.length === 0 ? (
-                <div className="py-6 text-center text-xs text-slate-400">
-                  Danh sách đi chợ sẽ tự động xuất hiện khi có món ăn trong thực đơn.
+            <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+              {shoppingList.length === 0 ? (
+                <div className="py-8 px-4 text-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 space-y-3">
+                  <div className="w-10 h-10 rounded-full bg-emerald-100/60 text-emerald-600 mx-auto flex items-center justify-center">
+                    <ShoppingCart className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-slate-700">Giỏ đi chợ đang trống</p>
+                    <p className="text-[11px] text-slate-500 mt-1 max-w-xs mx-auto">
+                      Nhấn nút <span className="font-semibold text-orange-600">"Đưa vào Danh sách đi chợ"</span> trong chi tiết bất kỳ món ăn nào, hoặc nạp nhanh từ thực đơn tuần.
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-1.5 pt-1">
+                    <button
+                      onClick={handleLoadFromWeeklyPlan}
+                      className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                    >
+                      + Nạp nguyên liệu từ Thực đơn tuần
+                    </button>
+                    <button
+                      onClick={handleAddCustomShoppingItem}
+                      className="w-full py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                    >
+                      + Tự thêm món cần mua
+                    </button>
+                  </div>
                 </div>
               ) : (
-                dynamicGrocery.map(item => {
-                  const isChecked = checkedGrocery.includes(item);
-                  return (
-                    <label
-                      key={item}
-                      onClick={() => toggleGroceryCheck(item)}
-                      className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-slate-50 text-xs cursor-pointer"
+                <>
+                  {shoppingList.map(item => {
+                    return (
+                      <div
+                        key={item.id}
+                        className={`group flex items-center justify-between p-2 rounded-xl transition-all border ${
+                          item.checked 
+                            ? 'bg-slate-50/80 border-slate-100 opacity-60' 
+                            : 'bg-white hover:bg-emerald-50/30 border-slate-200/60 shadow-2xs'
+                        }`}
+                      >
+                        <label className="flex items-center gap-2.5 flex-1 min-w-0 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(item.checked)}
+                            onChange={() => toggleShoppingItem(item.id)}
+                            className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 accent-emerald-600 cursor-pointer shrink-0"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className={`text-xs font-semibold truncate ${
+                                item.checked ? 'line-through text-slate-400' : 'text-slate-800'
+                              }`}>
+                                {item.name}
+                              </span>
+                              <span className="text-[10px] px-1.5 py-0.2 bg-slate-100 text-slate-600 font-medium rounded shrink-0">
+                                {item.amount}
+                              </span>
+                            </div>
+                            {item.recipeTitle && (
+                              <p className="text-[10px] text-orange-600/80 truncate font-medium">
+                                🍳 {item.recipeTitle}
+                              </p>
+                            )}
+                          </div>
+                        </label>
+                        <button
+                          onClick={() => removeShoppingItem(item.id, item.name)}
+                          className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-500 rounded transition-all cursor-pointer shrink-0"
+                          title="Xóa nguyên liệu này"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })}
+
+                  <div className="pt-2 flex items-center justify-between border-t border-slate-100 text-[11px]">
+                    <button
+                      onClick={handleAddCustomShoppingItem}
+                      className="text-emerald-700 font-bold hover:underline cursor-pointer flex items-center gap-1"
                     >
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() => toggleGroceryCheck(item)}
-                        className="rounded text-emerald-600 focus:ring-emerald-500 accent-emerald-600"
-                      />
-                      <span className={isChecked ? 'line-through text-slate-400' : 'text-slate-700 font-medium'}>
-                        {item}
-                      </span>
-                    </label>
-                  );
-                })
+                      <Plus className="w-3.5 h-3.5" /> Thêm món khác
+                    </button>
+                    <button
+                      onClick={handleLoadFromWeeklyPlan}
+                      className="text-slate-500 hover:text-slate-800 cursor-pointer"
+                    >
+                      + Nạp thêm từ thực đơn
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           </div>

@@ -159,3 +159,71 @@ export function normalizeDish(raw: any): Recipe {
     related_dishes: raw.related_dishes,
   };
 }
+
+// ────────────────────────────────────────────────────────────────────────────────
+// Quản lý Danh sách đi chợ (Shopping List) lưu cục bộ
+// ────────────────────────────────────────────────────────────────────────────────
+
+export interface ShoppingItem {
+  id: string;
+  name: string;
+  amount: string;
+  recipeTitle?: string;
+  checked?: boolean;
+  addedAt: number;
+}
+
+export function getShoppingList(): ShoppingItem[] {
+  try {
+    const raw = localStorage.getItem('culina_shopping_list');
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveShoppingList(items: ShoppingItem[]): void {
+  try {
+    localStorage.setItem('culina_shopping_list', JSON.stringify(items));
+    window.dispatchEvent(new CustomEvent('culina_shopping_updated', { detail: items }));
+  } catch (err) {
+    console.warn('Failed to save shopping list:', err);
+  }
+}
+
+export function addRecipeToShoppingList(recipe: Recipe): number {
+  if (!recipe || !recipe.ingredients || recipe.ingredients.length === 0) return 0;
+  const current = getShoppingList();
+  
+  let addedCount = 0;
+  const newItems = [...current];
+
+  recipe.ingredients.forEach(ing => {
+    const trimmed = (ing.name || '').trim();
+    if (!trimmed) return;
+    const amountStr = ing.amount ? `${ing.amount} ${ing.unit || ''}`.trim() : 'Vừa đủ';
+    
+    // Nếu đã có trong danh sách thì bổ sung tên món vào ghi chú
+    const foundIndex = newItems.findIndex(i => i.name.trim().toLowerCase() === trimmed.toLowerCase());
+    if (foundIndex >= 0) {
+      if (recipe.title && !newItems[foundIndex].recipeTitle?.includes(recipe.title)) {
+        newItems[foundIndex].recipeTitle = newItems[foundIndex].recipeTitle 
+          ? `${newItems[foundIndex].recipeTitle}, ${recipe.title}` 
+          : recipe.title;
+      }
+    } else {
+      newItems.push({
+        id: `shop-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        name: trimmed,
+        amount: amountStr,
+        recipeTitle: recipe.title,
+        checked: false,
+        addedAt: Date.now(),
+      });
+      addedCount++;
+    }
+  });
+
+  saveShoppingList(newItems);
+  return addedCount || recipe.ingredients.length;
+}

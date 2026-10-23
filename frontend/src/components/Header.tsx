@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Search, 
   ShieldCheck, 
@@ -8,11 +8,12 @@ import {
   UserPlus,
   Flame,
   User,
-  ChefHat
+  ChefHat,
+  ShoppingCart
 } from 'lucide-react';
 import { UserProfile, UserRole } from '../types';
 import { ChefLogo3D } from './ChefLogo3D';
-import { DEFAULT_AVATAR } from '../utils/dishUtils';
+import { DEFAULT_AVATAR, getShoppingList } from '../utils/dishUtils';
 
 interface HeaderProps {
   currentTab: string;
@@ -41,6 +42,25 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const [searchInput, setSearchInput] = useState('');
   const [showUserDropdown, setShowUserDropdown] = useState(false);
+  const [shoppingCount, setShoppingCount] = useState<number>(() => {
+    try {
+      return getShoppingList().filter(i => !i.checked).length;
+    } catch {
+      return 0;
+    }
+  });
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      setShoppingCount(getShoppingList().filter(i => !i.checked).length);
+    };
+    window.addEventListener('culina_shopping_updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+    return () => {
+      window.removeEventListener('culina_shopping_updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
+  }, []);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -204,7 +224,33 @@ export const Header: React.FC<HeaderProps> = ({
           ) : null}
 
           {/* Right Action Elements */}
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2 sm:gap-2.5">
+            {/* Quick Shopping Cart Button */}
+            {!isAdminMode && (
+              <button
+                onClick={() => {
+                  onTabChange('planner');
+                  setTimeout(() => {
+                    const el = document.getElementById('shopping-list-section');
+                    if (el) el.scrollIntoView({ behavior: 'smooth' });
+                  }, 120);
+                }}
+                className={`relative p-2 rounded-xl transition-all cursor-pointer flex items-center justify-center ${
+                  currentTab === 'planner'
+                    ? 'bg-emerald-50 text-emerald-600 ring-1 ring-emerald-200'
+                    : 'text-slate-600 hover:text-emerald-600 hover:bg-slate-100'
+                }`}
+                title={`Danh sách đi chợ (${shoppingCount} món cần mua)`}
+              >
+                <ShoppingCart className="w-5 h-5" />
+                {shoppingCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-emerald-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center shadow-xs">
+                    {shoppingCount > 99 ? '99+' : shoppingCount}
+                  </span>
+                )}
+              </button>
+            )}
+
             {!currentUser.isLoggedIn ? (
               /* When not logged in: ONLY show Login & Register buttons */
               <div className="flex items-center gap-2">
@@ -374,11 +420,18 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
             <button
               onClick={() => onTabChange('planner')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg shrink-0 ${
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg shrink-0 flex items-center gap-1 ${
                 currentTab === 'planner' ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-700'
               }`}
             >
-              Thực đơn
+              <span>Thực đơn</span>
+              {shoppingCount > 0 && (
+                <span className={`text-[10px] px-1 py-0.2 rounded-full font-bold ${
+                  currentTab === 'planner' ? 'bg-white/25 text-white' : 'bg-emerald-100 text-emerald-700'
+                }`}>
+                  {shoppingCount}
+                </span>
+              )}
             </button>
             <button
               onClick={() => onTabChange('profile')}
