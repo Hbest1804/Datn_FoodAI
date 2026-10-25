@@ -6,8 +6,6 @@
   "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",
-    "seed": "node src/scripts/seedDatabase.js",
-    "images:optimize": "node src/scripts/optimizeDishImages.js",
     "start": "node src/server.js",
     "test": "node --test"
   },

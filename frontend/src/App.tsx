@@ -261,19 +261,12 @@ export default function App() {
     navigate('/', { replace: true });
   }, [location.pathname]);
 
+  // Vai trò chỉ lấy từ phiên đăng nhập (máy chủ trả về); giao diện không được tự nâng lên quản trị viên
   const handleSwitchUserRole = (role: UserRole) => {
     if (role === 'guest') {
       setCurrentUser(DEFAULT_GUEST);
       if (isAdminMode) setCurrentTab('discovery');
-    } else if (role === 'admin') {
-      setCurrentUser(prev => ({
-        ...prev,
-        role: 'admin',
-        roleLabel: 'Quản trị viên',
-        name: prev.name === 'Khách' ? 'Quản Trị Viên' : prev.name,
-      }));
-      setCurrentTab('admin');
-    } else {
+    } else if (role === 'user') {
       setCurrentUser(prev => ({
         ...prev,
         role: 'user',
@@ -284,16 +277,7 @@ export default function App() {
   };
 
   const handleToggleAdminMode = (admin: boolean) => {
-    if (admin) {
-      setCurrentUser(prev => ({
-        ...prev,
-        role: 'admin',
-        roleLabel: 'Quản trị viên',
-      }));
-      setCurrentTab('admin');
-    } else {
-      setCurrentTab('discovery');
-    }
+    setCurrentTab(admin && currentUser.role === 'admin' ? 'admin' : 'discovery');
   };
 
   const handleOpenChatWithPrompt = (prompt: string, fridgeContext?: string[]) => {
@@ -501,14 +485,6 @@ export default function App() {
         onOpenLoginModal={() => {
           setAuthModalType('login');
           setIsAuthModalOpen(true);
-        }}
-        onToggleAdmin={() => {
-          setCurrentUser(prev => ({
-            ...prev,
-            role: 'admin',
-            roleLabel: 'Quản trị viên',
-          }));
-          setCurrentTab('admin');
         }}
       />
 

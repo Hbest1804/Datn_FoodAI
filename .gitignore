@@ -1,5 +1,10 @@
 Untitled_Diagramtq.png
 *.docx
+*.pptx
+*.xlsx
+*.xls
+*.pdf
+*.csv
 api_targets.txt
 doc_api.txt
 api_extracted.txt
@@ -7,8 +12,13 @@ use_case_extracted.txt
 *.sql
 backend/schema_chatbot_am_thuc.sql
 diagram.png
-backend/src/scripts/test*
+htdb*.png
 *.png
+*.jpg
+*.jpeg
+*.dbml
+erd_v3.dbml
+backend/src/scripts/test*
 *.zip
 
 # Dependencies & Build

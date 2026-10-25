@@ -1,14 +1,13 @@
  import React from 'react';
-import { UtensilsCrossed, Sparkles, Shield, HeartHandshake } from 'lucide-react';
+import { UtensilsCrossed, Sparkles, HeartHandshake } from 'lucide-react';
 import { ChefLogo3D } from './ChefLogo3D';
 
 interface FooterProps {
   onSelectTab: (tab: string) => void;
   onOpenLoginModal: () => void;
-  onToggleAdmin: () => void;
 }
 
-export const Footer: React.FC<FooterProps> = ({ onSelectTab, onOpenLoginModal, onToggleAdmin }) => {
+export const Footer: React.FC<FooterProps> = ({ onSelectTab, onOpenLoginModal }) => {
   return (
     <footer className="bg-white border-t border-slate-200 mt-20 pt-16 pb-12 text-slate-600">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -166,15 +165,6 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab, onOpenLoginModal, o
                   <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
                   Cộng đồng: <span className="font-medium text-slate-700">Hội Yêu Bếp & Dinh Dưỡng ChefAI</span>
                 </a>
-              </li>
-              <li className="pt-2">
-                <button
-                  onClick={onToggleAdmin}
-                  className="hover:text-orange-600 transition-colors text-left cursor-pointer font-semibold text-orange-600 flex items-center gap-1"
-                >
-                  <Shield className="w-3.5 h-3.5" />
-                  Quản trị viên (ChefAI Studio)
-                </button>
               </li>
             </ul>
           </div>
