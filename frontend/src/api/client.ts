@@ -58,6 +58,75 @@ export function clearAuthToken(): void {
 
 export interface RequestOptions extends RequestInit {
   params?: Record<string, any>;
+  // Nội bộ: đã thử làm mới mã truy cập cho yêu cầu này hay chưa
+  _retried?: boolean;
+}
+
+// Dùng chung một yêu cầu làm mới khi nhiều API cùng nhận TOKEN_EXPIRED
+let refreshPromise: Promise<string | null> | null = null;
+
+/**
+ * Làm mới mã truy cập bằng refresh token (POST /auth/refresh). Mã làm mới được cấp mới mỗi lần nên lưu lại cả hai.
+ */
+export function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = localStorage.getItem('culina_refresh_token');
+  if (!refreshToken) return Promise.resolve(null);
+  if (!refreshPromise) {
+    refreshPromise = fetch(`${BASE_API_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    })
+      .then(async (res) => {
+        const json = await res.json().catch(() => ({}));
+        const token = json.data?.access_token;
+        if (!res.ok || !token) {
+          clearAuthToken();
+          return null;
+        }
+        setAuthToken(token, json.data?.refresh_token);
+        return token as string;
+      })
+      .catch(() => null)
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise;
+}
+
+/** Ghép thông báo lỗi: ưu tiên lỗi theo từng trường (error.details) nếu có. */
+function buildErrorMessage(data: any, status: number): string {
+  const details = data?.error?.details;
+  if (Array.isArray(details)) {
+    const messages = details.map((d: any) => d?.message).filter(Boolean);
+    if (messages.length > 0) return [...new Set(messages)].join(' ');
+  }
+  return data?.error?.message || data?.message || `Lỗi máy chủ (${status})`;
+}
+
+/**
+ * fetch kèm mã truy cập cho các yêu cầu không gửi JSON (tải tệp lên, tải tệp về).
+ * Tự làm mới mã truy cập một lần khi nhận TOKEN_EXPIRED; lỗi được ném ra dưới dạng ApiError.
+ */
+export async function authFetch(endpoint: string, init: RequestInit = {}, retried = false): Promise<Response> {
+  const token = getAuthToken();
+  const headers: Record<string, string> = { ...(init.headers as Record<string, string> || {}) };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_API_URL}${endpoint}`, { ...init, headers });
+  } catch {
+    throw new ApiError('Không thể kết nối tới máy chủ. Vui lòng kiểm tra kết nối mạng hoặc thử lại sau.', 'NETWORK_ERROR', 0);
+  }
+  if (res.ok) return res;
+
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && data?.error?.code === 'TOKEN_EXPIRED' && !retried && (await refreshAccessToken())) {
+    return authFetch(endpoint, init, true);
+  }
+  throw new ApiError(buildErrorMessage(data, res.status), data?.error?.code || 'API_ERROR', res.status, data?.error?.details || null);
 }
 
 /**
@@ -94,26 +163,33 @@ export async function apiClient<T = any>(endpoint: string, options: RequestOptio
     headers['Authorization'] = `Bearer ${token}`;
   }
 
+  const { params: _params, _retried, ...fetchOptions } = options;
+
   try {
     const response = await fetch(url, {
-      ...options,
+      ...fetchOptions,
       headers,
     });
 
-    if (response.status === 204) {
-      return null as T;
+    // 204 (xóa) và 202 (ghi nhận tương tác) có thể không có nội dung
+    const raw = await response.text();
+    let data: any = null;
+    try {
+      data = raw ? JSON.parse(raw) : null;
+    } catch {
+      data = null;
     }
-
-    const data = await response.json();
 
     if (!response.ok) {
-      const errorMsg = data.error?.message || data.message || `Lỗi máy chủ (${response.status})`;
-      const errorCode = data.error?.code || 'API_ERROR';
-      const errorDetails = data.error?.details || null;
-      throw new ApiError(errorMsg, errorCode, response.status, errorDetails);
+      const errorCode = data?.error?.code || 'API_ERROR';
+      // Mã truy cập hết hạn: làm mới rồi gửi lại đúng một lần
+      if (response.status === 401 && errorCode === 'TOKEN_EXPIRED' && !_retried && (await refreshAccessToken())) {
+        return apiClient<T>(endpoint, { ...options, _retried: true });
+      }
+      throw new ApiError(buildErrorMessage(data, response.status), errorCode, response.status, data?.error?.details || null);
     }
 
-    return data;
+    return data as T;
   } catch (err: any) {
     if (err instanceof ApiError) {
       throw err;

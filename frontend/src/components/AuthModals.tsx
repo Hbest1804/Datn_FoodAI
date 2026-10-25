@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   X, 
   UtensilsCrossed, 
@@ -27,6 +27,29 @@ interface AuthModalsProps {
   onClose: () => void;
   onSwitchType: (type: 'login' | 'register' | 'forgot-password') => void;
   onLoginSuccess: (user: Partial<UserProfile>) => void;
+  /** Token lấy từ liên kết /reset-password?token=... trong email → mở thẳng bước nhập mật khẩu mới */
+  initialResetToken?: string;
+}
+
+// Chỉ ghi nhớ email; mật khẩu do trình quản lý mật khẩu của trình duyệt lưu (không tự lưu mật khẩu vào localStorage)
+const REMEMBER_EMAIL_KEY = 'culina_remember_email';
+const OTP_LENGTH = 6;
+
+function readRememberedEmail(): string {
+  try {
+    return localStorage.getItem(REMEMBER_EMAIL_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function saveRememberedEmail(value: string | null): void {
+  try {
+    if (value) localStorage.setItem(REMEMBER_EMAIL_KEY, value);
+    else localStorage.removeItem(REMEMBER_EMAIL_KEY);
+  } catch {
+    // Trình duyệt chặn lưu trữ thì bỏ qua
+  }
 }
 
 export const AuthModals: React.FC<AuthModalsProps> = ({
@@ -35,44 +58,57 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
   onClose,
   onSwitchType,
   onLoginSuccess,
+  initialResetToken,
 }) => {
   // Common states
   const [showPassword, setShowPassword] = useState(false);
-  const [email, setEmail] = useState('');
+  const [showRegPassword, setShowRegPassword] = useState(false);
+  const [showRegConfirm, setShowRegConfirm] = useState(false);
+  const [regConfirm, setRegConfirm] = useState('');
+  const [email, setEmail] = useState(readRememberedEmail);
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(() => Boolean(readRememberedEmail()));
   const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
   // Register taste questionnaire states
   const [selectedDiet, setSelectedDiet] = useState('Eat Clean');
-  const [selectedAllergens, setSelectedAllergens] = useState<string[]>(['Không có']);
 
-  // Forgot password states
-  const [forgotStep, setForgotStep] = useState<1 | 2 | 3>(1);
+  // Forgot password states: 1 nhập email → 2 nhập mã xác thực → 3 đặt mật khẩu mới → 4 hoàn tất
+  const [forgotStep, setForgotStep] = useState<1 | 2 | 3 | 4>(1);
   const [forgotEmail, setForgotEmail] = useState('');
-  const [resetToken, setResetToken] = useState('');
-  const [otpCode, setOtpCode] = useState(['', '', '', '', '', '']);
+  const [otpCode, setOtpCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
 
-  if (!isOpen) return null;
-
-  const toggleAllergen = (item: string) => {
-    if (item === 'Không có') {
-      setSelectedAllergens(['Không có']);
-      return;
-    }
-    const filtered = selectedAllergens.filter(a => a !== 'Không có');
-    if (filtered.includes(item)) {
-      const next = filtered.filter(a => a !== item);
-      setSelectedAllergens(next.length === 0 ? ['Không có'] : next);
-    } else {
-      setSelectedAllergens([...filtered, item]);
+  const verifyCode = async (code: string) => {
+    setErrorMessage('');
+    setSuccessMessage('');
+    setLoading(true);
+    try {
+      await apiService.auth.verifyResetToken(code);
+      setForgotStep(3);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Mã xác thực không hợp lệ hoặc đã hết hạn.');
+      setForgotStep(2);
+    } finally {
+      setLoading(false);
     }
   };
+
+  // Mở từ liên kết trong email: điền sẵn mã và kiểm tra luôn
+  useEffect(() => {
+    if (!initialResetToken) return;
+    const code = initialResetToken.trim();
+    setOtpCode(code);
+    setForgotStep(2);
+    verifyCode(code);
+  }, [initialResetToken]);
+
+  if (!isOpen) return null;
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,11 +117,13 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
 
     try {
       const data = await apiService.auth.login(email.trim(), password);
+      saveRememberedEmail(rememberMe ? email.trim() : null);
       const user = data.user;
       onLoginSuccess({
         id: user.id,
         name: user.display_name || user.email.split('@')[0],
         email: user.email,
+        ...(user.avatar_url ? { avatar: user.avatar_url, avatar_url: user.avatar_url } : {}),
         role: user.role,
         roleLabel: user.role === 'admin' ? 'Super Admin' : 'Đầu bếp tại gia',
         isPro: true,
@@ -101,6 +139,10 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
 
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (password !== regConfirm) {
+      setErrorMessage('Mật khẩu xác nhận không khớp.');
+      return;
+    }
     setErrorMessage('');
     setLoading(true);
 
@@ -108,8 +150,8 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
       const data = await apiService.auth.register({
         email: email.trim(),
         password,
+        confirmPassword: regConfirm,
         displayName: name.trim(),
-        phone: phone.trim(),
       });
       const user = data.user;
       onLoginSuccess({
@@ -120,7 +162,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
         roleLabel: 'Đầu bếp tại gia',
         isPro: true,
         dietPreference: selectedDiet,
-        allergiesHardLock: selectedAllergens.filter(a => a !== 'Không có'),
+        allergiesHardLock: [],
       });
       onClose();
     } catch (err: any) {
@@ -142,6 +184,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
     try {
       const res = await apiService.auth.forgotPassword(forgotEmail.trim());
       setSuccessMessage(res.message);
+      setOtpCode('');
       setForgotStep(2);
     } catch (err: any) {
       setErrorMessage(err.message || 'Không thể gửi yêu cầu đặt lại mật khẩu.');
@@ -150,13 +193,54 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
     }
   };
 
-  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
+  const handleVerifyCodeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const tokenVal = resetToken.trim() || otpCode.join('').trim();
-    if (!tokenVal) {
-      setErrorMessage('Vui lòng nhập mã OTP hoặc Token xác thực.');
+    if (otpCode.length !== OTP_LENGTH) {
+      setErrorMessage(`Vui lòng nhập đủ ${OTP_LENGTH} số của mã xác thực.`);
       return;
     }
+    verifyCode(otpCode);
+  };
+
+  const handleOtpChange = (index: number, value: string) => {
+    const digits = value.replace(/\D/g, '');
+    if (!digits) {
+      setOtpCode(otpCode.slice(0, index) + otpCode.slice(index + 1));
+      return;
+    }
+    // Hỗ trợ dán cả mã 6 số vào một ô
+    const next = (otpCode.slice(0, index) + digits).slice(0, OTP_LENGTH);
+    setOtpCode(next);
+    otpRefs.current[Math.min(next.length, OTP_LENGTH - 1)]?.focus();
+  };
+
+  const handleOtpKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Backspace' && !otpCode[index] && index > 0) {
+      setOtpCode(otpCode.slice(0, index - 1));
+      otpRefs.current[index - 1]?.focus();
+    }
+  };
+
+  const handleResendCode = async () => {
+    if (!forgotEmail.trim()) {
+      setForgotStep(1);
+      return;
+    }
+    setErrorMessage('');
+    setLoading(true);
+    try {
+      const res = await apiService.auth.forgotPassword(forgotEmail.trim());
+      setSuccessMessage(res.message);
+      setOtpCode('');
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Không thể gửi lại mã xác thực.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (newPassword.length < 8) {
       setErrorMessage('Mật khẩu mới phải có ít nhất 8 ký tự, gồm chữ hoa, chữ thường và chữ số.');
       return;
@@ -169,14 +253,19 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
     setLoading(true);
     try {
       const res = await apiService.auth.resetPassword({
-        token: tokenVal,
+        token: otpCode,
         new_password: newPassword,
         confirm_password: confirmPassword,
       });
       setSuccessMessage(res.message);
-      setForgotStep(3);
+      setOtpCode('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setForgotStep(4);
     } catch (err: any) {
-      setErrorMessage(err.message || 'Mã xác thực không hợp lệ hoặc đã hết hạn.');
+      // Mã hết hạn trong lúc nhập mật khẩu → quay lại bước nhập mã
+      if (err.code === 'INVALID_OR_EXPIRED_TOKEN') setForgotStep(2);
+      setErrorMessage(err.message || 'Không thể đặt lại mật khẩu. Vui lòng thử lại.');
     } finally {
       setLoading(false);
     }
@@ -320,6 +409,9 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                     <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                     <input
                       type="email"
+                      name="email"
+                      id="login-email"
+                      autoComplete="username"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       required
@@ -344,6 +436,9 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                     <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                     <input
                       type={showPassword ? 'text' : 'password'}
+                      name="password"
+                      id="login-password"
+                      autoComplete="current-password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       required
@@ -360,7 +455,20 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-start gap-2 pt-1">
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="checkbox"
+                    id="remember-login"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="rounded text-orange-500 focus:ring-orange-500"
+                  />
+                  <label htmlFor="remember-login" className="text-[11px] font-semibold text-slate-600 cursor-pointer">
+                    Ghi nhớ đăng nhập
+                  </label>
+                </div>
+
+                <div className="flex items-start gap-2">
                   <input
                     type="checkbox"
                     id="terms-login"
@@ -514,24 +622,47 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs font-bold text-slate-700 block mb-1">MẬT KHẨU</label>
-                    <input
-                      type="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      required
-                      placeholder="Tối thiểu 8 ký tự"
-                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 focus:bg-white focus:border-orange-500 rounded-xl text-xs font-medium outline-none transition-all"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showRegPassword ? 'text' : 'password'}
+                        autoComplete="new-password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                        placeholder="Tối thiểu 8 ký tự"
+                        className="w-full pl-3 pr-10 py-2.5 bg-slate-50 border border-slate-200 focus:bg-white focus:border-orange-500 rounded-xl text-xs font-medium outline-none transition-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowRegPassword(!showRegPassword)}
+                        aria-label={showRegPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                        className="absolute right-3.5 top-3 text-slate-400 hover:text-slate-600"
+                      >
+                        {showRegPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
                   </div>
                   <div>
                     <label className="text-xs font-bold text-slate-700 block mb-1">XÁC NHẬN MẬT KHẨU</label>
-                    <input
-                      type="password"
-                      defaultValue={password}
-                      required
-                      placeholder="Nhập lại mật khẩu"
-                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 focus:bg-white focus:border-orange-500 rounded-xl text-xs font-medium outline-none transition-all"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showRegConfirm ? 'text' : 'password'}
+                        autoComplete="new-password"
+                        value={regConfirm}
+                        onChange={(e) => setRegConfirm(e.target.value)}
+                        required
+                        placeholder="Nhập lại mật khẩu"
+                        className="w-full pl-3 pr-10 py-2.5 bg-slate-50 border border-slate-200 focus:bg-white focus:border-orange-500 rounded-xl text-xs font-medium outline-none transition-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowRegConfirm(!showRegConfirm)}
+                        aria-label={showRegConfirm ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                        className="absolute right-3.5 top-3 text-slate-400 hover:text-slate-600"
+                      >
+                        {showRegConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -565,26 +696,6 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                     </div>
                   </div>
 
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1.5">DỊ ỨNG CẦN AI NÉ TRÁNH TUYỆT ĐỐI:</label>
-                    <div className="flex flex-wrap gap-1.5">
-                      {['Hải sản có vỏ', 'Sữa động vật', 'Đậu phộng', 'Không có'].map(alg => (
-                        <button
-                          key={alg}
-                          type="button"
-                          onClick={() => toggleAllergen(alg)}
-                          className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition-all cursor-pointer ${
-                            selectedAllergens.includes(alg)
-                              ? alg === 'Không có' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-red-500 text-white border-red-500'
-                              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                          }`}
-                        >
-                          {selectedAllergens.includes(alg) && '✓ '}
-                          {alg}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
                 </div>
 
                 <div className="flex items-start gap-2">
@@ -679,22 +790,17 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                 </div>
               </div>
 
-              {/* 3 Step Breadcrumb */}
-              <div className="flex items-center gap-3 pb-6 border-b border-slate-100 mb-6">
-                <div className={`flex items-center gap-1.5 text-xs font-bold ${forgotStep >= 1 ? 'text-orange-600' : 'text-slate-400'}`}>
-                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${forgotStep >= 1 ? 'bg-orange-500 text-white' : 'bg-slate-200'}`}>1</span>
-                  Yêu cầu mã
-                </div>
-                <span className="text-slate-300">/</span>
-                <div className={`flex items-center gap-1.5 text-xs font-bold ${forgotStep >= 2 ? 'text-orange-600' : 'text-slate-400'}`}>
-                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${forgotStep >= 2 ? 'bg-orange-500 text-white' : 'bg-slate-200'}`}>2</span>
-                  Đặt mật khẩu mới
-                </div>
-                <span className="text-slate-300">/</span>
-                <div className={`flex items-center gap-1.5 text-xs font-bold ${forgotStep >= 3 ? 'text-orange-600' : 'text-slate-400'}`}>
-                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${forgotStep >= 3 ? 'bg-orange-500 text-white' : 'bg-slate-200'}`}>3</span>
-                  Hoàn tất
-                </div>
+              {/* 4 Step Breadcrumb */}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-6 border-b border-slate-100 mb-6">
+                {['Nhập email', 'Nhập mã', 'Mật khẩu mới', 'Hoàn tất'].map((label, i) => (
+                  <React.Fragment key={label}>
+                    {i > 0 && <span className="text-slate-300">/</span>}
+                    <div className={`flex items-center gap-1.5 text-xs font-bold ${forgotStep >= i + 1 ? 'text-orange-600' : 'text-slate-400'}`}>
+                      <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${forgotStep >= i + 1 ? 'bg-orange-500 text-white' : 'bg-slate-200'}`}>{i + 1}</span>
+                      {label}
+                    </div>
+                  </React.Fragment>
+                ))}
               </div>
 
               {errorMessage && (
@@ -744,26 +850,76 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                 </form>
               )}
 
-              {/* Step 2: Nhập token/mã + mật khẩu mới */}
+              {/* Step 2: Nhập mã xác thực gửi qua email */}
               {forgotStep === 2 && (
-                <form onSubmit={handleResetPasswordSubmit} className="space-y-4">
+                <form onSubmit={handleVerifyCodeSubmit} className="space-y-4">
                   <div>
-                    <h4 className="text-lg font-black text-slate-900">Đặt lại mật khẩu</h4>
+                    <h4 className="text-lg font-black text-slate-900">Nhập mã xác thực</h4>
                     <p className="text-xs text-slate-500 mt-1">
-                      Vui lòng nhập mã xác thực (hoặc token gửi trong email) và mật khẩu mới cho tài khoản {forgotEmail}.
+                      Nhập mã {OTP_LENGTH} số đã gửi tới email{forgotEmail ? <> <span className="font-bold text-slate-700">{forgotEmail}</span></> : ' của bạn'}. Mã có hiệu lực trong 15 phút và chỉ dùng được một lần.
                     </p>
                   </div>
 
+                  <div className="flex justify-center gap-2">
+                    {Array.from({ length: OTP_LENGTH }, (_, i) => (
+                      <input
+                        key={i}
+                        ref={(el) => { otpRefs.current[i] = el; }}
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete={i === 0 ? 'one-time-code' : 'off'}
+                        maxLength={OTP_LENGTH}
+                        value={otpCode[i] ?? ''}
+                        onChange={(e) => handleOtpChange(i, e.target.value)}
+                        onKeyDown={(e) => handleOtpKeyDown(i, e)}
+                        onFocus={(e) => e.target.select()}
+                        autoFocus={i === 0}
+                        aria-label={`Số thứ ${i + 1} của mã xác thực`}
+                        className="w-11 h-12 text-center text-lg font-black font-mono bg-slate-50 border border-slate-200 focus:bg-white focus:border-orange-500 rounded-xl outline-none transition-all"
+                      />
+                    ))}
+                  </div>
+
+                  <div className="text-center text-[11px] text-slate-500">
+                    Chưa nhận được mã?{' '}
+                    <button
+                      type="button"
+                      onClick={handleResendCode}
+                      disabled={loading}
+                      className="font-bold text-orange-600 hover:underline disabled:opacity-50 cursor-pointer"
+                    >
+                      {forgotEmail ? 'Gửi lại mã' : 'Yêu cầu mã mới'}
+                    </button>
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => { setForgotStep(1); setErrorMessage(''); setSuccessMessage(''); }}
+                      className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+                    >
+                      Quay lại
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={loading || otpCode.length !== OTP_LENGTH}
+                      className="flex-1 py-3 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 disabled:opacity-50 text-white rounded-xl text-xs font-bold uppercase tracking-wider shadow-md shadow-orange-500/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      {loading ? 'Đang kiểm tra...' : 'Xác nhận mã'}
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* Step 3: Đặt mật khẩu mới (chỉ hiện sau khi mã hợp lệ) */}
+              {forgotStep === 3 && (
+                <form onSubmit={handleResetPasswordSubmit} className="space-y-4">
                   <div>
-                    <label className="text-xs font-bold text-slate-700 block mb-1">MÃ XÁC THỰC / TOKEN *</label>
-                    <input
-                      type="text"
-                      required
-                      value={resetToken}
-                      onChange={(e) => setResetToken(e.target.value)}
-                      placeholder="Nhập mã 6 số hoặc chuỗi token đặt lại..."
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 focus:bg-white focus:border-orange-500 rounded-xl text-xs font-mono outline-none transition-all"
-                    />
+                    <h4 className="text-lg font-black text-slate-900">Đặt mật khẩu mới</h4>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Mã xác thực hợp lệ. Vui lòng nhập mật khẩu mới cho tài khoản{forgotEmail ? ` ${forgotEmail}` : ''}.
+                    </p>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -772,6 +928,8 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                       <input
                         type="password"
                         required
+                        autoFocus
+                        autoComplete="new-password"
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
                         placeholder="Tối thiểu 8 ký tự"
@@ -783,6 +941,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                       <input
                         type="password"
                         required
+                        autoComplete="new-password"
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
                         placeholder="Nhập lại mật khẩu mới"
@@ -799,7 +958,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                   <div className="flex gap-2 pt-2">
                     <button
                       type="button"
-                      onClick={() => setForgotStep(1)}
+                      onClick={() => { setForgotStep(2); setErrorMessage(''); }}
                       className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
                     >
                       Quay lại
@@ -816,8 +975,8 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                 </form>
               )}
 
-              {/* Step 3: Hoàn tất */}
-              {forgotStep === 3 && (
+              {/* Step 4: Hoàn tất */}
+              {forgotStep === 4 && (
                 <div className="text-center py-6 space-y-4">
                   <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
                     <Check className="w-7 h-7" />
@@ -831,6 +990,9 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                   <button
                     type="button"
                     onClick={() => {
+                      if (forgotEmail.trim()) setEmail(forgotEmail.trim());
+                      setPassword('');
+                      setSuccessMessage('');
                       onSwitchType('login');
                       setForgotStep(1);
                     }}

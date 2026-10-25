@@ -1,7 +1,7 @@
 // frontend/src/api/auth.api.ts
 // Authentication API module
 
-import { apiClient, setAuthToken, clearAuthToken, getAuthToken } from './client';
+import { apiClient, setAuthToken, clearAuthToken, getAuthToken, refreshAccessToken } from './client';
 
 export interface AuthUser {
   id: string;
@@ -11,7 +11,7 @@ export interface AuthUser {
   name?: string;
   phone?: string;
   avatar_url?: string;
-  status?: 'active' | 'inactive' | 'locked';
+  status?: 'active' | 'locked';
 }
 
 export interface LoginResult {
@@ -23,8 +23,8 @@ export interface LoginResult {
 export interface RegisterData {
   email: string;
   password: string;
-  displayName?: string;
-  phone?: string;
+  displayName: string;
+  confirmPassword?: string;
 }
 
 export interface ResetPasswordData {
@@ -61,12 +61,18 @@ export const authApi = {
   async register(data: RegisterData): Promise<LoginResult> {
     const res = await apiClient<any>('/auth/register', {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: JSON.stringify({
+        email: data.email,
+        password: data.password,
+        confirm_password: data.confirmPassword ?? data.password,
+        display_name: data.displayName,
+      }),
     });
 
     const accessToken = res.accessToken || res.data?.access_token || res.token;
     const refreshToken = res.refreshToken || res.data?.refresh_token;
-    const user = res.user || res.data?.user;
+    // Đăng ký trả thông tin tài khoản ngay trong data (kèm token đăng nhập)
+    const user = res.user || res.data?.user || (res.data?.id ? { id: res.data.id, email: res.data.email, display_name: res.data.display_name, role: res.data.role } : undefined);
 
     if (accessToken) {
       setAuthToken(accessToken, refreshToken);
@@ -97,24 +103,7 @@ export const authApi = {
   },
 
   async refreshToken(): Promise<string | null> {
-    const refreshToken = localStorage.getItem('culina_refresh_token');
-    if (!refreshToken) return null;
-
-    try {
-      const res = await apiClient<any>('/auth/refresh', {
-        method: 'POST',
-        body: JSON.stringify({ refreshToken }),
-      });
-
-      const token = res.accessToken || res.data?.access_token;
-      if (token) {
-        setAuthToken(token);
-      }
-      return token || null;
-    } catch {
-      clearAuthToken();
-      return null;
-    }
+    return refreshAccessToken();
   },
 
   // ── Quên mật khẩu & Khôi phục mật khẩu ─────────────────────────────

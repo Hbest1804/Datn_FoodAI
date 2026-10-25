@@ -3,12 +3,11 @@
 
 import { apiClient, getAuthToken } from './client';
 import { Recipe } from '../types';
-import { normalizeDish } from '../utils/dishUtils';
+import { normalizeDish, normalizeRecommendation } from '../utils/dishUtils';
 
 export interface GetDishesParams {
   q?: string;
-  region_id?: number;
-  category_id?: number;
+  category?: string;
   ingredient_ids?: string;
   ingredient_match?: 'any' | 'all';
   min_match_ratio?: number;
@@ -20,7 +19,7 @@ export interface GetDishesParams {
   min_protein_g?: number;
   max_carbs_g?: number;
   max_fat_g?: number;
-  sort?: 'relevance' | 'match' | 'newest' | 'rating' | 'popular' | 'cook_time' | 'calories';
+  sort?: 'relevance' | 'match' | 'newest' | 'updated' | 'rating' | 'popular' | 'cook_time' | 'calories';
   page?: number;
   limit?: number;
 }
@@ -81,12 +80,12 @@ export const dishesApi = {
     }
   },
 
-  async getRecommendations(): Promise<Recipe[]> {
+  async getRecommendations(limit = 12): Promise<Recipe[]> {
     try {
       const token = getAuthToken();
       const endpoint = token ? '/me/recommendations' : '/dishes/recommendations';
-      const res = await apiClient<{ success: boolean; data: any[] }>(endpoint);
-      return (res.data || []).map(normalizeDish);
+      const res = await apiClient<{ success: boolean; data: any[] }>(`${endpoint}?limit=${limit}`);
+      return (res.data || []).map(normalizeRecommendation);
     } catch {
       return [];
     }
@@ -105,7 +104,7 @@ export const dishesApi = {
     }
   },
 
-  async getRatings(dishId: string, params: { page?: number; limit?: number; sort?: string } = {}) {
+  async getRatings(dishId: string, params: { page?: number; limit?: number; sort?: 'newest' | 'highest' | 'lowest'; has_comment?: boolean } = {}) {
     return apiClient<{
       success: boolean;
       data: {
@@ -117,33 +116,42 @@ export const dishesApi = {
         items: Array<{
           id: number;
           stars: number;
-          comment: string;
+          comment: string | null;
           user: {
             id: string | null;
-            name: string;
-            avatar?: string;
+            display_name: string;
+            avatar_url?: string | null;
           };
           created_at: string;
+          updated_at?: string;
         }>;
       };
       meta?: any;
     }>(`/dishes/${dishId}/ratings`, { params });
   },
 
+  // Bình luận rỗng không được gửi lên (máy chủ từ chối chuỗi rỗng)
   async createRating(dishId: string, stars: number, comment?: string) {
     return apiClient<{
       success: boolean;
-      data: any;
+      data: {
+        rating: { id: number; dish_id: string; stars: number; comment: string | null; created_at: string };
+        rating_summary: { average: number; count: number };
+      };
     }>(`/dishes/${dishId}/ratings`, {
       method: 'POST',
-      body: JSON.stringify({ stars, comment }),
+      body: JSON.stringify({ stars, ...(comment ? { comment } : {}) }),
     });
   },
 
-  async updateRating(ratingId: number | string, stars: number, comment?: string) {
-    return apiClient(`/ratings/${ratingId}`, {
+  // comment = null để xóa bình luận, bỏ trống (undefined) để giữ nguyên
+  async updateRating(ratingId: number | string, stars: number, comment?: string | null) {
+    return apiClient<{
+      success: boolean;
+      data: { id: number; stars: number; comment: string | null; updated_at: string };
+    }>(`/ratings/${ratingId}`, {
       method: 'PATCH',
-      body: JSON.stringify({ stars, comment }),
+      body: JSON.stringify({ stars, ...(comment !== undefined ? { comment } : {}) }),
     });
   },
 
@@ -151,6 +159,18 @@ export const dishesApi = {
     return apiClient(`/ratings/${ratingId}`, {
       method: 'DELETE',
     });
+  },
+
+  // Ghi nhận tương tác (POST /interactions → 202), không chặn giao diện nên bỏ qua lỗi
+  trackInteraction(
+    eventType: 'view' | 'click' | 'search' | 'chat_card_click' | 'recommendation_click' | 'share' | 'page_view',
+    dishId?: string,
+    context?: Record<string, any>
+  ): void {
+    apiClient('/interactions', {
+      method: 'POST',
+      body: JSON.stringify({ event_type: eventType, dish_id: dishId, context }),
+    }).catch(() => {});
   },
 };
 

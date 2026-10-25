@@ -1,126 +1,124 @@
 // src/routes/admin.js
-// Routes cho khu vực quản trị
+// 4.10 – 4.14 và 5.7 – 5.9: các API quản trị, tất cả yêu cầu vai trò admin
 
 import { Router } from 'express';
 import { authenticate, requireAdmin } from '../middlewares/authMiddleware.js';
+import { adminLimiter } from '../middlewares/rateLimiter.js';
+import { getPublishedDishes, invalidateCache } from '../services/cacheService.js';
+import { clearRecommendationCache } from '../services/recommendationService.js';
+import { handleDishImageUpload, handleImportUpload } from '../middlewares/uploadMiddleware.js';
 import {
-  // Quản lý món ăn
-  adminGetDishes,
   adminCreateDish,
-  adminGetDishDetail,
-  adminUpdateDish,
-  adminTogglePublishDish,
-  adminDeleteDish,
   adminCreateDishRecipe,
-  adminUpdateDishRecipe,
-  adminGetDishRecipe,
+  adminDeleteDish,
   adminDeleteDishRecipe,
+  adminGetDishDetail,
+  adminGetDishRecipe,
+  adminGetDishes,
+  adminGetImportTemplate,
+  adminImportDishes,
   adminReindexDish,
-  // Quản lý dữ liệu nền (Master Data)
-  adminGetMasterResource,
-  adminCreateMasterResource,
-  adminUpdateMasterResource,
-  adminDeleteMasterResource,
-  // Quản lý người dùng & Audit logs
-  adminGetUsers,
-  adminGetUserDetail,
-  adminUpdateUser,
-  adminUpdateUserStatus,
-  adminUpdateUserRole,
+  adminTogglePublishDish,
+  adminUpdateDish,
+  adminUpdateDishRecipe,
+  adminUploadImage,
+} from '../controllers/adminDishesController.js';
+import { adminGetRecipeImportTemplate, adminImportRecipes } from '../controllers/adminRecipeImportController.js';
+import {
+  adminDeleteRating,
   adminDeleteUser,
   adminGetAuditLogs,
-  adminDeleteRating,
-  // Giám sát chatbot
-  adminGetChatbotOverview,
-  adminGetChatSessions,
-  adminGetChatSessionDetail,
-  adminFlagChatMessage,
-  adminGetChatbotFrequentQuestions,
+  adminGetUserDetail,
+  adminGetUsers,
+  adminUpdateUserRole,
+  adminUpdateUserStatus,
+} from '../controllers/adminUsersController.js';
+import {
+  adminFlagMessage,
   adminGetChatbotHealth,
-  adminGetChatbotConfig,
-  adminUpdateChatbotConfig,
-  // Thống kê
-  adminGetStats,
-  adminGetStatsTopDishes,
-  adminGetStatsTimeseries,
-  adminGetStatsSearchTrends,
+  adminGetChatbotOverview,
+  adminGetChatbotSettings,
+  adminGetConversationDetail,
+  adminGetConversations,
+  adminGetFrequentQuestions,
+  adminUpdateChatbotSettings,
+} from '../controllers/adminChatbotController.js';
+import {
+  adminExportStats,
   adminGetStatsChatbotUsage,
-  adminGetStatsExport,
-  // Danh mục
-  adminGetCategories,
-  adminCreateCategory,
-  adminUpdateCategory,
-  adminDeleteCategory,
-} from '../controllers/adminController.js';
-import { handleDishImageUpload } from '../middlewares/uploadMiddleware.js';
-import { uploadDishImage } from '../controllers/uploadController.js';
+  adminGetStatsOverview,
+  adminGetStatsSearchTrends,
+  adminGetStatsTimeseries,
+  adminGetStatsTopDishes,
+} from '../controllers/adminStatsController.js';
+import { uuidParam } from '../utils/http.js';
 
 const router = Router();
 
-// ─── Bảo vệ tất cả route quản trị dưới đây: bắt buộc phải có quyền Admin ─────
-router.use('/admin', authenticate, requireAdmin);
+router.use(authenticate, requireAdmin, adminLimiter);
 
-// Upload hình ảnh món ăn
-router.post('/admin/uploads/images', handleDishImageUpload, uploadDishImage);
+// Mọi thao tác ghi của Admin (món, nguyên liệu, người dùng...) đều xóa bộ nhớ đệm để giao diện thấy ngay thay đổi,
+// rồi nạp lại danh sách món ngay để người dùng kế tiếp không phải chờ CSDL
+router.use((req, res, next) => {
+  if (req.method !== 'GET') {
+    res.on('finish', () => {
+      invalidateCache();
+      clearRecommendationCache();
+      getPublishedDishes().catch((err) => console.warn('[Cache] Không nạp lại được danh sách món:', err.message));
+    });
+  }
+  next();
+});
+router.param('dishId', uuidParam('DISH_NOT_FOUND', 'Món không tồn tại.'));
+router.param('userId', uuidParam('USER_NOT_FOUND', 'Người dùng không tồn tại.'));
+router.param('sessionId', uuidParam('CHAT_SESSION_NOT_FOUND', 'Hội thoại không tồn tại.'));
+router.param('messageId', uuidParam('MESSAGE_NOT_FOUND', 'Tin nhắn không tồn tại.'));
 
-// Quản lý món ăn
-router.get('/admin/dishes', adminGetDishes);
-router.post('/admin/dishes', adminCreateDish);
-router.get('/admin/dishes/:dishId', adminGetDishDetail);
-router.put('/admin/dishes/:dishId', adminUpdateDish);
-router.patch('/admin/dishes/:dishId/publish', adminTogglePublishDish);
-router.delete('/admin/dishes/:dishId', adminDeleteDish);
-router.get('/admin/dishes/:dishId/recipe', adminGetDishRecipe);
-router.post('/admin/dishes/:dishId/recipe', adminCreateDishRecipe);
-router.put('/admin/dishes/:dishId/recipe', adminUpdateDishRecipe);
-router.delete('/admin/dishes/:dishId/recipe', adminDeleteDishRecipe);
-// Section 5.7.2 – Cập nhật lại embedding của món ăn bằng gemini-embedding-2
-router.post('/admin/dishes/:dishId/reindex', adminReindexDish);
+// 4.10 Quản lý món ăn (đường dẫn cố định đặt trước /dishes/:dishId)
+router.post('/uploads/images', handleDishImageUpload, adminUploadImage);   // 4.10.6
+router.get('/dishes/import/template', adminGetImportTemplate);             // 4.10.7
+router.post('/dishes/import', handleImportUpload, adminImportDishes);      // 4.10.8
+router.get('/dishes', adminGetDishes);                                     // 4.10.1
+router.post('/dishes', adminCreateDish);                                   // 4.10.3
+router.get('/dishes/:dishId', adminGetDishDetail);                         // 4.10.2
+router.put('/dishes/:dishId', adminUpdateDish);                            // 4.10.4
+router.delete('/dishes/:dishId', adminDeleteDish);                         // 4.10.5
+router.patch('/dishes/:dishId/publish', adminTogglePublishDish);           // 5.7.1
+router.post('/dishes/:dishId/reindex', adminReindexDish);                  // 5.7.2
 
-// Section 4.11 – Quản lý dữ liệu nền (Master Data)
-router.get('/admin/master/:resource', adminGetMasterResource);
-router.post('/admin/master/:resource', adminCreateMasterResource);
-router.put('/admin/master/:resource/:id', adminUpdateMasterResource);
-router.delete('/admin/master/:resource/:id', adminDeleteMasterResource);
+// 4.14 Quản lý công thức
+router.get('/dishes/:dishId/recipe', adminGetDishRecipe);                  // 4.14.1
+router.post('/dishes/:dishId/recipe', adminCreateDishRecipe);              // 4.14.2
+router.put('/dishes/:dishId/recipe', adminUpdateDishRecipe);               // 4.14.3
+router.delete('/dishes/:dishId/recipe', adminDeleteDishRecipe);            // 4.14.4
+router.get('/recipes/import/template', adminGetRecipeImportTemplate);       // 4.14.5
+router.post('/recipes/import', handleImportUpload, adminImportRecipes);    // 4.14.6
 
-// Quản lý người dùng & Nhật ký thao tác
-router.get('/admin/users', adminGetUsers);
-router.get('/admin/users/:userId', adminGetUserDetail);
-router.patch('/admin/users/:userId/status', adminUpdateUserStatus);
-router.patch('/admin/users/:userId/role', adminUpdateUserRole);
-router.patch('/admin/users/:userId', adminUpdateUser);
-router.delete('/admin/users/:userId', adminDeleteUser);
-router.get('/admin/audit-logs', adminGetAuditLogs);
-// Section 5.8.1 – Gỡ bình luận vi phạm
-router.delete('/admin/ratings/:ratingId', adminDeleteRating);
+// 4.11 Quản lý người dùng
+router.get('/users', adminGetUsers);                                       // 4.11.1
+router.get('/users/:userId', adminGetUserDetail);                          // 4.11.2
+router.patch('/users/:userId/status', adminUpdateUserStatus);              // 4.11.3
+router.patch('/users/:userId/role', adminUpdateUserRole);                  // 4.11.4
+router.delete('/users/:userId', adminDeleteUser);                          // 4.11.5
+router.get('/audit-logs', adminGetAuditLogs);                              // 4.11.6
+router.delete('/ratings/:ratingId', adminDeleteRating);                    // 5.8.1
 
-// Giám sát chatbot
-router.get('/admin/chatbot/overview', adminGetChatbotOverview);
-router.get('/admin/chatbot/sessions', adminGetChatSessions);
-router.get('/admin/chatbot/conversations', adminGetChatSessions);
-router.get('/admin/chatbot/sessions/:sessionId', adminGetChatSessionDetail);
-router.get('/admin/chatbot/conversations/:sessionId', adminGetChatSessionDetail);
-router.patch('/admin/chatbot/messages/:messageId/flag', adminFlagChatMessage);
-router.get('/admin/chatbot/frequent-questions', adminGetChatbotFrequentQuestions);
-router.get('/admin/chatbot/health', adminGetChatbotHealth);
-router.get('/admin/chatbot/config', adminGetChatbotConfig);
-router.put('/admin/chatbot/config', adminUpdateChatbotConfig);
-router.get('/admin/chatbot/settings', adminGetChatbotConfig);
-router.put('/admin/chatbot/settings', adminUpdateChatbotConfig);
+// 4.12 Giám sát chatbot
+router.get('/chatbot/overview', adminGetChatbotOverview);                  // 4.12.1
+router.get('/chatbot/conversations', adminGetConversations);               // 4.12.2
+router.get('/chatbot/conversations/:sessionId', adminGetConversationDetail); // 4.12.3
+router.get('/chatbot/settings', adminGetChatbotSettings);                  // 4.12.4
+router.put('/chatbot/settings', adminUpdateChatbotSettings);               // 4.12.5
+router.patch('/chatbot/messages/:messageId/flag', adminFlagMessage);       // 4.12.6
+router.get('/chatbot/frequent-questions', adminGetFrequentQuestions);      // 4.12.7
+router.get('/chatbot/health', adminGetChatbotHealth);                      // 4.12.8
 
-// Thống kê hệ thống
-router.get('/admin/stats', adminGetStats);
-router.get('/admin/stats/overview', adminGetStats);
-router.get('/admin/stats/top-dishes', adminGetStatsTopDishes);
-router.get('/admin/stats/timeseries', adminGetStatsTimeseries);
-router.get('/admin/stats/search-trends', adminGetStatsSearchTrends);
-router.get('/admin/stats/chatbot-usage', adminGetStatsChatbotUsage);
-router.get('/admin/stats/export', adminGetStatsExport);
-
-// Danh mục
-router.get('/admin/categories', adminGetCategories);
-router.post('/admin/categories', adminCreateCategory);
-router.put('/admin/categories/:categoryId', adminUpdateCategory);
-router.delete('/admin/categories/:categoryId', adminDeleteCategory);
+// 4.13 Thống kê hệ thống
+router.get('/stats/overview', adminGetStatsOverview);                      // 4.13.1
+router.get('/stats/top-dishes', adminGetStatsTopDishes);                   // 4.13.2
+router.get('/stats/timeseries', adminGetStatsTimeseries);                  // 4.13.3
+router.get('/stats/search-trends', adminGetStatsSearchTrends);             // 4.13.4
+router.get('/stats/export', adminExportStats);                             // 4.13.5
+router.get('/stats/chatbot-usage', adminGetStatsChatbotUsage);             // 5.9.1
 
 export default router;

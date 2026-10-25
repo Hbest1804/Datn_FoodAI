@@ -1,8 +1,61 @@
 // frontend/src/api/admin.api.ts
 // Admin Studio API module
 
-import { apiClient, BASE_API_URL, getAuthToken } from './client';
-import { AdminStats } from '../types';
+import { apiClient, authFetch } from './client';
+
+type RangeParams = { from?: string; to?: string; days?: number };
+
+export interface RecipePayload {
+  ingredients: Array<{
+    ingredient_id?: number;
+    name?: string;
+    quantity: number;
+    unit?: string;
+    allergen_group_id?: number | null;
+    no_allergen?: boolean;
+  }>;
+  steps: Array<{ order: number; content: string }>;
+  publish?: boolean;
+}
+
+// 4.10.8 Kết quả nhập món (chỉ thông tin món; món mới luôn ẩn)
+export interface DishImportResult {
+  dry_run: boolean;
+  file_name: string;
+  total_dishes: number;
+  valid_dishes: number;
+  error_dishes: number;
+  created_count: number;
+  errors: Array<{ row: number; slug: string | null; field: string; code: string; message: string }>;
+  warnings: string[];
+  created?: Array<{ id: string; name: string; slug: string }>;
+}
+
+// 4.14.6 Kết quả nhập công thức; khi dry_run = true, created_count / replaced_count / published_count / new_ingredients là việc sẽ thực hiện
+export interface RecipeImportResult {
+  dry_run: boolean;
+  file_name: string;
+  total_dishes: number;
+  valid_dishes: number;
+  error_dishes: number;
+  created_count: number;
+  replaced_count: number;
+  published_count: number;
+  new_ingredients: string[];
+  skipped: Array<{ slug: string; dish_id: string; name: string }>;
+  errors: Array<{ sheet: string; row: number; slug: string | null; field: string; code: string; message: string }>;
+  warnings: string[];
+  saved?: Array<{ dish_id: string; name: string; slug: string; replaced: boolean; is_published: boolean }>;
+}
+
+// Tài liệu API dùng from/to (YYYY-MM-DD); quy đổi tham số days của giao diện sang khoảng ngày
+function toRange<T extends RangeParams>(params: T): Omit<T, 'days'> {
+  const { days, ...rest } = params;
+  if (!days || rest.from || rest.to) return rest;
+  const to = new Date();
+  const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000);
+  return { ...rest, from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
+}
 
 export const adminApi = {
   // ── Thống kê hệ thống ──────────────────────────────────────────────
@@ -11,7 +64,7 @@ export const adminApi = {
       const res = await apiClient<{
         success: boolean;
         data: any;
-      }>('/admin/stats', { params });
+      }>('/admin/stats/overview', { params: toRange(params) });
 
       return res.data || {};
     } catch {
@@ -21,7 +74,7 @@ export const adminApi = {
 
   async getTopDishes(params: { by?: 'views' | 'favorites' | 'rating'; limit?: number; from?: string; to?: string; days?: number } = {}): Promise<any[]> {
     try {
-      const res = await apiClient<{ success: boolean; data: any[] }>('/admin/stats/top-dishes', { params });
+      const res = await apiClient<{ success: boolean; data: any[] }>('/admin/stats/top-dishes', { params: toRange(params) });
       return res.data || [];
     } catch {
       return [];
@@ -30,7 +83,7 @@ export const adminApi = {
 
   async getStatsTimeseries(params: { metric?: string; interval?: string; from?: string; to?: string; days?: number } | string = '30d'): Promise<any[]> {
     try {
-      const queryParams = typeof params === 'string' ? { days: parseInt(params) || 30 } : params;
+      const queryParams = toRange(typeof params === 'string' ? { metric: 'visits', days: parseInt(params) || 30 } : { metric: 'visits', ...params });
       const res = await apiClient<{ success: boolean; data: any }>('/admin/stats/timeseries', { params: queryParams });
       return res.data?.points || res.data || [];
     } catch {
@@ -40,7 +93,7 @@ export const adminApi = {
 
   async getSearchTrends(params: { days?: number } = {}): Promise<any[]> {
     try {
-      const res = await apiClient<{ success: boolean; data: any[] }>('/admin/stats/search-trends', { params });
+      const res = await apiClient<{ success: boolean; data: any[] }>('/admin/stats/search-trends', { params: toRange(params) });
       return res.data || [];
     } catch {
       return [];
@@ -49,31 +102,27 @@ export const adminApi = {
 
   async getStatsChatbotUsage(params: { from?: string; to?: string; days?: number } = {}) {
     try {
-      const res = await apiClient<{ success: boolean; data: any }>('/admin/stats/chatbot-usage', { params });
+      const res = await apiClient<{ success: boolean; data: any }>('/admin/stats/chatbot-usage', { params: toRange(params) });
       return res.data || null;
     } catch {
       return null;
     }
   },
 
-  async exportStats(params: { format?: 'xlsx' | 'csv' | 'pdf'; from?: string; to?: string; days?: number } = {}): Promise<Blob> {
-    const token = getAuthToken();
+  async exportStats(params: { type?: 'overview' | 'top-dishes' | 'search-trends' | 'chatbot-usage'; format?: 'xlsx' | 'csv' | 'pdf'; from?: string; to?: string; days?: number } = {}): Promise<Blob> {
+    const range = toRange(params);
     const query = new URLSearchParams();
-    if (params.format) query.set('format', params.format);
-    if (params.from) query.set('from', params.from);
-    if (params.to) query.set('to', params.to);
-    if (params.days) query.set('days', String(params.days));
+    query.set('type', params.type || 'overview');
+    query.set('format', params.format || 'xlsx');
+    if (range.from) query.set('from', range.from);
+    if (range.to) query.set('to', range.to);
 
-    const res = await fetch(`${BASE_API_URL}/admin/stats/export?${query.toString()}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+    const res = await authFetch(`/admin/stats/export?${query.toString()}`);
     return res.blob();
   },
 
   // ── Quản lý món ăn ────────────────────────────────────────────────
-  async getDishes(params: { page?: number; limit?: number; q?: string; category?: string; category_id?: number; is_published?: string | boolean; has_recipe?: string | boolean; sort?: string } = {}) {
+  async getDishes(params: { page?: number; limit?: number; q?: string; category?: string; is_published?: boolean; sort?: 'updated_at' | 'created_at' | 'name' } = {}) {
     return apiClient<{
       success: boolean;
       data: any[];
@@ -118,50 +167,79 @@ export const adminApi = {
     });
   },
 
+  // Ảnh JPG/PNG/WEBP tối đa 5 MB, gửi trong trường "file"
   async uploadDishImage(file: File): Promise<{ image_url: string }> {
-    const token = getAuthToken();
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('image', file);
 
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-
-    const res = await fetch(`${BASE_API_URL}/admin/uploads/images`, {
-      method: 'POST',
-      headers,
-      body: formData,
-    });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error?.message || 'Không thể tải ảnh món ăn lên');
-    }
-
+    const res = await authFetch('/admin/uploads/images', { method: 'POST', body: formData });
     const json = await res.json();
-    const url = json.data?.url || json.data?.image_url || json.image_url || json.url || '';
-    return { image_url: url };
+    return { image_url: json.data?.url || '' };
+  },
+
+  // ── Nhập món từ Excel/CSV ─────────────────────────────────────────
+  async downloadImportTemplate(format: 'xlsx' | 'csv' = 'xlsx'): Promise<Blob> {
+    const res = await authFetch(`/admin/dishes/import/template?format=${format}`);
+    return res.blob();
+  },
+
+  // dry_run = true: chỉ kiểm tra file, chưa ghi dữ liệu
+  async importDishes(file: File, dryRun = true): Promise<DishImportResult> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('dry_run', String(dryRun));
+
+    const res = await authFetch('/admin/dishes/import', { method: 'POST', body: formData });
+    const json = await res.json();
+    return json.data;
   },
 
   // ── Quản lý công thức ─────────────────────────────────────────────
+  async downloadRecipeImportTemplate(): Promise<Blob> {
+    const res = await authFetch('/admin/recipes/import/template');
+    return res.blob();
+  },
+
+  // Nhập công thức cho nhiều món đã có; on_existing: bỏ qua (skip) hoặc ghi đè (replace) món đã có công thức
+  async importRecipes(
+    file: File,
+    { dryRun = true, onExisting = 'skip', publish = false }: { dryRun?: boolean; onExisting?: 'skip' | 'replace'; publish?: boolean } = {},
+  ): Promise<RecipeImportResult> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('dry_run', String(dryRun));
+    formData.append('on_existing', onExisting);
+    formData.append('publish', String(publish));
+
+    const res = await authFetch('/admin/recipes/import', { method: 'POST', body: formData });
+    const json = await res.json();
+    return json.data;
+  },
+
   async getRecipe(dishId: string) {
     return apiClient<{ success: boolean; data: any }>(`/admin/dishes/${dishId}/recipe`);
   },
 
-  async createRecipe(dishId: string, data: { servings?: number; ingredients?: any[]; steps?: any[]; publish?: boolean }) {
+  // ingredients: [{ ingredient_id | name, quantity, unit, allergen_group_id?, no_allergen? }]
+  // steps: [{ order, content }]
+  async createRecipe(dishId: string, data: RecipePayload) {
     return apiClient<{ success: boolean; data: any }>(`/admin/dishes/${dishId}/recipe`, {
       method: 'POST',
       body: JSON.stringify(data),
     });
   },
 
-  async updateRecipe(dishId: string, data: { servings?: number; ingredients?: any[]; steps?: any[]; publish?: boolean }) {
-    return apiClient<{ success: boolean; data: any }>(`/admin/dishes/${dishId}/recipe`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
+  // Lưu công thức: sửa (PUT) nếu món đã có công thức, chưa có thì tạo mới (POST)
+  async updateRecipe(dishId: string, data: RecipePayload) {
+    try {
+      return await apiClient<{ success: boolean; data: any }>(`/admin/dishes/${dishId}/recipe`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      });
+    } catch (err: any) {
+      if (err?.code !== 'RECIPE_NOT_FOUND') throw err;
+      return adminApi.createRecipe(dishId, data);
+    }
   },
 
   async deleteRecipe(dishId: string, confirm = true) {
@@ -183,7 +261,8 @@ export const adminApi = {
     return apiClient<{ success: boolean; data: any }>(`/admin/users/${userId}`);
   },
 
-  async updateUserStatus(userId: string, status: 'active' | 'inactive' | 'locked', reason?: string) {
+  // Khóa tài khoản (locked) bắt buộc có lý do
+  async updateUserStatus(userId: string, status: 'active' | 'locked', reason?: string) {
     return apiClient(`/admin/users/${userId}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status, reason }),
@@ -210,10 +289,10 @@ export const adminApi = {
     });
   },
 
-  async getAuditLogs(params: { page?: number; limit?: number; action?: string } = {}) {
+  async getAuditLogs(params: { page?: number; limit?: number; action?: string; actor_id?: string; from?: string; to?: string; days?: number } = {}) {
     try {
       return await apiClient<{ success: boolean; data: any[]; meta: any }>(`/admin/audit-logs`, {
-        params,
+        params: toRange(params),
       });
     } catch {
       return { data: [], meta: { page: 1, limit: 20, total: 0 } };
@@ -223,17 +302,17 @@ export const adminApi = {
   // ── Giám sát chatbot ──────────────────────────────────────────────
   async getChatbotOverview(params: { from?: string; to?: string; days?: number } = {}) {
     try {
-      const res = await apiClient<{ success: boolean; data: any }>('/admin/chatbot/overview', { params });
+      const res = await apiClient<{ success: boolean; data: any }>('/admin/chatbot/overview', { params: toRange(params) });
       return res.data;
     } catch {
       return null;
     }
   },
 
-  async getChatSessions(params: { page?: number; limit?: number; user_id?: string; status?: 'all' | 'error' | 'flagged' | 'disliked'; q?: string } = {}) {
+  async getChatSessions(params: { page?: number; limit?: number; user_id?: string; status?: 'all' | 'error' | 'flagged' | 'disliked'; q?: string; from?: string; to?: string; days?: number } = {}) {
     try {
-      return await apiClient<{ success: boolean; data: any[]; meta: any }>('/admin/chatbot/sessions', {
-        params,
+      return await apiClient<{ success: boolean; data: any[]; meta: any }>('/admin/chatbot/conversations', {
+        params: toRange(params),
       });
     } catch {
       return { data: [], meta: { page: 1, limit: 20, total: 0 } };
@@ -241,13 +320,13 @@ export const adminApi = {
   },
 
   async getChatSessionDetail(sessionId: string) {
-    return apiClient<{ success: boolean; data: any }>(`/admin/chatbot/sessions/${sessionId}`);
+    return apiClient<{ success: boolean; data: any }>(`/admin/chatbot/conversations/${sessionId}`);
   },
 
   async flagChatMessage(messageId: string, isFlagged: boolean, reason?: string) {
     return apiClient(`/admin/chatbot/messages/${messageId}/flag`, {
       method: 'PATCH',
-      body: JSON.stringify({ is_flagged: isFlagged, flagged: isFlagged, reason }),
+      body: JSON.stringify({ flagged: isFlagged, reason }),
     });
   },
 
@@ -256,13 +335,13 @@ export const adminApi = {
       const res = await apiClient<{ success: boolean; data: any }>('/admin/chatbot/health');
       return res.data;
     } catch {
-      return { status: 'healthy', latency_ms: 380, model: 'gemini-3.8-flash' };
+      return { status: 'down', latency_ms: null, model: null };
     }
   },
 
   async getChatbotConfig() {
     try {
-      const res = await apiClient<{ success: boolean; data: any }>('/admin/chatbot/config');
+      const res = await apiClient<{ success: boolean; data: any }>('/admin/chatbot/settings');
       return res.data;
     } catch {
       return {
@@ -280,7 +359,7 @@ export const adminApi = {
     system_prompt?: string;
     max_context_dishes?: number;
   }) {
-    return apiClient<{ success: boolean; data: any }>('/admin/chatbot/config', {
+    return apiClient<{ success: boolean; data: any }>('/admin/chatbot/settings', {
       method: 'PUT',
       body: JSON.stringify(config),
     });
@@ -293,47 +372,6 @@ export const adminApi = {
     } catch {
       return [];
     }
-  },
-
-  // ── Master Data & Categories ──────────────────────────────────────
-  async getCategories() {
-    try {
-      const res = await apiClient<{ success: boolean; data: any[] }>('/admin/categories');
-      return res.data || [];
-    } catch {
-      return [];
-    }
-  },
-
-  async createCategory(data: { name: string; description?: string }) {
-    return apiClient<{ success: boolean; data: any }>('/admin/categories', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  },
-
-  async getMasterResource(resource: string, params: { page?: number; limit?: number; q?: string; needs_review?: boolean } = {}) {
-    return apiClient<{ success: boolean; data: any[]; meta: any }>(`/admin/master/${resource}`, { params });
-  },
-
-  async createMasterResource(resource: string, data: any) {
-    return apiClient<{ success: boolean; data: any }>(`/admin/master/${resource}`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  },
-
-  async updateMasterResource(resource: string, id: string | number, data: any) {
-    return apiClient<{ success: boolean; data: any }>(`/admin/master/${resource}/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
-  },
-
-  async deleteMasterResource(resource: string, id: string | number) {
-    return apiClient(`/admin/master/${resource}/${id}`, {
-      method: 'DELETE',
-    });
   },
 };
 

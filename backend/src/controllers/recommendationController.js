@@ -1,45 +1,27 @@
 // src/controllers/recommendationController.js
-// Xử lý Gợi ý cá nhân hóa theo mục 4.7 của tài liệu đặc tả API
+// Gợi ý cá nhân hóa theo mục 4.7 của tài liệu đặc tả API
 
 import { getPersonalizedRecommendations } from '../services/recommendationService.js';
+import { parseBool, sendError, sendOk } from '../utils/http.js';
 
 /**
- * 4.7.1 Nhận gợi ý món ăn
- * GET /me/recommendations hoặc /api/me/recommendations
+ * 4.7.1 Nhận gợi ý món ăn – GET /me/recommendations?limit=&category=&refresh=
  */
-export async function getRecommendations(req, res, next) {
-  try {
-    const userId = req.user?.id || null;
-    const {
-      limit = 12,
-      category_id,
-      region_id,
-      refresh,
-    } = req.query;
-
-    const parsedLimit = limit !== undefined ? Number(limit) : 12;
-    if (isNaN(parsedLimit) || parsedLimit <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: 'INVALID_QUERY',
-          message: 'Tham số limit không hợp lệ (phải là số nguyên dương).',
-        },
-      });
-    }
-
-    const isRefresh = refresh === true || refresh === 'true' || refresh === '1';
-
-    const result = await getPersonalizedRecommendations({
-      userId,
-      limit: parsedLimit,
-      categoryId: category_id,
-      regionId: region_id,
-      refresh: isRefresh,
-    });
-
-    return res.status(200).json(result);
-  } catch (err) {
-    next(err);
+export async function getRecommendations(req, res) {
+  const limit = req.query.limit === undefined ? 12 : Number(req.query.limit);
+  if (!Number.isInteger(limit) || limit < 1) {
+    return sendError(res, 400, 'INVALID_QUERY', 'Tham số limit phải là số nguyên dương.');
   }
+  const refresh = req.query.refresh === undefined ? false : parseBool(req.query.refresh);
+  if (refresh === undefined) {
+    return sendError(res, 400, 'INVALID_QUERY', 'Tham số refresh phải là true hoặc false.');
+  }
+
+  const result = await getPersonalizedRecommendations({
+    userId: req.user?.id || null,
+    limit: Math.min(limit, 50),
+    category: typeof req.query.category === 'string' ? req.query.category.trim() : '',
+    refresh,
+  });
+  return sendOk(res, result.data, { meta: result.meta });
 }

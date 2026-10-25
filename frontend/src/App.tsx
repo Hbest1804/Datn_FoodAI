@@ -1,13 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
+import { Routes, Route, Navigate, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 import { Header } from './components/Header';
 import { Footer } from './components/Footer';
 import { DiscoveryView } from './components/DiscoveryView';
-import { ChatbotView } from './components/ChatbotView';
-import { SearchFilterView } from './components/SearchFilterView';
-import { TasteProfileView } from './components/TasteProfileView';
-import { UserProfileView } from './components/UserProfileView';
-import { MealPlannerView } from './components/MealPlannerView';
-import { AdminStudioView } from './components/AdminStudioView';
 import { RecipeDetailModal } from './components/RecipeDetailModal';
 import { AuthModals } from './components/AuthModals';
 import { FloatingChefWidget } from './components/FloatingChefWidget';
@@ -15,6 +11,14 @@ import { UserProfile, UserRole, Recipe } from './types';
 import { apiService } from './services/api';
 import { DEFAULT_AVATAR } from './utils/dishUtils';
 import { NotificationContainer, toast } from './components/NotificationModal';
+
+// Các trang ngoài trang chủ chỉ tải khi người dùng mở tới, giúp trang chủ hiện nhanh hơn
+const ChatbotView = lazy(() => import('./components/ChatbotView').then((m) => ({ default: m.ChatbotView })));
+const SearchFilterView = lazy(() => import('./components/SearchFilterView').then((m) => ({ default: m.SearchFilterView })));
+const TasteProfileView = lazy(() => import('./components/TasteProfileView').then((m) => ({ default: m.TasteProfileView })));
+const UserProfileView = lazy(() => import('./components/UserProfileView').then((m) => ({ default: m.UserProfileView })));
+const MealPlannerView = lazy(() => import('./components/MealPlannerView').then((m) => ({ default: m.MealPlannerView })));
+const AdminStudioView = lazy(() => import('./components/AdminStudioView').then((m) => ({ default: m.AdminStudioView })));
 
 const DEFAULT_GUEST: UserProfile = {
   id: '',
@@ -59,18 +63,43 @@ const DEFAULT_GUEST: UserProfile = {
   tasteAccuracy: 0,
 };
 
+// Ánh xạ giữa tên tab (Header/Footer dùng) và đường dẫn URL
+const TAB_PATHS: Record<string, string> = {
+  discovery: '/',
+  search: '/search',
+  chat: '/chat',
+  planner: '/planner',
+  profile: '/taste-profile',
+  account: '/account',
+  admin: '/admin',
+};
+
+const pathToTab = (pathname: string): string => {
+  const match = Object.entries(TAB_PATHS).find(([, path]) => path !== '/' && pathname.startsWith(path));
+  return match ? match[0] : 'discovery';
+};
+
 export default function App() {
-  const [currentTab, setCurrentTab] = useState<string>('discovery');
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const currentTab = pathToTab(location.pathname);
+  const isAdminMode = currentTab === 'admin';
+  const setCurrentTab = (tab: string) => navigate(TAB_PATHS[tab] ?? '/');
+
   const [currentUser, setCurrentUser] = useState<UserProfile>(DEFAULT_GUEST);
-  const [isAdminMode, setIsAdminMode] = useState<boolean>(false);
+  // Đã kiểm tra xong phiên đăng nhập hay chưa (tránh đá Admin ra khỏi /admin khi F5)
+  const [sessionChecked, setSessionChecked] = useState<boolean>(false);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [selectedRecipeForModal, setSelectedRecipeForModal] = useState<Recipe | null>(null);
+  const [resetTokenFromLink, setResetTokenFromLink] = useState<string>('');
 
   // Cross-view shortcuts
   const [initialChatPrompt, setInitialChatPrompt] = useState<string>('');
   const [initialChatFridge, setInitialChatFridge] = useState<string[]>([]);
   const [initialChatSessionId, setInitialChatSessionId] = useState<string | undefined>(undefined);
-  const [initialSearchQuery, setInitialSearchQuery] = useState<string>('');
+  const searchQueryParam = currentTab === 'search' ? (searchParams.get('q') ?? '') : '';
+  const dishParam = searchParams.get('dish');
 
   // Auth modal states
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
@@ -81,21 +110,30 @@ export default function App() {
     let isMounted = true;
 
     // 1. Fetch live dishes
-    const fetchInitialDishes = async () => {
+    // Máy chủ đang khởi động lại hoặc CSDL phản hồi chậm thì lượt đầu trả rỗng: thử lại sau 2s, 4s, 8s, 16s
+    const fetchInitialDishes = async (attempt = 0) => {
       try {
-        const res = await apiService.dishes.getDishes({ limit: 12 });
+        // Món vừa cập nhật / vừa công khai lên đầu trang Khám phá
+        const res = await apiService.dishes.getDishes({ limit: 12, sort: 'updated' });
         if (isMounted && res.dishes && res.dishes.length > 0) {
           setRecipes(res.dishes);
+          return;
         }
       } catch (err) {
         console.warn('Initial dishes fetch fallback:', err);
+      }
+      if (isMounted && attempt < 4) {
+        setTimeout(() => fetchInitialDishes(attempt + 1), 2000 * 2 ** attempt);
       }
     };
 
     // 2. Restore user session if token exists
     const checkUserSession = async () => {
       const token = localStorage.getItem('culina_token');
-      if (!token) return;
+      if (!token) {
+        setSessionChecked(true);
+        return;
+      }
 
       try {
         const userRes = await apiService.auth.getMe();
@@ -116,11 +154,6 @@ export default function App() {
             isLoggedIn: true,
             isPro: true,
           }));
-
-          if (isAdmin && window.location.hash === '#admin') {
-            setIsAdminMode(true);
-            setCurrentTab('admin');
-          }
 
           // Try to fetch user's taste profile
           try {
@@ -148,8 +181,20 @@ export default function App() {
         console.warn('Session expired or invalid:', err);
         localStorage.removeItem('culina_token');
         localStorage.removeItem('culina_user');
+      } finally {
+        if (isMounted) setSessionChecked(true);
       }
     };
+
+    // Ghi nhận một lượt truy cập cho mỗi phiên trình duyệt (dùng cho thống kê lượt truy cập của Admin)
+    try {
+      if (!sessionStorage.getItem('culina_visit_logged')) {
+        sessionStorage.setItem('culina_visit_logged', '1');
+        apiService.dishes.trackInteraction('page_view', undefined, { path: window.location.pathname });
+      }
+    } catch {
+      // sessionStorage không khả dụng: bỏ qua
+    }
 
     fetchInitialDishes();
     checkUserSession();
@@ -157,42 +202,82 @@ export default function App() {
     return () => { isMounted = false; };
   }, []);
 
+  // Chi tiết món mở dưới dạng ?dish=<id> trên trang hiện tại: F5 hoặc gửi link vẫn mở lại đúng món,
+  // nút Back của trình duyệt sẽ đóng cửa sổ chi tiết
+  const openRecipe = (recipe: Recipe) => {
+    setSelectedRecipeForModal(recipe);
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.set('dish', String(recipe.id));
+      return next;
+    });
+  };
+
+  const closeRecipe = () => {
+    setSelectedRecipeForModal(null);
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.delete('dish');
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (!dishParam) {
+      setSelectedRecipeForModal(null);
+      return;
+    }
+    if (selectedRecipeForModal && String(selectedRecipeForModal.id) === dishParam) return;
+    let cancelled = false;
+    apiService.dishes.getDetail(dishParam)
+      .then(recipe => {
+        if (!cancelled) setSelectedRecipeForModal(recipe);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        toast.error('Không tìm thấy món ăn hoặc món đã bị ẩn.');
+        closeRecipe();
+      });
+    return () => { cancelled = true; };
+  }, [dishParam]);
+
+  // Trang Quản trị: chờ khôi phục phiên đăng nhập xong mới kiểm tra quyền
+  useEffect(() => {
+    if (!isAdminMode || !sessionChecked || currentUser.role === 'admin') return;
+    toast.warning('Bạn cần đăng nhập bằng tài khoản Quản trị viên để truy cập trang này.');
+    navigate('/', { replace: true });
+    if (!currentUser.isLoggedIn) {
+      setAuthModalType('login');
+      setIsAuthModalOpen(true);
+    }
+  }, [isAdminMode, sessionChecked, currentUser.role, currentUser.isLoggedIn]);
+
+  // Liên kết đặt lại mật khẩu trong email: /reset-password?token=...
+  useEffect(() => {
+    if (location.pathname !== '/reset-password') return;
+    setResetTokenFromLink(searchParams.get('token') ?? '');
+    setAuthModalType('forgot-password');
+    setIsAuthModalOpen(true);
+    navigate('/', { replace: true });
+  }, [location.pathname]);
+
+  // Vai trò chỉ lấy từ phiên đăng nhập (máy chủ trả về); giao diện không được tự nâng lên quản trị viên
   const handleSwitchUserRole = (role: UserRole) => {
     if (role === 'guest') {
       setCurrentUser(DEFAULT_GUEST);
-      setIsAdminMode(false);
-      if (currentTab === 'admin') setCurrentTab('discovery');
-    } else if (role === 'admin') {
-      setCurrentUser(prev => ({
-        ...prev,
-        role: 'admin',
-        roleLabel: 'Quản trị viên',
-        name: prev.name === 'Khách' ? 'Quản Trị Viên' : prev.name,
-      }));
-      setIsAdminMode(true);
-      setCurrentTab('admin');
-    } else {
+      if (isAdminMode) setCurrentTab('discovery');
+    } else if (role === 'user') {
       setCurrentUser(prev => ({
         ...prev,
         role: 'user',
         roleLabel: 'Đầu bếp tại gia',
       }));
-      setIsAdminMode(false);
+      if (isAdminMode) setCurrentTab('discovery');
     }
   };
 
   const handleToggleAdminMode = (admin: boolean) => {
-    setIsAdminMode(admin);
-    if (admin) {
-      setCurrentUser(prev => ({
-        ...prev,
-        role: 'admin',
-        roleLabel: 'Quản trị viên',
-      }));
-      setCurrentTab('admin');
-    } else {
-      setCurrentTab('discovery');
-    }
+    setCurrentTab(admin && currentUser.role === 'admin' ? 'admin' : 'discovery');
   };
 
   const handleOpenChatWithPrompt = (prompt: string, fridgeContext?: string[]) => {
@@ -206,8 +291,8 @@ export default function App() {
   };
 
   const handleSearchSubmit = (query: string) => {
-    setInitialSearchQuery(query);
-    setCurrentTab('search');
+    const q = query.trim();
+    navigate(q ? `/search?q=${encodeURIComponent(q)}` : '/search');
   };
 
   const handleAddToPlanner = (recipe: Recipe) => {
@@ -229,7 +314,6 @@ export default function App() {
       isPro: true,
     }));
     if (isAdmin) {
-      setIsAdminMode(true);
       setCurrentTab('admin');
     }
   };
@@ -241,8 +325,12 @@ export default function App() {
     localStorage.removeItem('culina_token');
     localStorage.removeItem('culina_user');
     setCurrentUser(DEFAULT_GUEST);
-    setIsAdminMode(false);
     setCurrentTab('discovery');
+  };
+
+  const openRegisterModal = () => {
+    setAuthModalType('register');
+    setIsAuthModalOpen(true);
   };
 
   return (
@@ -250,14 +338,7 @@ export default function App() {
       {/* Header */}
       <Header
         currentTab={currentTab}
-        onTabChange={(tab) => {
-          if (tab === 'admin') {
-            setIsAdminMode(true);
-          } else if (isAdminMode) {
-            setIsAdminMode(false);
-          }
-          setCurrentTab(tab);
-        }}
+        onTabChange={setCurrentTab}
         currentUser={currentUser}
         onSwitchUserRole={handleSwitchUserRole}
         isAdminMode={isAdminMode}
@@ -266,121 +347,144 @@ export default function App() {
           setAuthModalType('login');
           setIsAuthModalOpen(true);
         }}
-        onOpenRegisterModal={() => {
-          setAuthModalType('register');
-          setIsAuthModalOpen(true);
-        }}
+        onOpenRegisterModal={openRegisterModal}
         onSearchSubmit={handleSearchSubmit}
         onLogout={handleLogout}
       />
 
       {/* Main Content View Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-        {currentTab === 'discovery' && (
-          <DiscoveryView
-            currentUser={currentUser}
-            recipes={recipes}
-            onSelectRecipe={(r) => setSelectedRecipeForModal(r)}
-            onOpenChatWithPrompt={handleOpenChatWithPrompt}
-            onOpenRegisterModal={() => {
-              setAuthModalType('register');
-              setIsAuthModalOpen(true);
-            }}
-            onGoToProfile={() => setCurrentTab('profile')}
-            onGoToPlanner={() => setCurrentTab('planner')}
+      <main className={`flex-1 w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 ${isAdminMode ? 'max-w-[1520px]' : 'max-w-7xl'}`}>
+        <Suspense
+          fallback={
+            <div className="py-24 flex justify-center">
+              <Loader2 className="w-6 h-6 animate-spin text-orange-500" />
+            </div>
+          }
+        >
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <DiscoveryView
+                currentUser={currentUser}
+                recipes={recipes}
+                onSelectRecipe={openRecipe}
+                onOpenChatWithPrompt={handleOpenChatWithPrompt}
+                onOpenRegisterModal={openRegisterModal}
+                onGoToProfile={() => setCurrentTab('profile')}
+                onGoToPlanner={() => setCurrentTab('planner')}
+              />
+            }
           />
-        )}
 
-        {currentTab === 'search' && (
-          <SearchFilterView
-            currentUser={currentUser}
-            recipes={recipes}
-            onSelectRecipe={(r) => setSelectedRecipeForModal(r)}
-            onOpenChatWithPrompt={handleOpenChatWithPrompt}
-            initialSearchQuery={initialSearchQuery}
+          <Route
+            path="/search"
+            element={
+              <SearchFilterView
+                // Đổi từ khóa trên URL (tìm từ Header) → khởi tạo lại trang tìm kiếm với từ khóa mới
+                key={searchQueryParam}
+                currentUser={currentUser}
+                recipes={recipes}
+                onSelectRecipe={openRecipe}
+                onOpenChatWithPrompt={handleOpenChatWithPrompt}
+                initialSearchQuery={searchQueryParam}
+              />
+            }
           />
-        )}
 
-        {currentTab === 'chat' && (
-          <ChatbotView
-            currentUser={currentUser}
-            initialPrompt={initialChatPrompt}
-            initialFridge={initialChatFridge}
-            initialSessionId={initialChatSessionId}
-            onOpenRecipe={(r) => setSelectedRecipeForModal(r)}
-            onOpenRegisterModal={() => {
-              setAuthModalType('register');
-              setIsAuthModalOpen(true);
-            }}
-            onGoToProfile={() => setCurrentTab('profile')}
-            onAddToPlanner={handleAddToPlanner}
+          <Route
+            path="/chat"
+            element={
+              <ChatbotView
+                currentUser={currentUser}
+                recipes={recipes}
+                initialPrompt={initialChatPrompt}
+                initialFridge={initialChatFridge}
+                initialSessionId={initialChatSessionId}
+                onOpenRecipe={openRecipe}
+                onOpenRegisterModal={openRegisterModal}
+                onGoToProfile={() => setCurrentTab('profile')}
+                onAddToPlanner={handleAddToPlanner}
+              />
+            }
           />
-        )}
 
-        {currentTab === 'profile' && (
-          <TasteProfileView
-            currentUser={currentUser}
-            onUpdateUser={handleUpdateUser}
+          <Route
+            path="/taste-profile"
+            element={
+              <TasteProfileView
+                currentUser={currentUser}
+                onUpdateUser={handleUpdateUser}
+              />
+            }
           />
-        )}
 
-        {currentTab === 'account' && (
-          <UserProfileView
-            currentUser={currentUser}
-            onUpdateUser={handleUpdateUser}
-            onOpenRecipe={(r) => setSelectedRecipeForModal(r)}
-            onGoToChat={(prompt) => {
-              if (prompt) setInitialChatPrompt(prompt);
-              setCurrentTab('chat');
-            }}
-            onGoToTasteProfile={() => setCurrentTab('profile')}
+          <Route
+            path="/account"
+            element={
+              <UserProfileView
+                currentUser={currentUser}
+                onUpdateUser={handleUpdateUser}
+                onOpenRecipe={openRecipe}
+                onGoToChat={(prompt) => {
+                  if (prompt) setInitialChatPrompt(prompt);
+                  setCurrentTab('chat');
+                }}
+                onGoToTasteProfile={() => setCurrentTab('profile')}
+              />
+            }
           />
-        )}
 
-        {currentTab === 'planner' && (
-          <MealPlannerView
-            currentUser={currentUser}
-            recipes={recipes}
-            onOpenRecipe={(r) => setSelectedRecipeForModal(r)}
-            onOpenChatWithPrompt={handleOpenChatWithPrompt}
+          <Route
+            path="/planner"
+            element={
+              <MealPlannerView
+                currentUser={currentUser}
+                recipes={recipes}
+                onOpenRecipe={openRecipe}
+                onOpenChatWithPrompt={handleOpenChatWithPrompt}
+              />
+            }
           />
-        )}
 
-        {currentTab === 'admin' && (
-          <AdminStudioView
-            onBackToUserMode={() => {
-              setIsAdminMode(false);
-              setCurrentTab('discovery');
-              setCurrentUser(prev => ({
-                ...prev,
-                role: 'user',
-                roleLabel: 'Đầu bếp tại gia',
-              }));
-            }}
-            recipes={recipes}
-            onOpenRecipe={(r) => setSelectedRecipeForModal(r)}
+          <Route
+            path="/admin"
+            element={
+              currentUser.role === 'admin' ? (
+                <AdminStudioView
+                  onBackToUserMode={() => {
+                    setCurrentTab('discovery');
+                    setCurrentUser(prev => ({
+                      ...prev,
+                      role: 'user',
+                      roleLabel: 'Đầu bếp tại gia',
+                    }));
+                  }}
+                  recipes={recipes}
+                  onOpenRecipe={openRecipe}
+                />
+              ) : (
+                <div className="py-24 flex flex-col items-center gap-3 text-sm text-slate-400">
+                  <Loader2 className="w-6 h-6 animate-spin text-orange-500" />
+                  Đang kiểm tra quyền truy cập...
+                </div>
+              )
+            }
           />
-        )}
+
+          {/* /reset-password được xử lý bằng effect phía trên rồi chuyển về trang chủ */}
+          <Route path="/reset-password" element={null} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+        </Suspense>
       </main>
 
       {/* Footer */}
       <Footer
-        onSelectTab={(tab) => {
-          setIsAdminMode(false);
-          setCurrentTab(tab);
-        }}
+        onSelectTab={setCurrentTab}
         onOpenLoginModal={() => {
           setAuthModalType('login');
           setIsAuthModalOpen(true);
-        }}
-        onToggleAdmin={() => {
-          setIsAdminMode(true);
-          setCurrentUser(prev => ({
-            ...prev,
-            role: 'admin',
-            roleLabel: 'Quản trị viên',
-          }));
-          setCurrentTab('admin');
         }}
       />
 
@@ -388,12 +492,16 @@ export default function App() {
       {selectedRecipeForModal && (
         <RecipeDetailModal
           recipe={selectedRecipeForModal}
-          onClose={() => setSelectedRecipeForModal(null)}
+          onClose={closeRecipe}
           currentUser={currentUser}
           onAddToPlanner={handleAddToPlanner}
           onOpenAuth={() => {
             setAuthModalType('login');
             setIsAuthModalOpen(true);
+          }}
+          onOpenChatWithPrompt={(prompt, fridgeContext) => {
+            setSelectedRecipeForModal(null);
+            handleOpenChatWithPrompt(prompt, fridgeContext);
           }}
         />
       )}
@@ -402,9 +510,13 @@ export default function App() {
       <AuthModals
         isOpen={isAuthModalOpen}
         type={authModalType}
-        onClose={() => setIsAuthModalOpen(false)}
+        onClose={() => {
+          setIsAuthModalOpen(false);
+          setResetTokenFromLink('');
+        }}
         onSwitchType={(t) => setAuthModalType(t)}
         onLoginSuccess={handleLoginSuccess}
+        initialResetToken={resetTokenFromLink}
       />
 
       {/* Floating AI Chef Assistant Widget (Luôn hiển thị ở góc dưới phải) */}
@@ -415,7 +527,7 @@ export default function App() {
           if (sessionId) setInitialChatSessionId(sessionId);
           setCurrentTab('chat');
         }}
-        onOpenRecipe={(recipe) => setSelectedRecipeForModal(recipe)}
+        onOpenRecipe={openRecipe}
       />
 
       {/* Global Notification & Dialog Frame */}

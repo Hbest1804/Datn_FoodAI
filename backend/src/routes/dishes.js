@@ -1,47 +1,28 @@
-import express from 'express';
-import {
-  getDishes,
-  getDishDetail
-} from '../controllers/dishesController.js';
+// src/routes/dishes.js
+// 4.3 Món ăn, 4.8 Yêu thích & đánh giá, 5.1.1 Món phổ biến
+
+import { Router } from 'express';
+import { getDishDetail, getDishes, getPopularDishes } from '../controllers/dishesController.js';
+import { addFavorite, createDishRating, getDishRatings, removeFavorite } from '../controllers/engagementController.js';
 import { getRecommendations } from '../controllers/recommendationController.js';
-import {
-  addFavorite,
-  removeFavorite,
-  getDishRatings,
-  createDishRating,
-} from '../controllers/engagementController.js';
 import { authenticate, optionalAuthenticate } from '../middlewares/authMiddleware.js';
+import { publicReadLimiter } from '../middlewares/rateLimiter.js';
+import { uuidParam } from '../utils/http.js';
 
-const router = express.Router();
+const router = Router();
 
-// 4.3.1 Tìm kiếm & lọc món ăn
-// GET /dishes hoặc /api/dishes
-router.get('/', optionalAuthenticate, getDishes);
+router.param('dishId', uuidParam('DISH_NOT_FOUND', 'Món không tồn tại.'));
 
-// Tiện ích GET /dishes/popular: chuyển tiếp tới sort=popular
-router.get('/popular', optionalAuthenticate, (req, _res, next) => {
-  req.query.sort = req.query.sort || 'popular';
-  next();
-}, getDishes);
+router.get('/', publicReadLimiter, optionalAuthenticate, getDishes);                    // 4.3.1
+router.get('/popular', publicReadLimiter, optionalAuthenticate, getPopularDishes);      // 5.1.1
+// Giữ cho giao diện cũ: gợi ý công khai (khách nhận món phổ biến, đã đăng nhập thì cá nhân hóa như /me/recommendations)
+router.get('/recommendations', publicReadLimiter, optionalAuthenticate, getRecommendations);
 
-// Gợi ý món ăn công khai / cá nhân hóa - GET /dishes/recommendations
-router.get('/recommendations', optionalAuthenticate, getRecommendations);
+router.put('/:dishId/favorite', authenticate, addFavorite);                             // 4.8.1
+router.delete('/:dishId/favorite', authenticate, removeFavorite);                       // 4.8.2
+router.get('/:dishId/ratings', publicReadLimiter, getDishRatings);                      // 4.8.3
+router.post('/:dishId/ratings', authenticate, createDishRating);                        // 4.8.4
 
-// 4.8.1 Thêm vào yêu thích - PUT /dishes/:dishId/favorite
-router.put('/:dishId/favorite', authenticate, addFavorite);
-
-// 4.8.2 Bỏ yêu thích - DELETE /dishes/:dishId/favorite
-router.delete('/:dishId/favorite', authenticate, removeFavorite);
-
-// 4.8.3 Danh sách đánh giá & bình luận của món - GET /dishes/:dishId/ratings
-router.get('/:dishId/ratings', optionalAuthenticate, getDishRatings);
-
-// 4.8.4 Đánh giá & bình luận món - POST /dishes/:dishId/ratings
-router.post('/:dishId/ratings', authenticate, createDishRating);
-
-// 4.3.2 Xem chi tiết món ăn & công thức
-// GET /dishes/:idOrSlug hoặc /api/dishes/:idOrSlug
-router.get('/:idOrSlug', optionalAuthenticate, getDishDetail);
+router.get('/:idOrSlug', publicReadLimiter, optionalAuthenticate, getDishDetail);       // 4.3.2
 
 export default router;
-

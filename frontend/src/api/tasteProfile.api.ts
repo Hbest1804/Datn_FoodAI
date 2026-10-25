@@ -1,9 +1,9 @@
 // frontend/src/api/tasteProfile.api.ts
 // Taste Profile & User Personalization API module
 
-import { apiClient, BASE_API_URL, getAuthToken } from './client';
+import { apiClient, authFetch } from './client';
 import { BackendTasteProfile, Recipe } from '../types';
-import { normalizeDish } from '../utils/dishUtils';
+import { normalizeDish, normalizeRecommendation } from '../utils/dishUtils';
 
 export interface UpdateTasteProfilePayload {
   preferred_region_id?: number | null;
@@ -81,18 +81,19 @@ export const tasteProfileApi = {
       success: boolean;
       data: any[];
     }>('/me/recommendations');
-    return (res.data || []).map(normalizeDish);
+    return (res.data || []).map(normalizeRecommendation);
   },
 
   // ── Quản lý dữ liệu cá nhân ────────────────────────────────────────
   async getMyProfile(): Promise<any> {
-    const res = await apiClient<{ success: boolean; data: any }>('/me/profile');
+    const res = await apiClient<{ success: boolean; data: any }>('/me');
     return res.data || res;
   },
 
-  async updateMyProfile(data: { display_name?: string; phone?: string }): Promise<any> {
-    const res = await apiClient<{ success: boolean; data: any }>('/me/profile', {
-      method: 'PUT',
+  // Máy chủ chỉ cho sửa tên hiển thị (PATCH /me)
+  async updateMyProfile(data: { display_name: string }): Promise<any> {
+    const res = await apiClient<{ success: boolean; data: any }>('/me', {
+      method: 'PATCH',
       body: JSON.stringify(data),
     });
     return res.data || res;
@@ -105,44 +106,32 @@ export const tasteProfileApi = {
       confirm_password: data.confirm_password,
     };
     const res = await apiClient<{ success: boolean; message?: string; data?: any }>('/me/password', {
-      method: 'PATCH',
+      method: 'PUT',
       body: JSON.stringify(payload),
     });
     return { message: res.message || res.data?.message || 'Đổi mật khẩu thành công.' };
   },
 
+  // Ảnh JPG/PNG/WEBP tối đa 2 MB, gửi trong trường "file"
   async uploadAvatar(file: File): Promise<{ avatar_url: string }> {
-    const token = getAuthToken();
     const formData = new FormData();
-    formData.append('avatar', file);
+    formData.append('file', file);
 
-    const res = await fetch(`${BASE_API_URL}/me/avatar`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      body: formData,
-    });
-
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.error?.message || 'Không thể tải ảnh đại diện lên');
-    }
-
+    const res = await authFetch('/me/avatar', { method: 'POST', body: formData });
     const data = await res.json();
-    return { avatar_url: data.avatar_url || data.data?.avatar_url };
+    return { avatar_url: data.data?.avatar_url };
   },
 
-  async getFavorites(): Promise<Recipe[]> {
+  async getFavorites(params: { q?: string; page?: number; limit?: number } = {}): Promise<Recipe[]> {
     const res = await apiClient<{
       success: boolean;
       data: any[];
-    }>('/me/favorites');
+    }>('/me/favorites', { params: { limit: 100, ...params } });
     return (res.data || []).map(normalizeDish);
   },
 
   async clearFavorites(): Promise<void> {
-    await apiClient('/me/favorites', { method: 'DELETE' });
+    await apiClient('/me/favorites?confirm=true', { method: 'DELETE' });
   },
 
   async getMyRatings(): Promise<any[]> {
@@ -159,11 +148,50 @@ export const tasteProfileApi = {
   },
 
   async clearViewHistory(): Promise<void> {
-    await apiClient('/me/view-history', { method: 'DELETE' });
+    await apiClient('/me/view-history?confirm=true', { method: 'DELETE' });
   },
 
   async deleteChatHistory(): Promise<void> {
-    await apiClient('/me/chat-history', { method: 'DELETE' });
+    await apiClient('/chat/sessions?confirm=true', { method: 'DELETE' });
+  },
+
+  // ── Bộ sưu tập món ăn (5.6) ────────────────────────────────────────
+  async getCollections(): Promise<any[]> {
+    const res = await apiClient<{ success: boolean; data: any[] }>('/me/collections');
+    return res.data || [];
+  },
+
+  async getCollection(collectionId: string): Promise<any> {
+    const res = await apiClient<{ success: boolean; data: any }>(`/me/collections/${collectionId}`);
+    return res.data;
+  },
+
+  async createCollection(name: string): Promise<any> {
+    const res = await apiClient<{ success: boolean; data: any }>('/me/collections', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+    return res.data;
+  },
+
+  async renameCollection(collectionId: string, name: string): Promise<any> {
+    const res = await apiClient<{ success: boolean; data: any }>(`/me/collections/${collectionId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    });
+    return res.data;
+  },
+
+  async deleteCollection(collectionId: string): Promise<void> {
+    await apiClient(`/me/collections/${collectionId}`, { method: 'DELETE' });
+  },
+
+  async addDishToCollection(collectionId: string, dishId: string): Promise<void> {
+    await apiClient(`/me/collections/${collectionId}/dishes/${dishId}`, { method: 'PUT' });
+  },
+
+  async removeDishFromCollection(collectionId: string, dishId: string): Promise<void> {
+    await apiClient(`/me/collections/${collectionId}/dishes/${dishId}`, { method: 'DELETE' });
   },
 
   async deleteAccount(passwordOrConfirm?: string | boolean | { password?: string; confirm?: boolean }): Promise<void> {

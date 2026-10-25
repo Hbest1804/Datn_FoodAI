@@ -50,30 +50,33 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
   const [metaFilters, setMetaFilters] = useState<MetaFilters | null>(null);
 
   // Selected filters
-  const [selectedCategoryId, setSelectedCategoryId] = useState<number | undefined>(undefined);
+  const [selectedCategory, setSelectedCategory] = useState<string | undefined>(undefined);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [selectedDifficulty, setSelectedDifficulty] = useState<'easy' | 'medium' | 'hard' | undefined>(undefined);
   const [maxCookTime, setMaxCookTime] = useState<number | undefined>(undefined);
   const [maxCalories, setMaxCalories] = useState<number>(700);
-  const [sortBy, setSortBy] = useState<'relevance' | 'match' | 'newest' | 'rating' | 'popular' | 'cook_time' | 'calories'>('relevance');
+  const [sortBy, setSortBy] = useState<'relevance' | 'match' | 'newest' | 'updated' | 'rating' | 'popular' | 'cook_time' | 'calories'>('relevance');
   const [viewLayout, setViewLayout] = useState<'grid' | 'list'>('grid');
 
   // Smart Fridge State (Tủ lạnh thông minh)
   const [fridgeIngredients, setFridgeIngredients] = useState<Array<{ id: number; name: string }>>(() => {
     try {
-      const saved = localStorage.getItem('culina_fridge');
+      const saved = localStorage.getItem('culina_search_fridge');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          return parsed.map((item: any, idx: number) => ({
-            id: typeof item.id === 'number' ? item.id : idx + 1,
-            name: item.name || String(item)
-          }));
+          return parsed.filter((item: any) => typeof item?.id === 'number' && item.name);
         }
       }
     } catch {}
     return [];
   });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('culina_search_fridge', JSON.stringify(fridgeIngredients));
+    } catch {}
+  }, [fridgeIngredients]);
   const [ingredientSearchInput, setIngredientSearchInput] = useState('');
   const [ingredientSuggestions, setIngredientSuggestions] = useState<Array<{ id: number; name: string }>>([]);
   const [onlyReadyToCook, setOnlyReadyToCook] = useState(false); // min_match_ratio = 1
@@ -127,7 +130,7 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
 
       const result = await apiService.dishes.getDishes({
         q: searchQuery.trim() || undefined,
-        category_id: selectedCategoryId,
+        category: selectedCategory,
         ingredient_ids: ingredientIds || undefined,
         min_match_ratio: onlyReadyToCook ? 1 : undefined,
         tag_ids: tagIds || undefined,
@@ -151,7 +154,7 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
     }
   }, [
     searchQuery,
-    selectedCategoryId,
+    selectedCategory,
     selectedTagIds,
     selectedDifficulty,
     maxCookTime,
@@ -169,7 +172,7 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
   // Reset Filters
   const handleResetFilters = () => {
     setSearchQuery('');
-    setSelectedCategoryId(undefined);
+    setSelectedCategory(undefined);
     setSelectedTagIds([]);
     setSelectedDifficulty(undefined);
     setMaxCookTime(undefined);
@@ -442,11 +445,11 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
             <div className="flex flex-wrap gap-1.5">
               <button
                 onClick={() => {
-                  setSelectedCategoryId(undefined);
+                  setSelectedCategory(undefined);
                   setPage(1);
                 }}
                 className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition-all cursor-pointer ${
-                  selectedCategoryId === undefined
+                  selectedCategory === undefined
                     ? 'bg-orange-500 text-white border-orange-500 shadow-xs'
                     : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
                 }`}
@@ -455,19 +458,19 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
               </button>
               {(metaFilters?.categories || []).map(cat => (
                 <button
-                  key={cat.id}
+                  key={cat}
                   onClick={() => {
-                    setSelectedCategoryId(cat.id === selectedCategoryId ? undefined : cat.id);
+                    setSelectedCategory(cat === selectedCategory ? undefined : cat);
                     setPage(1);
                   }}
                   className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition-all cursor-pointer ${
-                    selectedCategoryId === cat.id
+                    selectedCategory === cat
                       ? 'bg-orange-500 text-white border-orange-500 shadow-xs'
                       : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
                   }`}
                 >
-                  {selectedCategoryId === cat.id && '✓ '}
-                  {cat.name}
+                  {selectedCategory === cat && '✓ '}
+                  {cat}
                 </button>
               ))}
             </div>
@@ -586,7 +589,8 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
                   <option value="popular">Phổ biến nhất</option>
                   <option value="cook_time">Nấu nhanh nhất</option>
                   <option value="calories">Calo thấp đến cao</option>
-                  <option value="newest">Mới cập nhật</option>
+                  <option value="updated">Mới cập nhật</option>
+                  <option value="newest">Mới thêm</option>
                 </select>
               </div>
 
@@ -654,6 +658,7 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
                       <img
                         src={recipe.image}
                         alt={recipe.title}
+                        loading="lazy" decoding="async"
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                       />
                       
@@ -680,6 +685,13 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
                         <Clock className="w-3 h-3 text-orange-400" />
                         {recipe.cookingTime} phút
                       </div>
+
+                      {recipe.contains_user_allergens && (
+                        <div className="absolute top-12 left-3 px-2.5 py-1 rounded-full bg-red-600 text-white text-[11px] font-bold shadow-xs flex items-center gap-1">
+                          <AlertCircle className="w-3 h-3" />
+                          Có nguyên liệu bạn kiêng
+                        </div>
+                      )}
 
                       {recipe.difficulty && (
                         <div className="absolute bottom-3 right-3 px-2 py-0.5 rounded-full bg-white/90 backdrop-blur-xs text-slate-800 text-[10px] font-bold">
@@ -709,7 +721,7 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
                       {/* Missing ingredients notice if available */}
                       {recipe.match && recipe.match.missing_count > 0 && (
                         <div className="text-[11px] text-amber-700 bg-amber-50 px-2 py-1 rounded-lg">
-                          Thiếu: {recipe.match.missing_ingredients.slice(0, 2).join(', ')}
+                          Thiếu: {recipe.match.missing_ingredients.slice(0, 2).map(i => i.name).join(', ')}
                           {recipe.match.missing_ingredients.length > 2 ? '...' : ''}
                         </div>
                       )}

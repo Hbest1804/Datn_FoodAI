@@ -1,295 +1,263 @@
 // src/services/authService.js
-// Business logic cho chức năng xác thực (Auth)
-// Sử dụng Supabase Auth để quản lý email/password + JWT
+// Nghiệp vụ xác thực – mục 4.1 của tài liệu API. Mật khẩu do dịch vụ xác thực của Supabase băm và lưu.
 
+import crypto from 'crypto';
+import { createClient } from '@supabase/supabase-js';
 import { supabase, supabaseAdmin } from '../config/supabase.js';
+import { env } from '../config/appConfig.js';
+import { ApiError } from '../utils/http.js';
+import { sendPasswordResetEmail } from './mailService.js';
 
-/**
- * Đăng ký tài khoản mới.
- * - Tạo user trong auth.users (Supabase Auth)
- * - Tạo hồ sơ mở rộng trong bảng `users` và `user_profiles`
- * @returns {{ user, session }} hoặc throw Error
- */
-export async function registerUser({ email, password, displayName, phone }) {
-  // 1. Tạo user trong Supabase Auth
-  // 1. Tạo user qua Admin API (auto-confirm email để dùng ngay)
-  const { data: adminData, error: adminError } = await supabaseAdmin.auth.admin.createUser({
-    email,
+const MAX_FAILED_LOGINS = 5;
+const LOGIN_LOCK_MINUTES = 15;
+const RESET_TOKEN_MINUTES = 15;
+const RESET_REQUESTS_PER_WINDOW = 3;
+
+const USER_FIELDS = 'id, email, display_name, avatar_url, role, status, created_at';
+
+/** Tạo kết nối riêng cho mỗi lần đăng nhập để các yêu cầu không dùng chung phiên đăng nhập. */
+function freshClient() {
+  return createClient(env.supabase.url, env.supabase.anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
+function tokenPayload(session) {
+  return {
+    access_token: session.access_token,
+    refresh_token: session.refresh_token,
+    token_type: 'bearer',
+    expires_in: session.expires_in,
+  };
+}
+
+async function findUserByEmail(email) {
+  const { data, error } = await supabaseAdmin
+    .from('users')
+    .select(`${USER_FIELDS}, failed_login_count, locked_until`)
+    .ilike('email', email.replace(/[%_\\]/g, '\\$&'))
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+/** Kiểm tra mật khẩu bằng cách đăng nhập thử; đúng thì trả phiên đăng nhập, sai thì trả null. */
+export async function verifyPassword(email, password) {
+  const { data, error } = await freshClient().auth.signInWithPassword({ email, password });
+  if (error || !data.session) return null;
+  return data.session;
+}
+
+// ── Thu hồi mã truy cập khi đăng xuất (mã vẫn hợp lệ tới khi hết hạn nên cần danh sách chặn) ──
+const revokedTokens = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, exp] of revokedTokens) if (exp <= now) revokedTokens.delete(token);
+}, 30 * 60 * 1000).unref();
+
+export function decodeJwtExp(token) {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+    return typeof payload.exp === 'number' ? payload.exp : null;
+  } catch {
+    return null;
+  }
+}
+
+export function isTokenRevoked(token) {
+  return Boolean(token) && revokedTokens.has(token);
+}
+
+function revokeAccessToken(token) {
+  const exp = decodeJwtExp(token);
+  revokedTokens.set(token, exp ? exp * 1000 : Date.now() + 60 * 60 * 1000);
+}
+
+// ── 4.1.1 Đăng ký ────────────────────────────────────────────────────────────
+
+export async function registerUser({ email, password, displayName }) {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (await findUserByEmail(normalizedEmail)) {
+    throw new ApiError(409, 'EMAIL_ALREADY_EXISTS', 'Email này đã được đăng ký.');
+  }
+
+  const { data: created, error } = await supabaseAdmin.auth.admin.createUser({
+    email: normalizedEmail,
     password,
     email_confirm: true,
     user_metadata: { display_name: displayName },
   });
-
-  if (adminError) {
-    if (adminError.message.toLowerCase().includes('already been registered') ||
-      adminError.message.toLowerCase().includes('already exists') ||
-      adminError.message.toLowerCase().includes('duplicate key') ||
-      adminError.message.toLowerCase().includes('user already exists')) {
-      throw new Error('EMAIL_EXISTS');
-    }
-    throw new Error(adminError.message);
-  }
-
-  const authUser = adminData.user;
-  if (!authUser) {
-    throw new Error('SIGNUP_FAILED');
-  }
-
-  // 2. Tạo hồ sơ mở rộng trong bảng `users`
-  const { error: profileError } = await supabaseAdmin
-    .from('users')
-    .insert({
-      id: authUser.id,
-      email: authUser.email,
-      display_name: displayName || email.split('@')[0],
-      role: 'user',
-      status: 'active',
-    });
-
-  if (profileError) {
-    await supabaseAdmin.auth.admin.deleteUser(authUser.id);
-    throw new Error(`Không thể tạo hồ sơ người dùng: ${profileError.message}`);
-  }
-
-  // 3. Tạo user_profiles
-  const { error: upError } = await supabaseAdmin
-    .from('user_profiles')
-    .insert({
-      user_id: authUser.id,
-      household_size: 1,
-      taste_prefs: {},
-    });
-
-  if (upError) {
-    console.warn('Không tạo được user_profiles:', upError.message);
-  }
-
-  // 4. Sign in ngay để lấy session (vì đã auto-confirm)
-  const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  });
-
-  if (signInError) {
-    console.warn('Không lấy được session sau đăng ký:', signInError.message);
-  }
-
-  return {
-    user: {
-      id: authUser.id,
-      email: authUser.email,
-      displayName: displayName || email.split('@')[0],
-      role: 'user',
-    },
-    session: signInData?.session ?? null,
-  };
-}
-
-/**
- * Đăng nhập bằng email + mật khẩu.
- * @returns {{ user, session, accessToken, refreshToken }}
- */
-export async function loginUser({ email, password }) {
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  });
-
   if (error) {
-    if (
-      error.message.includes('Invalid login credentials') ||
-      error.message.includes('invalid_credentials')
-    ) {
-      throw new Error('INVALID_CREDENTIALS');
+    if (/already|exists|registered/i.test(error.message)) {
+      throw new ApiError(409, 'EMAIL_ALREADY_EXISTS', 'Email này đã được đăng ký.');
     }
-    throw new Error(error.message);
+    throw error;
   }
 
-  const authUser = data.user;
-  const session = data.session;
-
-  // Lấy thêm role & status từ bảng users
-  const { data: profile, error: profileError } = await supabaseAdmin
+  const { data: user, error: insertErr } = await supabaseAdmin
     .from('users')
-    .select('id, email, display_name, role, status')
-    .eq('id', authUser.id)
+    .insert({ id: created.user.id, email: normalizedEmail, display_name: displayName, role: 'user', status: 'active' })
+    .select(USER_FIELDS)
     .single();
-
-  if (profileError) {
-    throw new Error('Không thể lấy thông tin tài khoản.');
+  if (insertErr) {
+    await supabaseAdmin.auth.admin.deleteUser(created.user.id);
+    throw insertErr;
   }
+  await supabaseAdmin.from('user_profiles').insert({ user_id: user.id });
 
-  if (profile.status === 'locked') {
-    throw new Error('ACCOUNT_LOCKED');
-  }
-
-  return {
-    user: {
-      id: profile.id,
-      email: profile.email,
-      displayName: profile.display_name,
-      avatarUrl: authUser.user_metadata?.avatar_url || null,
-      role: profile.role,
-      status: profile.status,
-    },
-    accessToken: session.access_token,
-    refreshToken: session.refresh_token,
-    expiresAt: session.expires_at,
-  };
+  // Đăng nhập luôn để giao diện không phải gọi thêm /auth/login
+  const session = await verifyPassword(normalizedEmail, password);
+  return { user, session };
 }
 
-// Danh sách token đã bị thu hồi sau khi người dùng đăng xuất (In-memory token blacklist)
-// Cấu trúc: Map<token, expiresAtTimestamp>
-const revokedTokenMap = new Map();
+// ── 4.1.2 Đăng nhập (khóa 15 phút sau 5 lần sai liên tiếp – luồng 2c) ──────────
 
-// Tự động dọn dẹp các token đã quá hạn trong blacklist sau mỗi 30 phút
-setInterval(() => {
-  const now = Date.now();
-  for (const [token, exp] of revokedTokenMap.entries()) {
-    if (exp <= now) {
-      revokedTokenMap.delete(token);
-    }
-  }
-}, 30 * 60 * 1000).unref();
+export async function loginUser({ email, password }) {
+  const normalizedEmail = email.trim().toLowerCase();
+  const user = await findUserByEmail(normalizedEmail);
 
-export function revokeToken(token, expiresAt = null) {
-  if (!token || typeof token !== 'string') return;
-  const exp = expiresAt ? expiresAt * 1000 : Date.now() + 24 * 60 * 60 * 1000;
-  revokedTokenMap.set(token, exp);
-}
-
-export function isTokenRevoked(token) {
-  if (!token) return false;
-  return revokedTokenMap.has(token);
-}
-
-/**
- * Đăng xuất — vô hiệu hoá session phía Supabase và thu hồi token trong hệ thống.
- * @param {string|null} accessToken
- */
-export async function logoutUser(accessToken) {
-  if (accessToken) {
-    // 1. Đưa token vào blocklist để chặn ngay lập tức trên mọi request tiếp theo
-    revokeToken(accessToken);
-
-    // 2. Thu hồi session phía Supabase GoTrue Auth qua Admin API
-    try {
-      await supabaseAdmin.auth.admin.signOut(accessToken, 'global');
-    } catch (error) {
-      console.warn('Supabase admin signOut warning:', error.message);
-    }
+  if (user?.locked_until && new Date(user.locked_until) > new Date()) {
+    const retryAfter = Math.ceil((new Date(user.locked_until) - Date.now()) / 1000);
+    throw new ApiError(429, 'TOO_MANY_ATTEMPTS', `Bạn đã nhập sai quá ${MAX_FAILED_LOGINS} lần. Vui lòng thử lại sau ${Math.ceil(retryAfter / 60)} phút.`, { retry_after: retryAfter });
   }
 
-  return { success: true };
-}
-
-/**
- * Lấy thông tin user hiện tại từ JWT.
- * @param {string} accessToken
- */
-export async function getMe(accessToken) {
-  // Xác thực token với Supabase
-  const { data: { user: authUser }, error } = await supabase.auth.getUser(accessToken);
-
-  if (error || !authUser) {
-    throw new Error('TOKEN_INVALID');
-  }
-
-  // Lấy profile mở rộng
-  const { data: profile, error: profileError } = await supabaseAdmin
-    .from('users')
-    .select('id, email, display_name, role, status, created_at')
-    .eq('id', authUser.id)
-    .single();
-
-  if (profileError) {
-    throw new Error('Không thể lấy thông tin tài khoản.');
-  }
-
-  if (profile.status === 'locked') {
-    throw new Error('ACCOUNT_LOCKED');
-  }
-
-  return {
-    id: profile.id,
-    email: profile.email,
-    displayName: profile.display_name,
-    role: profile.role,
-    status: profile.status,
-    createdAt: profile.created_at,
-  };
-}
-
-/**
- * Refresh access token bằng refresh token.
- */
-export async function refreshSession(refreshToken) {
-  const { data, error } = await supabase.auth.refreshSession({
-    refresh_token: refreshToken,
-  });
+  const { data, error } = await freshClient().auth.signInWithPassword({ email: normalizedEmail, password });
 
   if (error || !data.session) {
-    throw new Error('REFRESH_FAILED');
+    if (user && /banned/i.test(error?.message || '')) {
+      throw new ApiError(403, 'ACCOUNT_LOCKED', 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.');
+    }
+    if (user) {
+      const failed = (user.failed_login_count || 0) + 1;
+      const lock = failed >= MAX_FAILED_LOGINS;
+      await supabaseAdmin.from('users').update({
+        failed_login_count: lock ? 0 : failed,
+        locked_until: lock ? new Date(Date.now() + LOGIN_LOCK_MINUTES * 60 * 1000).toISOString() : null,
+      }).eq('id', user.id);
+      if (lock) {
+        throw new ApiError(429, 'TOO_MANY_ATTEMPTS', `Bạn đã nhập sai quá ${MAX_FAILED_LOGINS} lần. Vui lòng thử lại sau ${LOGIN_LOCK_MINUTES} phút.`, { retry_after: LOGIN_LOCK_MINUTES * 60 });
+      }
+    }
+    // Không tiết lộ email có tồn tại hay không
+    throw new ApiError(401, 'INVALID_CREDENTIALS', 'Email hoặc mật khẩu không chính xác.');
   }
 
-  return {
-    accessToken: data.session.access_token,
-    refreshToken: data.session.refresh_token,
-    expiresAt: data.session.expires_at,
-  };
-}
-
-/**
- * Yêu cầu đặt lại mật khẩu (gửi email).
- */
-export async function requestPasswordReset(email, redirectTo) {
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo,
-  });
-
-  if (error) {
-    throw new Error(`Không thể gửi email đặt lại mật khẩu: ${error.message}`);
+  if (!user || user.status === 'locked') {
+    await supabaseAdmin.auth.admin.signOut(data.session.access_token, 'local').catch(() => {});
+    if (!user) throw new ApiError(401, 'INVALID_CREDENTIALS', 'Email hoặc mật khẩu không chính xác.');
+    throw new ApiError(403, 'ACCOUNT_LOCKED', 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.');
   }
 
-  return { success: true };
+  if (user.failed_login_count || user.locked_until) {
+    await supabaseAdmin.from('users').update({ failed_login_count: 0, locked_until: null }).eq('id', user.id);
+  }
+
+  const { failed_login_count: _f, locked_until: _l, ...publicUser } = user;
+  return { ...tokenPayload(data.session), user: publicUser };
 }
 
-/**
- * Kiểm tra tính hợp lệ của token.
- * Vì Supabase trả về access_token trên frontend, ta dùng nó như 'token' để gọi getUser.
- */
+// ── 4.1.3 Đăng xuất / 4.1.4 Làm mới mã truy cập ──────────────────────────────
+
+export async function logoutUser(accessToken) {
+  if (!accessToken) return;
+  revokeAccessToken(accessToken);
+  // Hủy phiên hiện tại → mã làm mới của phiên này hết hiệu lực
+  const { error } = await supabaseAdmin.auth.admin.signOut(accessToken, 'local');
+  if (error) console.warn('[Auth] signOut:', error.message);
+}
+
+export async function refreshSession(refreshToken) {
+  const { data, error } = await supabase.auth.refreshSession({ refresh_token: refreshToken });
+  if (error || !data.session) {
+    throw new ApiError(401, 'INVALID_REFRESH_TOKEN', 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+  }
+  const { data: user } = await supabaseAdmin.from('users').select('status').eq('id', data.user.id).maybeSingle();
+  if (!user || user.status === 'locked') {
+    await supabaseAdmin.auth.admin.signOut(data.session.access_token, 'global').catch(() => {});
+    throw new ApiError(403, 'ACCOUNT_LOCKED', 'Tài khoản đã bị khóa.');
+  }
+  return tokenPayload(data.session);
+}
+
+// ── 4.1.5 – 4.1.7 Đặt lại mật khẩu (mã 6 số, lưu SHA-256, hạn 15 phút, dùng một lần) ──
+
+const resetRequestLog = new Map(); // email → danh sách thời điểm gửi yêu cầu
+
+function hashToken(token) {
+  return crypto.createHash('sha256').update(String(token).trim()).digest('hex');
+}
+
+export async function requestPasswordReset(email) {
+  const normalizedEmail = email.trim().toLowerCase();
+
+  // Giới hạn 3 yêu cầu / 15 phút cho mỗi email (luồng 4c); giới hạn theo IP nằm ở lớp chặn tần suất
+  const now = Date.now();
+  const recent = (resetRequestLog.get(normalizedEmail) || []).filter((t) => now - t < RESET_TOKEN_MINUTES * 60 * 1000);
+  if (recent.length >= RESET_REQUESTS_PER_WINDOW) {
+    const retryAfter = Math.ceil((recent[0] + RESET_TOKEN_MINUTES * 60 * 1000 - now) / 1000);
+    throw new ApiError(429, 'TOO_MANY_REQUESTS', 'Bạn đã gửi yêu cầu quá nhiều lần. Vui lòng thử lại sau.', { retry_after: retryAfter });
+  }
+  resetRequestLog.set(normalizedEmail, [...recent, now]);
+
+  const user = await findUserByEmail(normalizedEmail);
+  // Chỉ gửi email khi tài khoản tồn tại và không bị khóa; kết quả trả về luôn giống nhau (luồng 4a)
+  if (!user || user.status !== 'active') return;
+
+  await supabaseAdmin.from('password_reset_tokens').delete().eq('user_id', user.id).is('used_at', null);
+
+  let code;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+    const { error } = await supabaseAdmin.from('password_reset_tokens').insert({
+      user_id: user.id,
+      token_hash: hashToken(code),
+      expires_at: new Date(now + RESET_TOKEN_MINUTES * 60 * 1000).toISOString(),
+    });
+    if (!error) break;
+    if (error.code !== '23505') throw error; // trùng mã đang hiệu lực của người khác → sinh lại
+    code = null;
+  }
+  if (!code) throw new Error('Không sinh được mã đặt lại mật khẩu');
+
+  try {
+    await sendPasswordResetEmail(user.email, code, `${env.frontendUrl}/reset-password?token=${code}`);
+  } catch (err) {
+    console.error('[Auth] Gửi email đặt lại mật khẩu thất bại:', err.message);
+    throw new ApiError(502, 'EMAIL_SEND_FAILED', 'Không gửi được email. Vui lòng thử lại.');
+  }
+}
+
+async function findValidResetToken(token) {
+  if (!token || typeof token !== 'string') return null;
+  const { data, error } = await supabaseAdmin
+    .from('password_reset_tokens')
+    .select('id, user_id, expires_at, used_at')
+    .eq('token_hash', hashToken(token))
+    .maybeSingle();
+  if (error) throw error;
+  if (!data || data.used_at || new Date(data.expires_at) <= new Date()) return null;
+  return data;
+}
+
 export async function verifyResetToken(token) {
-  const { data, error } = await supabase.auth.getUser(token);
-  if (error || !data.user) {
-    throw new Error('INVALID_OR_EXPIRED_TOKEN');
-  }
-  return { valid: true };
+  const row = await findValidResetToken(token);
+  if (!row) throw new ApiError(400, 'INVALID_OR_EXPIRED_TOKEN', 'Mã đặt lại mật khẩu không hợp lệ hoặc đã hết hạn.');
+  return { valid: true, expires_at: row.expires_at };
 }
 
-/**
- * Đặt mật khẩu mới.
- * Sử dụng token (access_token từ email) để định danh user, sau đó dùng admin client đổi mật khẩu.
- */
 export async function resetPassword(token, newPassword) {
-  // Xác thực token trước
-  const { data, error: userError } = await supabase.auth.getUser(token);
+  const row = await findValidResetToken(token);
+  if (!row) throw new ApiError(400, 'INVALID_OR_EXPIRED_TOKEN', 'Mã đặt lại mật khẩu không hợp lệ hoặc đã hết hạn.');
 
-  if (userError || !data.user) {
-    throw new Error('INVALID_OR_EXPIRED_TOKEN');
-  }
+  const { data: updated, error } = await supabaseAdmin.auth.admin.updateUserById(row.user_id, { password: newPassword });
+  if (error) throw error;
 
-  const userId = data.user.id;
+  await Promise.all([
+    supabaseAdmin.from('password_reset_tokens').update({ used_at: new Date().toISOString() }).eq('id', row.id),
+    supabaseAdmin.from('users').update({ failed_login_count: 0, locked_until: null }).eq('id', row.user_id),
+  ]);
 
-  const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
-    password: newPassword,
-  });
-
-  if (error) {
-    throw new Error(`Không thể cập nhật mật khẩu: ${error.message}`);
-  }
-
-  // Supabase tự động revoke toàn bộ session/refresh token cũ khi đổi mật khẩu qua admin.updateUserById()
-  // KHÔNG gọi admin.signOut(userId) — hàm đó nhận JWT string, không nhận UUID.
-
-  return { success: true };
+  // Hủy mọi phiên cũ: đăng nhập bằng mật khẩu mới để lấy một phiên rồi đăng xuất khỏi tất cả thiết bị
+  const session = await verifyPassword(updated.user.email, newPassword);
+  if (session) await supabaseAdmin.auth.admin.signOut(session.access_token, 'global').catch(() => {});
 }

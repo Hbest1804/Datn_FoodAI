@@ -1,141 +1,96 @@
 // src/middlewares/authMiddleware.js
-// Xác thực JWT (Bearer token) từ Supabase Auth cho các route được bảo vệ
+// Xác thực mã truy cập (Bearer) do Supabase cấp – mục 2.1 của tài liệu API
 
 import { supabase, supabaseAdmin } from '../config/supabase.js';
-import { isTokenRevoked } from '../services/authService.js';
+import { decodeJwtExp, isTokenRevoked } from '../services/authService.js';
+import { cached, invalidateCache } from '../services/cacheService.js';
+import { sendError } from '../utils/http.js';
+
+const AUTH_CACHE_TTL_MS = 60 * 1000;
 
 /**
- * Middleware xác thực JWT.
- * Gắn `req.user` nếu token hợp lệ, trả 401 nếu không có / hết hạn / đã thu hồi.
+ * Trả về { user } nếu mã truy cập hợp lệ, ngược lại trả { status, code, message } mô tả lỗi.
  */
-export async function authenticate(req, res, next) {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({
-      success: false,
-      error: { code: 'UNAUTHORIZED', message: 'Chưa xác thực. Vui lòng đăng nhập.' },
-    });
+async function resolveUser(req) {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) {
+    return { status: 401, code: 'UNAUTHORIZED', message: 'Chưa đăng nhập. Vui lòng đăng nhập.' };
   }
-
-  const token = authHeader.slice(7); // bỏ 'Bearer '
-
-  // Kiểm tra token đã bị thu hồi do đăng xuất chưa
+  const token = header.slice(7);
   if (isTokenRevoked(token)) {
-    return res.status(401).json({
-      success: false,
-      error: { code: 'TOKEN_REVOKED', message: 'Phiên làm việc đã kết thúc do bạn đã đăng xuất. Vui lòng đăng nhập lại.' },
-    });
+    return { status: 401, code: 'UNAUTHORIZED', message: 'Phiên đăng nhập đã kết thúc. Vui lòng đăng nhập lại.' };
+  }
+  // Mã truy cập hết hạn → 401 TOKEN_EXPIRED để giao diện gọi POST /auth/refresh
+  const exp = decodeJwtExp(token);
+  if (exp && exp * 1000 <= Date.now()) {
+    return { status: 401, code: 'TOKEN_EXPIRED', message: 'Phiên đăng nhập đã hết hạn.' };
   }
 
+  // Yêu cầu đọc dùng lại kết quả xác thực trong 60 giây (mỗi lần xác thực tốn 2 lượt gọi Supabase);
+  // yêu cầu ghi luôn xác thực lại và xóa đệm của mã này để lượt đọc sau thấy hồ sơ mới
+  const cacheKey = `auth:${token}`;
+  if (req.method !== 'GET') {
+    invalidateCache(cacheKey);
+    req.res?.on('finish', () => invalidateCache(cacheKey));
+    return verifyToken(token);
+  }
+  const result = await cached(cacheKey, AUTH_CACHE_TTL_MS, async () => {
+    const r = await verifyToken(token);
+    // Chỉ đệm kết quả thành công; lỗi được trả về ngay mà không giữ lại
+    if (!r.user) throw Object.assign(new Error('auth failed'), { result: r });
+    return r;
+  }).catch((err) => {
+    if (err.result) return err.result;
+    throw err;
+  });
+  return result;
+}
+
+async function verifyToken(token) {
+  const { data: { user: authUser } = {}, error } = await supabase.auth.getUser(token);
+  if (error || !authUser) {
+    return { status: 401, code: 'UNAUTHORIZED', message: 'Token không hợp lệ.' };
+  }
+
+  const { data: profile } = await supabaseAdmin
+    .from('users')
+    .select('id, email, display_name, avatar_url, role, status, created_at')
+    .eq('id', authUser.id)
+    .maybeSingle();
+  if (!profile) return { status: 401, code: 'UNAUTHORIZED', message: 'Tài khoản không tồn tại.' };
+  if (profile.status === 'locked') {
+    return { status: 403, code: 'ACCOUNT_LOCKED', message: 'Tài khoản đã bị khóa.' };
+  }
+  return { user: { ...profile, accessToken: token } };
+}
+
+/** Bắt buộc đăng nhập; gắn req.user. */
+export async function authenticate(req, res, next) {
   try {
-    const { data: { user: authUser }, error } = await supabase.auth.getUser(token);
-
-    if (error || !authUser) {
-      return res.status(401).json({
-        success: false,
-        error: { code: 'UNAUTHORIZED', message: 'Token không hợp lệ hoặc đã hết hạn.' },
-      });
-    }
-
-    // Lấy role & status từ bảng users
-    const { data: profile, error: profileErr } = await supabaseAdmin
-      .from('users')
-      .select('id, email, display_name, role, status')
-      .eq('id', authUser.id)
-      .single();
-
-    if (profileErr || !profile) {
-      return res.status(401).json({
-        success: false,
-        error: { code: 'UNAUTHORIZED', message: 'Tài khoản không tồn tại.' },
-      });
-    }
-
-    if (profile.status === 'locked') {
-      return res.status(403).json({
-        success: false,
-        error: { code: 'ACCOUNT_LOCKED', message: 'Tài khoản đã bị khóa.' },
-      });
-    }
-
-    // Gắn vào request để các handler tiếp theo dùng
-    req.user = {
-      id: profile.id,
-      email: profile.email,
-      displayName: profile.display_name,
-      avatarUrl: authUser.user_metadata?.avatar_url || null,
-      role: profile.role,
-    };
-
+    const result = await resolveUser(req);
+    if (!result.user) return sendError(res, result.status, result.code, result.message);
+    req.user = result.user;
     next();
   } catch (err) {
-    console.error('Auth middleware error:', err);
-    return res.status(500).json({
-      success: false,
-      error: { code: 'INTERNAL_AUTH_ERROR', message: 'Lỗi xác thực nội bộ.' },
-    });
+    next(err);
   }
 }
 
-/**
- * Middleware kiểm tra quyền admin.
- * Phải dùng sau `authenticate`.
- */
+/** Chỉ Admin (dùng sau authenticate). */
 export function requireAdmin(req, res, next) {
-  if (!req.user || req.user.role !== 'admin') {
-    return res.status(403).json({
-      success: false,
-      error: { code: 'FORBIDDEN', message: 'Bạn không có quyền truy cập khu vực này.' },
-    });
+  if (req.user?.role !== 'admin') {
+    return sendError(res, 403, 'FORBIDDEN', 'Bạn không có quyền truy cập khu vực này.');
   }
   next();
 }
 
-/**
- * Middleware tùy chọn: gắn user nếu có token, không bắt buộc.
- * Dùng cho route có thể truy cập cả guest lẫn logged-in.
- */
+/** Không bắt buộc đăng nhập: có token hợp lệ thì gắn req.user, ngược lại req.user = null. */
 export async function optionalAuthenticate(req, _res, next) {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    req.user = null;
-    return next();
-  }
-
-  const token = authHeader.slice(7);
-
-  if (isTokenRevoked(token)) {
-    req.user = null;
-    return next();
-  }
-
   try {
-    const { data: { user: authUser }, error } = await supabase.auth.getUser(token);
-
-    if (error || !authUser) {
-      req.user = null;
-      return next();
-    }
-
-    const { data: profile } = await supabaseAdmin
-      .from('users')
-      .select('id, email, display_name, role, status')
-      .eq('id', authUser.id)
-      .single();
-
-    req.user = profile
-      ? {
-          id: profile.id,
-          email: profile.email,
-          displayName: profile.display_name,
-          role: profile.role,
-        }
-      : null;
+    const result = req.headers.authorization ? await resolveUser(req) : {};
+    req.user = result.user || null;
   } catch {
     req.user = null;
   }
-
   next();
 }
