@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, 
   UtensilsCrossed, 
@@ -27,6 +27,8 @@ interface AuthModalsProps {
   onClose: () => void;
   onSwitchType: (type: 'login' | 'register' | 'forgot-password') => void;
   onLoginSuccess: (user: Partial<UserProfile>) => void;
+  /** Token lấy từ liên kết /reset-password?token=... trong email → mở thẳng bước nhập mật khẩu mới */
+  initialResetToken?: string;
 }
 
 export const AuthModals: React.FC<AuthModalsProps> = ({
@@ -35,6 +37,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
   onClose,
   onSwitchType,
   onLoginSuccess,
+  initialResetToken,
 }) => {
   // Common states
   const [showPassword, setShowPassword] = useState(false);
@@ -47,7 +50,6 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
 
   // Register taste questionnaire states
   const [selectedDiet, setSelectedDiet] = useState('Eat Clean');
-  const [selectedAllergens, setSelectedAllergens] = useState<string[]>(['Không có']);
 
   // Forgot password states
   const [forgotStep, setForgotStep] = useState<1 | 2 | 3>(1);
@@ -57,21 +59,14 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (!initialResetToken) return;
+    setResetToken(initialResetToken);
+    setForgotStep(2);
+    setErrorMessage('');
+  }, [initialResetToken]);
 
-  const toggleAllergen = (item: string) => {
-    if (item === 'Không có') {
-      setSelectedAllergens(['Không có']);
-      return;
-    }
-    const filtered = selectedAllergens.filter(a => a !== 'Không có');
-    if (filtered.includes(item)) {
-      const next = filtered.filter(a => a !== item);
-      setSelectedAllergens(next.length === 0 ? ['Không có'] : next);
-    } else {
-      setSelectedAllergens([...filtered, item]);
-    }
-  };
+  if (!isOpen) return null;
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -119,7 +114,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
         roleLabel: 'Đầu bếp tại gia',
         isPro: true,
         dietPreference: selectedDiet,
-        allergiesHardLock: selectedAllergens.filter(a => a !== 'Không có'),
+        allergiesHardLock: [],
       });
       onClose();
     } catch (err: any) {
@@ -564,26 +559,6 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                     </div>
                   </div>
 
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1.5">DỊ ỨNG CẦN AI NÉ TRÁNH TUYỆT ĐỐI:</label>
-                    <div className="flex flex-wrap gap-1.5">
-                      {['Hải sản có vỏ', 'Sữa động vật', 'Đậu phộng', 'Không có'].map(alg => (
-                        <button
-                          key={alg}
-                          type="button"
-                          onClick={() => toggleAllergen(alg)}
-                          className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition-all cursor-pointer ${
-                            selectedAllergens.includes(alg)
-                              ? alg === 'Không có' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-red-500 text-white border-red-500'
-                              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                          }`}
-                        >
-                          {selectedAllergens.includes(alg) && '✓ '}
-                          {alg}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
                 </div>
 
                 <div className="flex items-start gap-2">

@@ -13,7 +13,7 @@ import { apiClient, BASE_API_URL, ApiError } from './client';
 // Health check endpoint
 async function checkHealth(): Promise<boolean> {
   try {
-    const res = await fetch('http://localhost:5000/health');
+    const res = await fetch(`${BASE_API_URL}/health`);
     const json = await res.json();
     return json.status === 'ok';
   } catch {

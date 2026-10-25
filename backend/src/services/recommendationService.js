@@ -8,6 +8,7 @@ import { getSettings } from './settingsService.js';
 import { cosineSimilarity, getDishEmbeddings, parseVector } from './embeddingService.js';
 import { getForbiddenIngredientIds } from './chatContextService.js';
 import { fetchTasteProfile } from './tasteProfileService.js';
+import { getPublishedDishes } from './cacheService.js';
 import { normalizeText } from '../utils/textUtils.js';
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
@@ -21,7 +22,11 @@ export function invalidateRecommendationCache(userId) {
   }
 }
 
-const DISH_FIELDS = 'id, name, slug, description, image_url, category, category_normalized, cook_time_minutes, difficulty, calories, servings, est_cost, avg_rating, rating_count, favorite_count, dish_ingredients(ingredient_id)';
+/** Xóa gợi ý của mọi người dùng khi Admin đổi danh mục món (thêm, nhập, sửa, ẩn món). */
+export function clearRecommendationCache() {
+  recommendationCache.clear();
+}
+
 
 export function toDishSummary(d, isFavorite = false) {
   return {
@@ -119,21 +124,17 @@ export async function getPersonalizedRecommendations({ userId, limit = 12, categ
   const personalized = Boolean(tasteVector) && (profile.completeness >= 30 || hasInteractions);
   const strategy = personalized ? 'personalized' : 'popular_fallback';
 
-  // 2. Món ứng viên đã loại nguyên liệu dị ứng / không thích / needs_review (khi có dị ứng)
-  let query = supabaseAdmin.from('dishes').select(DISH_FIELDS).eq('is_published', true);
-  if (categoryKey) query = query.eq('category_normalized', categoryKey);
-  const [{ data: dishes, error }, forbidden, embeddings] = await Promise.all([
-    query,
+  // 2. Món ứng viên đã loại nguyên liệu dị ứng / không thích
+  const [allDishes, forbidden, embeddings] = await Promise.all([
+    getPublishedDishes(),
     getForbiddenIngredientIds({
       allergenGroupIds: profile.allergen_group_ids,
       dislikedIngredientIds: profile.disliked_ingredient_ids,
     }),
     personalized ? getDishEmbeddings() : Promise.resolve(new Map()),
   ]);
-  if (error) throw error;
-
-  const candidates = (dishes || []).filter((d) =>
-    !(d.dish_ingredients || []).some((di) => forbidden.has(Number(di.ingredient_id))));
+  const candidates = allDishes.filter((d) =>
+    (!categoryKey || d.category_normalized === categoryKey) && !(d.dish_ingredients || []).some((di) => forbidden.has(Number(di.ingredient_id))));
 
   // 3. Chấm điểm
   const maxPop = Math.max(1, ...candidates.map((d) => (d.favorite_count || 0) + (d.rating_count || 0)));

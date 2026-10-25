@@ -656,6 +656,7 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
                     <img
                       src={dish.image}
                       alt={dish.title}
+                      loading="lazy" decoding="async"
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
                     <span className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-black/60 text-white text-[10px] font-bold backdrop-blur-xs">
@@ -732,6 +733,7 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
                         <img
                           src={dish.image_url}
                           alt={dish.name || 'Món'}
+                          loading="lazy" decoding="async"
                           className="w-12 h-12 rounded-xl object-cover"
                         />
                       )}

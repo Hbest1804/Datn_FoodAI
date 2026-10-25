@@ -790,62 +790,92 @@ export async function generateEmbedding(text, outputDimensionality = 768) {
     throw new AIServiceError('VALIDATION_ERROR', 'Văn bản embedding không được để trống.', 422);
   }
 
-  const model = env.gemini.embeddingModel || 'gemini-embedding-2';
-  const candidateModels = [model, 'gemini-embedding-2', 'text-embedding-004'].filter(
-    (m, i, arr) => arr.indexOf(m) === i
-  );
-
   // Không sinh véc-tơ giả: véc-tơ ngẫu nhiên làm sai lệch truy hồi và gợi ý
   if (!env.gemini.apiKey) {
     throw new AIServiceError('AI_SERVICE_ERROR', 'Chưa cấu hình GEMINI_API_KEY nên không tạo được embedding.', 502);
   }
 
+  const configured = env.gemini.embeddingModel || 'gemini-embedding-2';
+  // Các model embedding thực tế được hỗ trợ bởi API Gemini v1beta:
+  // Loại bỏ text-embedding-004 vì trả về 404 trên endpoint này
+  const candidateModels = [
+    configured,
+    'gemini-embedding-2',
+    'gemini-embedding-001',
+    'gemini-embedding-2-preview',
+  ].filter((m, i, arr) => Boolean(m) && arr.indexOf(m) === i);
+
   let lastError = null;
 
   for (const targetModel of candidateModels) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:embedContent`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    const maxRetries = 2;
 
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': env.gemini.apiKey,
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: `models/${targetModel}`,
-          content: {
-            parts: [{ text: text.trim().slice(0, 4000) }],
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:embedContent`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': env.gemini.apiKey,
           },
-          outputDimensionality,
-        }),
-      });
+          signal: controller.signal,
+          body: JSON.stringify({
+            model: `models/${targetModel}`,
+            content: {
+              parts: [{ text: text.trim().slice(0, 4000) }],
+            },
+            outputDimensionality,
+          }),
+        });
 
-      clearTimeout(timeoutId);
+        clearTimeout(timeoutId);
 
-      if (!response.ok) {
-        const errText = await response.text();
-        console.warn(`[Embedding Engine] Model ${targetModel} trả về lỗi ${response.status}: ${errText.slice(0, 100)}`);
-        lastError = new AIServiceError('AI_SERVICE_ERROR', `Lỗi model ${targetModel}: ${response.status}`, 502);
-        continue;
+        // Xử lý 429 (vượt rate-limit quota) hoặc 503 (quá tải)
+        if (response.status === 429 || response.status === 503) {
+          const errText = await response.text();
+          console.warn(`[Embedding Engine] Model ${targetModel} bận (status ${response.status}, lần ${attempt + 1}/${maxRetries + 1}): ${errText.slice(0, 100)}`);
+          lastError = new AIServiceError('AI_SERVICE_ERROR', `Model ${targetModel} đang bận (status ${response.status})`, 502);
+
+          if (attempt < maxRetries) {
+            // Chờ lũy thừa (2s, 4s) trước khi thử lại
+            await new Promise((r) => setTimeout(r, (attempt + 1) * 2000));
+            continue;
+          }
+          // Đã hết số lần thử lại cho model này, thử model kế tiếp
+          break;
+        }
+
+        if (!response.ok) {
+          const errText = await response.text();
+          console.warn(`[Embedding Engine] Model ${targetModel} trả về lỗi ${response.status}: ${errText.slice(0, 100)}`);
+          lastError = new AIServiceError('AI_SERVICE_ERROR', `Lỗi model ${targetModel}: ${response.status}`, 502);
+          // Lỗi khác (như 404, 400) không thử lại model này nữa
+          break;
+        }
+
+        const data = await response.json();
+        const values = data.embedding?.values;
+
+        if (Array.isArray(values) && values.length > 0) {
+          return {
+            embedding: values,
+            model: targetModel,
+            dimensions: values.length,
+          };
+        }
+      } catch (err) {
+        clearTimeout(timeoutId);
+        lastError = err;
+        if (attempt < maxRetries) {
+          await new Promise((r) => setTimeout(r, 1000));
+          continue;
+        }
+        break;
       }
-
-      const data = await response.json();
-      const values = data.embedding?.values;
-
-      if (Array.isArray(values) && values.length > 0) {
-        return {
-          embedding: values,
-          model: targetModel,
-          dimensions: values.length,
-        };
-      }
-    } catch (err) {
-      clearTimeout(timeoutId);
-      lastError = err;
     }
   }
 

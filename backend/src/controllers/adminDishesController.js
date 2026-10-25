@@ -1,11 +1,12 @@
 // src/controllers/adminDishesController.js
 // Admin – Quản lý món ăn (mục 4.10, 5.7) và công thức (mục 4.14). Mọi API yêu cầu vai trò admin.
 
-import * as XLSX from 'xlsx';
 import { supabaseAdmin } from '../config/supabase.js';
 import { recordAuditLog } from '../services/auditService.js';
 import { reindexDish, reindexDishInBackground } from '../services/embeddingService.js';
 import { inspectImage } from '../utils/image.js';
+import { importRemoteDishImage, isOwnDishImageUrl, removeDishImages, uploadDishImage } from '../services/imageStorageService.js';
+import { buildCsvTemplate, buildXlsx, fileExtension, parseTable, readImportFile, XLSX_MIME } from '../utils/importFile.js';
 import { matchesSearchKeyword, normalizeText, slugify } from '../utils/textUtils.js';
 import {
   pageMeta,
@@ -197,8 +198,9 @@ export async function adminGetDishes(req, res) {
 
   let query = supabaseAdmin
     .from('dishes')
-    .select(`id, name, slug, description, image_url, category, cook_time_minutes, difficulty, calories, avg_rating,
-      rating_count, favorite_count, is_published, created_at, updated_at, recipe_steps(count), dish_ingredients(count)`);
+    .select(`id, name, slug, description, image_url, category, cook_time_minutes, difficulty, servings, calories,
+      protein_g, carbs_g, fat_g, avg_rating, rating_count, favorite_count, is_published, created_at, updated_at,
+      recipe_steps(count), dish_ingredients(count)`);
   if (isPublished !== undefined) query = query.eq('is_published', isPublished);
   if (typeof req.query.category === 'string' && req.query.category.trim()) {
     query = query.eq('category_normalized', normalizeText(req.query.category));
@@ -209,12 +211,21 @@ export async function adminGetDishes(req, res) {
 
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   const rows = (data || []).filter((d) => !q || matchesSearchKeyword(d.name, q));
-  const items = rows.slice(pg.from, pg.to + 1).map(({ recipe_steps: steps, dish_ingredients: ings, ...d }) => ({
-    ...d,
-    calories: toNum(d.calories),
-    avg_rating: Number(d.avg_rating) || 0,
-    has_recipe: (steps?.[0]?.count || 0) > 0 && (ings?.[0]?.count || 0) > 0,
-  }));
+  const items = rows.slice(pg.from, pg.to + 1).map(({ recipe_steps: steps, dish_ingredients: ings, ...d }) => {
+    const ingredientCount = ings?.[0]?.count || 0;
+    const stepCount = steps?.[0]?.count || 0;
+    return {
+      ...d,
+      calories: toNum(d.calories),
+      protein_g: toNum(d.protein_g),
+      carbs_g: toNum(d.carbs_g),
+      fat_g: toNum(d.fat_g),
+      avg_rating: Number(d.avg_rating) || 0,
+      ingredient_count: ingredientCount,
+      step_count: stepCount,
+      has_recipe: stepCount > 0 && ingredientCount > 0,
+    };
+  });
   return sendOk(res, items, { meta: pageMeta(pg, rows.length) });
 }
 
@@ -360,20 +371,18 @@ export async function adminUploadImage(req, res) {
   const info = inspectImage(req.file.buffer);
   if (!info) return sendError(res, 415, 'UNSUPPORTED_MEDIA_TYPE', 'Chỉ chấp nhận ảnh JPG, PNG hoặc WEBP.');
 
-  const path = `dish_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${info.ext}`;
-  const { error } = await supabaseAdmin.storage.from('dishes').upload(path, req.file.buffer, { contentType: info.mime });
-  if (error) throw error;
-  const { data: { publicUrl } } = supabaseAdmin.storage.from('dishes').getPublicUrl(path);
-  return sendOk(res, { url: publicUrl, width: info.width, height: info.height, size: req.file.size }, { status: 201 });
+  const { url } = await uploadDishImage(req.file.buffer, info);
+  return sendOk(res, { url, width: info.width, height: info.height, size: req.file.size }, { status: 201 });
 }
 
-// ── 4.10.7 – 4.10.8 Nhập món từ file Excel/CSV ───────────────────────────────
+// ── 4.10.7 – 4.10.8 Nhập món từ file Excel/CSV (chỉ thông tin món; công thức nhập ở mục 4.14.6) ──
 
-const IMPORT_COLUMNS = ['name', 'description', 'category', 'cook_time_minutes', 'difficulty', 'servings', 'est_cost',
-  'calories', 'protein_g', 'carbs_g', 'fat_g', 'tags', 'image_url'];
-const REQUIRED_COLUMNS = ['name', 'category', 'servings'];
-const MAX_IMPORT_ROWS = 500;
-const EXAMPLE_ROW = ['Bún bò Huế', 'Món bún đậm đà, cay nhẹ đặc trưng xứ Huế.', 'Món nước', 90, 'medium', 4, 120000, 520, 32, 58, 18, 'Cay; Món truyền thống', ''];
+const SHEET_DISHES = 'mon_an';
+const DISH_IMPORT_COLUMNS = ['slug', 'name', 'description', 'category', 'cook_time_minutes', 'difficulty', 'servings', 'est_cost',
+  'calories', 'protein_g', 'carbs_g', 'fat_g', 'tags', 'image_url', 'source_url'];
+const MAX_IMPORT_DISHES = 500;
+const EXAMPLE_DISH = ['bun-bo-hue', 'Bún bò Huế', 'Món bún đậm đà, cay nhẹ đặc trưng xứ Huế.', 'Món nước', 90, 'medium', 4, 120000,
+  520, 32, 58, 18, 'Cay; Món nước', '', ''];
 
 /**
  * 4.10.7 Tải file mẫu nhập món – GET /admin/dishes/import/template?format=xlsx|csv
@@ -383,169 +392,107 @@ export async function adminGetImportTemplate(req, res) {
   if (!['xlsx', 'csv'].includes(format)) return sendError(res, 400, 'INVALID_QUERY', 'format phải là xlsx hoặc csv.');
 
   if (format === 'csv') {
-    const line = (cells) => cells.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="mau-nhap-mon-an.csv"');
-    return res.send(`﻿${line(IMPORT_COLUMNS)}\r\n${line(EXAMPLE_ROW)}\r\n`);
+    return res.send(buildCsvTemplate(DISH_IMPORT_COLUMNS, EXAMPLE_DISH));
   }
 
   const { data: tags } = await supabaseAdmin.from('tags').select('name').order('name');
   const guide = [
     ['Cột', 'Bắt buộc', 'Mô tả'],
-    ['name', 'Có', 'Tên món (không trùng món đã có).'],
+    ['slug', 'Không', 'Mã món: không dấu, viết thường, nối bằng "-"; để trống thì tự sinh từ tên món. Dùng để nhập công thức từ file ở Quản lý công thức.'],
+    ['name', 'Có', 'Tên món (không trùng món đã có hoặc dòng khác trong file).'],
     ['description', 'Không', 'Mô tả.'],
     ['category', 'Có', 'Danh mục món, tối đa 100 ký tự.'],
     ['cook_time_minutes', 'Không', 'Thời gian nấu (phút), số nguyên lớn hơn 0.'],
     ['difficulty', 'Không', 'Một trong: easy | medium | hard.'],
     ['servings', 'Có', 'Số khẩu phần, số nguyên lớn hơn 0.'],
-    ['est_cost', 'Không', 'Chi phí ước tính (VND), số nguyên không âm.'],
+    ['est_cost', 'Không', 'Chi phí ước tính cho cả công thức (VND), số nguyên không âm.'],
     ['calories', 'Không', 'Năng lượng mỗi khẩu phần (kcal).'],
     ['protein_g', 'Không', 'Đạm mỗi khẩu phần (g).'],
     ['carbs_g', 'Không', 'Tinh bột mỗi khẩu phần (g).'],
     ['fat_g', 'Không', 'Chất béo mỗi khẩu phần (g).'],
     ['tags', 'Không', 'Tên thẻ, phân tách bằng dấu ";" (phải có trong danh sách bên dưới).'],
-    ['image_url', 'Không', 'URL ảnh http(s) đã có sẵn.'],
+    ['image_url', 'Không', 'Link ảnh http(s) (JPG, PNG hoặc WEBP, tối đa 5 MB). Khi lưu, ảnh được tải về kho ảnh của hệ thống.'],
+    ['source_url', 'Không', 'Nguồn tham khảo công thức (URL http(s)).'],
+    [],
+    ['Món mới luôn ở trạng thái ẩn; bổ sung công thức ở Quản lý công thức rồi mới công khai.'],
     [],
     ['Thẻ hiện có'],
     ...(tags || []).map((t) => [t.name]),
   ];
-  const wb = XLSX.utils.book_new();
-  const wsDishes = XLSX.utils.aoa_to_sheet([IMPORT_COLUMNS, EXAMPLE_ROW]);
-  wsDishes['!cols'] = IMPORT_COLUMNS.map((c) => ({ wch: Math.max(14, c.length + 2) }));
-  XLSX.utils.book_append_sheet(wb, wsDishes, 'Mon_an');
-  const wsGuide = XLSX.utils.aoa_to_sheet(guide);
-  wsGuide['!cols'] = [{ wch: 20 }, { wch: 10 }, { wch: 70 }];
-  XLSX.utils.book_append_sheet(wb, wsGuide, 'Huong_dan');
 
-  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Type', XLSX_MIME);
   res.setHeader('Content-Disposition', 'attachment; filename="mau-nhap-mon-an.xlsx"');
-  return res.send(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
-}
-
-/** Đọc CSV (dấu phẩy hoặc chấm phẩy, hỗ trợ ô trong ngoặc kép). */
-function parseCsv(text) {
-  const firstLine = text.split(/\r?\n/, 1)[0];
-  const delimiter = (firstLine.match(/;/g) || []).length > (firstLine.match(/,/g) || []).length ? ';' : ',';
-  const rows = [];
-  let row = [];
-  let cell = '';
-  let quoted = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (quoted) {
-      if (ch === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (ch === '"') quoted = false; else cell += ch;
-    } else if (ch === '"') {
-      quoted = true;
-    } else if (ch === delimiter) {
-      row.push(cell); cell = '';
-    } else if (ch === '\n' || ch === '\r') {
-      if (ch === '\r' && text[i + 1] === '\n') i++;
-      row.push(cell); rows.push(row); row = []; cell = '';
-    } else {
-      cell += ch;
-    }
-  }
-  if (cell !== '' || row.length > 0) { row.push(cell); rows.push(row); }
-  return rows;
-}
-
-/** Đọc file thành mảng dòng (dòng 1 là tiêu đề); ném lỗi { status, code, message } khi file hỏng. */
-function readImportFile(file) {
-  const ext = (file.originalname || '').toLowerCase().split('.').pop();
-  if (ext === 'csv') {
-    let text;
-    try {
-      text = new TextDecoder('utf-8', { fatal: true }).decode(file.buffer);
-    } catch {
-      throw { status: 422, code: 'INVALID_FILE', message: 'File CSV phải mã hóa UTF-8.' };
-    }
-    return parseCsv(text.replace(/^﻿/, ''));
-  }
-  // .xlsx là file zip (PK..); chỉ đọc giá trị ô, không thực thi công thức/macro
-  if (file.buffer[0] !== 0x50 || file.buffer[1] !== 0x4b) {
-    throw { status: 422, code: 'INVALID_FILE', message: 'File Excel bị hỏng hoặc không đúng định dạng .xlsx.' };
-  }
-  try {
-    const wb = XLSX.read(file.buffer, { type: 'buffer', cellFormula: false, cellHTML: false });
-    const sheet = wb.Sheets[wb.SheetNames[0]];
-    return XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: '', blankrows: true });
-  } catch {
-    throw { status: 422, code: 'INVALID_FILE', message: 'File Excel bị hỏng hoặc không đọc được.' };
-  }
+  return res.send(buildXlsx([
+    { name: SHEET_DISHES, rows: [DISH_IMPORT_COLUMNS, EXAMPLE_DISH], cols: DISH_IMPORT_COLUMNS.map((c) => Math.max(14, c.length + 2)) },
+    { name: 'Huong_dan', rows: guide, cols: [20, 10, 90] },
+  ]));
 }
 
 /**
- * 4.10.8 Nhập món ăn từ file Excel/CSV – POST /admin/dishes/import (gửi dạng biểu mẫu: file, dry_run)
+ * 4.10.8 Nhập món ăn từ file Excel/CSV – POST /admin/dishes/import (gửi dạng biểu mẫu: file, dry_run).
+ * Món mới luôn ẩn vì chưa có công thức.
  */
 export async function adminImportDishes(req, res) {
   if (!req.file) return sendError(res, 400, 'FILE_REQUIRED', 'Thiếu trường file.');
-  const ext = (req.file.originalname || '').toLowerCase().split('.').pop();
-  if (!['xlsx', 'csv'].includes(ext)) {
+  if (!['xlsx', 'csv'].includes(fileExtension(req.file))) {
     return sendError(res, 415, 'UNSUPPORTED_MEDIA_TYPE', 'Chỉ chấp nhận file .xlsx hoặc .csv.');
   }
   const dryRun = req.body?.dry_run === undefined || req.body.dry_run === '' ? true : parseBool(req.body.dry_run);
   if (dryRun === undefined) return sendError(res, 422, 'VALIDATION_ERROR', 'dry_run phải là true hoặc false.');
 
-  let sheet;
+  let dataRows;
+  let warnings;
   try {
-    sheet = readImportFile(req.file);
+    const sheet = readImportFile(req.file, { sheetName: SHEET_DISHES });
+    ({ data: dataRows, warnings } = parseTable(sheet, { columns: DISH_IMPORT_COLUMNS, required: ['name', 'category', 'servings'] }));
   } catch (err) {
     if (err.code) return sendError(res, err.status, err.code, err.message);
     throw err;
   }
-
-  // Dòng tiêu đề: tên cột không phân biệt hoa thường, thứ tự tùy ý
-  const header = (sheet[0] || []).map((h) => String(h).trim().toLowerCase());
-  if (header.length === 0 || header.every((h) => !h)) {
-    return sendError(res, 422, 'INVALID_TEMPLATE', 'File không có dòng tiêu đề.');
-  }
-  const missingCols = REQUIRED_COLUMNS.filter((c) => !header.includes(c));
-  if (missingCols.length) {
-    return sendError(res, 422, 'INVALID_TEMPLATE', `Thiếu cột bắt buộc: ${missingCols.join(', ')}.`);
-  }
-  const warnings = header.filter((h) => h && !IMPORT_COLUMNS.includes(h)).map((h) => `Bỏ qua cột ${h}`);
-
-  // Dòng dữ liệu (bỏ dòng trống hoàn toàn); row tính theo file gốc, tiêu đề là dòng 1
-  const dataRows = [];
-  for (let i = 1; i < sheet.length; i++) {
-    const cells = sheet[i] || [];
-    if (cells.every((c) => String(c ?? '').trim() === '')) continue;
-    const obj = {};
-    header.forEach((h, idx) => { if (IMPORT_COLUMNS.includes(h)) obj[h] = cells[idx]; });
-    dataRows.push({ row: i + 1, obj });
-  }
   if (dataRows.length === 0) return sendError(res, 422, 'EMPTY_FILE', 'File không có dòng dữ liệu nào.');
-  if (dataRows.length > MAX_IMPORT_ROWS) {
-    return sendError(res, 422, 'TOO_MANY_ROWS', `File có ${dataRows.length} dòng, tối đa ${MAX_IMPORT_ROWS} dòng dữ liệu.`);
+  if (dataRows.length > MAX_IMPORT_DISHES) {
+    return sendError(res, 422, 'TOO_MANY_ROWS', `File có ${dataRows.length} món, tối đa ${MAX_IMPORT_DISHES} món.`);
   }
 
-  const [categoryMap, tagsRes, slugsRes] = await Promise.all([
+  const [categoryMap, tagsRes, existingRes] = await Promise.all([
     loadCategoryMap(),
     supabaseAdmin.from('tags').select('id, name'),
-    supabaseAdmin.from('dishes').select('slug'),
+    supabaseAdmin.from('dishes').select('slug, name'),
   ]);
+  if (tagsRes.error) throw tagsRes.error;
+  if (existingRes.error) throw existingRes.error;
   const tagByName = new Map((tagsRes.data || []).map((t) => [normalizeText(t.name), t.id]));
-  const existingSlugs = new Set((slugsRes.data || []).map((d) => d.slug));
-  const slugsInFile = new Set();
+  const existingSlugs = new Set((existingRes.data || []).flatMap((d) => [d.slug, slugify(d.name)]));
+  const rowBySlug = new Map(); // slug (khai báo hoặc tự sinh từ tên) → dòng đầu tiên dùng nó trong file
 
   const errors = [];
-  const valid = [];
+  let valid = [];
   for (const { row, obj } of dataRows) {
-    const rowErrors = [];
-    const err = (field, code, message) => rowErrors.push({ row, field, code, message });
     const text = (k) => String(obj[k] ?? '').trim();
-
+    const rawSlug = text('slug');
     const name = text('name');
+    const declaredSlug = rawSlug ? slugify(rawSlug) : '';
+    const slug = declaredSlug || slugify(name);
+    const rowErrors = [];
+    const err = (field, code, message) => rowErrors.push({ row, slug: slug || null, field, code, message });
+
     const category = text('category').replace(/\s+/g, ' ');
     const servingsRaw = text('servings');
     if (!name) err('name', 'REQUIRED', 'Tên món không được để trống.');
+    else if (name.length > 200) err('name', 'INVALID_VALUE', 'Tên món tối đa 200 ký tự.');
     if (!category) err('category', 'REQUIRED', 'Danh mục không được để trống.');
     if (!servingsRaw) err('servings', 'REQUIRED', 'Số khẩu phần không được để trống.');
+    if (rawSlug && !declaredSlug) err('slug', 'INVALID_VALUE', 'slug chỉ gồm chữ không dấu, số và dấu "-".');
 
-    const slug = slugify(name);
-    if (name && existingSlugs.has(slug)) err('name', 'DISH_NAME_EXISTS', 'Tên món đã tồn tại trong hệ thống.');
-    else if (name && slugsInFile.has(slug)) err('name', 'DUPLICATE_IN_FILE', 'Trùng tên với dòng khác trong file.');
-    if (name) slugsInFile.add(slug);
+    // Trùng tên hoặc slug với món đã có / với dòng khác trong file
+    const nameSlug = slugify(name);
+    if (nameSlug && existingSlugs.has(nameSlug)) err('name', 'DISH_NAME_EXISTS', 'Tên món đã tồn tại trong hệ thống.');
+    else if (declaredSlug && existingSlugs.has(declaredSlug)) err('slug', 'DISH_NAME_EXISTS', `slug "${declaredSlug}" đã được dùng cho món khác.`);
+    else if (nameSlug && rowBySlug.has(nameSlug)) err('name', 'DUPLICATE_IN_FILE', `Trùng tên với món ở dòng ${rowBySlug.get(nameSlug)}.`);
+    else if (declaredSlug && rowBySlug.has(declaredSlug)) err('slug', 'DUPLICATE_IN_FILE', `Trùng slug với món ở dòng ${rowBySlug.get(declaredSlug)}.`);
+    [nameSlug, declaredSlug].forEach((s) => { if (s && !rowBySlug.has(s)) rowBySlug.set(s, row); });
     if (category.length > 100) err('category', 'CATEGORY_TOO_LONG', 'Danh mục tối đa 100 ký tự.');
 
     const values = { name, slug, category, description: text('description') || null };
@@ -566,9 +513,11 @@ export async function adminImportDishes(req, res) {
     if (difficulty && !DIFFICULTIES.includes(difficulty)) err('difficulty', 'INVALID_VALUE', 'Độ khó phải là easy, medium hoặc hard.');
     values.difficulty = difficulty || null;
 
-    const imageUrl = text('image_url');
-    if (imageUrl && !isHttpUrl(imageUrl)) err('image_url', 'INVALID_URL', 'URL ảnh không hợp lệ.');
-    values.image_url = imageUrl || null;
+    for (const f of ['image_url', 'source_url']) {
+      const url = text(f);
+      if (url && !isHttpUrl(url)) err(f, 'INVALID_URL', `${f === 'image_url' ? 'URL ảnh' : 'URL nguồn tham khảo'} không hợp lệ.`);
+      values[f] = url || null;
+    }
 
     const tagIds = [];
     for (const tagName of text('tags').split(';').map((t) => t.trim()).filter(Boolean)) {
@@ -588,38 +537,75 @@ export async function adminImportDishes(req, res) {
     }
   }
 
-  const errorRows = new Set(errors.map((e) => e.row)).size;
   const result = {
     dry_run: dryRun,
     file_name: req.file.originalname,
-    total_rows: dataRows.length,
-    valid_rows: valid.length,
-    error_rows: errorRows,
+    total_dishes: dataRows.length,
+    valid_dishes: valid.length,
+    error_dishes: dataRows.length - valid.length,
     created_count: 0,
     errors,
-    warnings,
+    warnings: warnings || [],
   };
   if (dryRun) return sendOk(res, result);
 
   if (valid.length === 0) {
-    return sendError(res, 422, 'NO_VALID_ROWS', 'Không có dòng hợp lệ nào để lưu.', errors);
+    return sendError(res, 422, 'NO_VALID_ROWS', 'Không có món hợp lệ nào để lưu.', errors);
   }
 
-  // Ghi tất cả món hợp lệ trong một câu lệnh (một giao dịch); lỗi khi gắn thẻ thì xóa các món vừa tạo
-  const { data: created, error: insertErr } = await supabaseAdmin
+  // Tải ảnh từ cột image_url về bucket "dishes" để ảnh không phụ thuộc trang gốc.
+  // Ảnh nào không tải được thì giữ nguyên link gốc và báo trong warnings, không chặn việc nhập món.
+  const uploadedImages = new Map(); // dòng → đường dẫn ảnh trong Storage, để xóa khi hoàn tác
+  const pending = valid.filter((v) => v.values.image_url && !isOwnDishImageUrl(v.values.image_url));
+  const IMAGE_CONCURRENCY = 4;
+  for (let i = 0; i < pending.length; i += IMAGE_CONCURRENCY) {
+    await Promise.all(pending.slice(i, i + IMAGE_CONCURRENCY).map(async (v) => {
+      const image = await importRemoteDishImage(v.values.image_url);
+      if (image.error) {
+        result.warnings.push(`Dòng ${v.row} (${v.values.name}): ${image.error}, giữ nguyên link ảnh gốc.`);
+        return;
+      }
+      v.values.image_url = image.url;
+      uploadedImages.set(v.row, image.path);
+    }));
+  }
+  const removeUploadedImages = (rows) => removeDishImages(rows.map((v) => uploadedImages.get(v.row)).filter(Boolean));
+
+  // Ghi tất cả món hợp lệ trong một câu lệnh; lỗi khi gắn thẻ thì xóa các món vừa tạo
+  const insertDishes = () => supabaseAdmin
     .from('dishes')
     .insert(valid.map((v) => ({ ...v.values, is_published: false, created_by: req.user.id })))
     .select('id, name, slug');
+  let { data: created, error: insertErr } = await insertDishes();
+  if (insertErr?.code === '23505') {
+    // Luồng 3g: có món cùng tên/slug vừa được tạo sau lúc xem trước → bỏ qua các món đó rồi ghi lại một lần
+    const { data: current, error: reloadErr } = await supabaseAdmin.from('dishes').select('slug, name');
+    if (reloadErr) throw reloadErr;
+    const taken = new Set((current || []).flatMap((d) => [d.slug, slugify(d.name)]));
+    const conflicts = valid.filter((v) => taken.has(v.values.slug) || taken.has(slugify(v.values.name)));
+    conflicts.forEach((v) => errors.push({
+      row: v.row, slug: v.values.slug, field: 'name', code: 'DISH_NAME_EXISTS',
+      message: 'Món cùng tên hoặc slug vừa được tạo sau lúc xem trước nên bị bỏ qua.',
+    }));
+    await removeUploadedImages(conflicts);
+    valid = valid.filter((v) => !conflicts.includes(v));
+    result.valid_dishes = valid.length;
+    result.error_dishes = dataRows.length - valid.length;
+    if (valid.length === 0) return sendError(res, 422, 'NO_VALID_ROWS', 'Không có món hợp lệ nào để lưu.', errors);
+    ({ data: created, error: insertErr } = await insertDishes());
+  }
   if (insertErr) {
+    await removeUploadedImages(valid);
     console.error('[Import] Lỗi ghi món:', insertErr);
     return sendError(res, 500, 'IMPORT_FAILED', 'Lỗi khi ghi dữ liệu; không món nào được tạo.');
   }
-  const idBySlug = new Map(created.map((d) => [d.slug, d]));
-  const tagRows = valid.flatMap((v) => v.tagIds.map((tag_id) => ({ dish_id: idBySlug.get(v.values.slug).id, tag_id })));
+  const idBySlug = new Map(created.map((d) => [d.slug, d.id]));
+  const tagRows = valid.flatMap((v) => v.tagIds.map((tag_id) => ({ dish_id: idBySlug.get(v.values.slug), tag_id })));
   if (tagRows.length > 0) {
     const { error: tagErr } = await supabaseAdmin.from('dish_tags').insert(tagRows);
     if (tagErr) {
       await supabaseAdmin.from('dishes').delete().in('id', created.map((d) => d.id));
+      await removeUploadedImages(valid);
       console.error('[Import] Lỗi gắn thẻ, đã hoàn tác:', tagErr);
       return sendError(res, 500, 'IMPORT_FAILED', 'Lỗi khi ghi dữ liệu; đã hoàn tác, không món nào được tạo.');
     }
@@ -628,7 +614,7 @@ export async function adminImportDishes(req, res) {
   created.forEach((d) => reindexDishInBackground(d.id));
   recordAuditLog(req.user, 'dish.import', 'dish', null, {
     file_name: req.file.originalname,
-    total_rows: dataRows.length,
+    total_dishes: dataRows.length,
     created_count: created.length,
     dish_ids: created.map((d) => d.id),
   });
@@ -636,10 +622,7 @@ export async function adminImportDishes(req, res) {
   return sendOk(res, {
     ...result,
     created_count: created.length,
-    created: valid.map((v) => {
-      const d = idBySlug.get(v.values.slug);
-      return { row: v.row, id: d.id, name: d.name, slug: d.slug };
-    }),
+    created: created.map((d) => ({ id: d.id, name: d.name, slug: d.slug })),
   }, { status: 201 });
 }
 
@@ -751,7 +734,7 @@ async function prepareRecipe(body) {
           name,
           default_unit: unit || 'g',
           allergen_group_id: allergenGroupId,
-          needs_review: allergenGroupId === null && !noAllergen,
+          needs_review: false,
         });
       }
     }

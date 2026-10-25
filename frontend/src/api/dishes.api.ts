@@ -3,7 +3,7 @@
 
 import { apiClient, getAuthToken } from './client';
 import { Recipe } from '../types';
-import { normalizeDish } from '../utils/dishUtils';
+import { normalizeDish, normalizeRecommendation } from '../utils/dishUtils';
 
 export interface GetDishesParams {
   q?: string;
@@ -19,7 +19,7 @@ export interface GetDishesParams {
   min_protein_g?: number;
   max_carbs_g?: number;
   max_fat_g?: number;
-  sort?: 'relevance' | 'match' | 'newest' | 'rating' | 'popular' | 'cook_time' | 'calories';
+  sort?: 'relevance' | 'match' | 'newest' | 'updated' | 'rating' | 'popular' | 'cook_time' | 'calories';
   page?: number;
   limit?: number;
 }
@@ -80,12 +80,12 @@ export const dishesApi = {
     }
   },
 
-  async getRecommendations(): Promise<Recipe[]> {
+  async getRecommendations(limit = 12): Promise<Recipe[]> {
     try {
       const token = getAuthToken();
       const endpoint = token ? '/me/recommendations' : '/dishes/recommendations';
-      const res = await apiClient<{ success: boolean; data: any[] }>(endpoint);
-      return (res.data || []).map(normalizeDish);
+      const res = await apiClient<{ success: boolean; data: any[] }>(`${endpoint}?limit=${limit}`);
+      return (res.data || []).map(normalizeRecommendation);
     } catch {
       return [];
     }

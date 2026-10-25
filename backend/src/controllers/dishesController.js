@@ -15,15 +15,23 @@ import {
   sendOk,
 } from '../utils/http.js';
 import { toDishSummary } from '../services/recommendationService.js';
+import { getUserAvoidedIngredientIds } from '../services/chatContextService.js';
 import { recomputeUserVectorsInBackground } from '../services/embeddingService.js';
+import { cached, getPublishedDishes } from '../services/cacheService.js';
 
-const SORTS = ['relevance', 'match', 'newest', 'rating', 'popular', 'cook_time', 'calories'];
+const SORTS = ['relevance', 'match', 'newest', 'updated', 'rating', 'popular', 'cook_time', 'calories'];
 
 function parseNonNegative(query, key) {
   if (query[key] === undefined || query[key] === '') return undefined;
   const n = Number(query[key]);
   if (!Number.isFinite(n) || n < 0) throw new ApiError(400, 'INVALID_QUERY', `Tham số ${key} không hợp lệ.`);
   return n;
+}
+
+/** Món có chứa nguyên liệu thuộc tập `ids` (ingredient_id hoặc ingredient.id). */
+function containsAny(dish, ids) {
+  return ids.size > 0 && (dish.dish_ingredients || [])
+    .some((di) => ids.has(Number(di.ingredient_id ?? di.ingredient?.id)));
 }
 
 async function getUserFavoriteSet(userId, dishIds) {
@@ -62,27 +70,24 @@ export async function getDishes(req, res) {
   const maxFat = parseNonNegative(q, 'max_fat_g');
   const pg = parsePagination(q);
 
-  // 1. Các điều kiện lọc thực hiện ngay trong truy vấn CSDL
-  let query = supabaseAdmin
-    .from('dishes')
-    .select(`id, name, slug, description, image_url, category, cook_time_minutes, difficulty, calories,
-      avg_rating, rating_count, favorite_count, created_at,
-      dish_tags(tag_id),
-      dish_ingredients(is_optional, ingredient:ingredients(id, name, aliases))`)
-    .eq('is_published', true);
-  if (typeof q.category === 'string' && q.category.trim()) query = query.eq('category_normalized', normalizeText(q.category));
-  if (q.difficulty) query = query.eq('difficulty', q.difficulty);
-  if (maxCookTime !== undefined) query = query.lte('cook_time_minutes', maxCookTime);
-  if (maxCalories !== undefined) query = query.lte('calories', maxCalories);
-  if (minProtein !== undefined) query = query.gte('protein_g', minProtein);
-  if (maxCarbs !== undefined) query = query.lte('carbs_g', maxCarbs);
-  if (maxFat !== undefined) query = query.lte('fat_g', maxFat);
-  const { data: rows, error } = await query;
-  if (error) throw error;
+  // 1. Lọc theo các cột trên danh sách món đã đệm (tránh truy vấn lại toàn bộ món mỗi lượt tìm)
+  const categoryKey = typeof q.category === 'string' && q.category.trim() ? normalizeText(q.category) : '';
+  const [allDishes, avoidedIds] = await Promise.all([getPublishedDishes(), getUserAvoidedIngredientIds(req.user?.id)]);
+  const rows = allDishes.filter((d) =>
+    (!categoryKey || d.category_normalized === categoryKey)
+    && (!q.difficulty || d.difficulty === q.difficulty)
+    && (maxCookTime === undefined || (d.cook_time_minutes != null && d.cook_time_minutes <= maxCookTime))
+    && (maxCalories === undefined || (d.calories != null && Number(d.calories) <= maxCalories))
+    && (minProtein === undefined || (d.protein_g != null && Number(d.protein_g) >= minProtein))
+    && (maxCarbs === undefined || (d.carbs_g != null && Number(d.carbs_g) <= maxCarbs))
+    && (maxFat === undefined || (d.fat_g != null && Number(d.fat_g) <= maxFat)));
 
-  // 2. Lọc thẻ, nguyên liệu và từ khóa (bỏ dấu) trên kết quả
+  // 2. Lọc thẻ, nguyên liệu và từ khóa (bỏ dấu) trên kết quả.
+  //    Chỉ lọc (không có từ khóa): ẩn món chứa nguyên liệu người dùng kiêng.
+  //    Tìm theo từ khóa: vẫn trả món đó nhưng gắn nhãn contains_user_allergens.
   const pantry = new Set(ingredientIds || []);
-  let list = (rows || []).filter((d) => {
+  let list = rows.filter((d) => {
+    if (!keyword && containsAny(d, avoidedIds)) return false;
     const ings = d.dish_ingredients || [];
     const ingIds = ings.map((di) => Number(di.ingredient?.id));
     const dishTagIds = (d.dish_tags || []).map((t) => t.tag_id);
@@ -130,6 +135,8 @@ export async function getDishes(req, res) {
     relevance: (a, b) => (Number(matchesSearchKeyword(b.name, keyword)) - Number(matchesSearchKeyword(a.name, keyword))) || byNewest(a, b),
     match: (a, b) => ((b.match?.ratio ?? 0) - (a.match?.ratio ?? 0)) || ((b.match?.matched_count ?? 0) - (a.match?.matched_count ?? 0)),
     newest: byNewest,
+    // Mới cập nhật: món vừa sửa / vừa công khai lên đầu
+    updated: (a, b) => (new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at)) || byNewest(a, b),
     rating: (a, b) => (Number(b.avg_rating) - Number(a.avg_rating)) || (b.rating_count - a.rating_count),
     popular: (a, b) => (b.favorite_count + b.rating_count) - (a.favorite_count + a.rating_count),
     cook_time: (a, b) => (a.cook_time_minutes ?? Infinity) - (b.cook_time_minutes ?? Infinity),
@@ -144,6 +151,7 @@ export async function getDishes(req, res) {
   const data = pageItems.map((d) => ({
     ...toDishSummary(d, favSet.has(d.id)),
     ...(d.match ? { match: d.match } : {}),
+    contains_user_allergens: containsAny(d, avoidedIds),
   }));
 
   // Không có kết quả: gợi ý mở rộng tìm kiếm; có nguyên liệu mà không khớp thì mời chuyển sang chatbot (luồng 2a, 4a)
@@ -171,25 +179,20 @@ export async function getPopularDishes(req, res) {
   const limit = req.query.limit === undefined ? 12 : Number(req.query.limit);
   if (!Number.isInteger(limit) || limit < 1) throw new ApiError(400, 'INVALID_QUERY', 'Tham số limit không hợp lệ.');
 
-  let query = supabaseAdmin
-    .from('dishes')
-    .select('id, name, slug, description, image_url, category, cook_time_minutes, difficulty, calories, avg_rating, rating_count, favorite_count')
-    .eq('is_published', true);
-  if (typeof req.query.category === 'string' && req.query.category.trim()) {
-    query = query.eq('category_normalized', normalizeText(req.query.category));
-  }
-  const [{ data: dishes, error }, { data: views }] = await Promise.all([
-    query,
-    supabaseAdmin.from('view_history').select('dish_id, view_count'),
+  const categoryKey = typeof req.query.category === 'string' && req.query.category.trim() ? normalizeText(req.query.category) : '';
+  const [allDishes, views, avoidedIds] = await Promise.all([
+    getPublishedDishes(),
+    cached('catalog:views', 60 * 1000, async () => (await supabaseAdmin.from('view_history').select('dish_id, view_count')).data || [], { stale: true }),
+    getUserAvoidedIngredientIds(req.user?.id),
   ]);
-  if (error) throw error;
+  const dishes = categoryKey ? allDishes.filter((d) => d.category_normalized === categoryKey) : allDishes;
 
   const viewCount = new Map();
-  (views || []).forEach((v) => viewCount.set(v.dish_id, (viewCount.get(v.dish_id) || 0) + v.view_count));
+  views.forEach((v) => viewCount.set(v.dish_id, (viewCount.get(v.dish_id) || 0) + v.view_count));
   const score = (d) => Math.log1p(viewCount.get(d.id) || 0) + 2 * Math.log1p(d.favorite_count || 0)
     + Number(d.avg_rating || 0) * Math.log1p(d.rating_count || 0);
 
-  const top = (dishes || []).sort((a, b) => score(b) - score(a)).slice(0, Math.min(limit, 50));
+  const top = dishes.filter((d) => !containsAny(d, avoidedIds)).sort((a, b) => score(b) - score(a)).slice(0, Math.min(limit, 50));
   const favSet = await getUserFavoriteSet(req.user?.id, top.map((d) => d.id));
   return sendOk(res, top.map((d) => toDishSummary(d, favSet.has(d.id))));
 }
@@ -215,15 +218,22 @@ export async function getDishDetail(req, res) {
   if (!dish) return sendError(res, 404, 'DISH_NOT_FOUND', 'Món không tồn tại hoặc đã bị ẩn.');
 
   const userId = req.user?.id;
-  const [ratingsRes, relatedRes, favRes] = await Promise.all([
+  const [ratingsRes, relatedRes, favRes, avoidedIds] = await Promise.all([
     supabaseAdmin.from('ratings').select('id, user_id, stars, comment').eq('dish_id', dish.id),
-    supabaseAdmin.from('dishes').select('id, name, slug, image_url')
-      .eq('is_published', true).eq('category', dish.category).neq('id', dish.id).limit(6),
+    supabaseAdmin.from('dishes').select('id, name, slug, image_url, dish_ingredients(ingredient_id)')
+      .eq('is_published', true).eq('category', dish.category).neq('id', dish.id).limit(12),
     userId
       ? supabaseAdmin.from('favorites').select('dish_id').eq('user_id', userId).eq('dish_id', dish.id).maybeSingle()
       : Promise.resolve({ data: null }),
+    getUserAvoidedIngredientIds(userId),
   ]);
   if (ratingsRes.error) throw ratingsRes.error;
+
+  // Món vẫn xem được qua liên kết trực tiếp nhưng đánh dấu nguyên liệu người dùng kiêng; món liên quan thì loại hẳn
+  const relatedDishes = (relatedRes.data || [])
+    .filter((d) => !containsAny(d, avoidedIds))
+    .slice(0, 6)
+    .map(({ dish_ingredients, ...d }) => d);
 
   const distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
   (ratingsRes.data || []).forEach((r) => { distribution[r.stars] += 1; });
@@ -249,7 +259,9 @@ export async function getDishDetail(req, res) {
       unit: di.unit,
       is_optional: di.is_optional,
       allergen_group: di.ingredient?.allergen_group || null,
+      is_user_allergen: avoidedIds.has(Number(di.ingredient?.id)),
     })),
+    contains_user_allergens: containsAny(dish, avoidedIds),
     steps: (dish.recipe_steps || [])
       .sort((a, b) => a.step_order - b.step_order)
       .map((s) => ({ order: s.step_order, content: s.content })),
@@ -260,7 +272,7 @@ export async function getDishDetail(req, res) {
       distribution,
     },
     my_rating: mine ? { id: mine.id, stars: mine.stars, comment: mine.comment } : null,
-    related_dishes: relatedRes.data || [],
+    related_dishes: relatedDishes,
     created_at: dish.created_at,
     updated_at: dish.updated_at,
   });

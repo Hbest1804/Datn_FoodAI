@@ -126,10 +126,9 @@ export async function getChatSessionById(req, res) {
 // ── Ngữ cảnh cá nhân hóa (luồng 2–3) ─────────────────────────────────────────
 
 async function loadUserContext(userId, sessionId, excludeMessageId) {
-  const [profileRes, dietsRes, allergiesRes, dislikesRes, favsRes, historyRes] = await Promise.all([
+  const [profileRes, dietsRes, dislikesRes, favsRes, historyRes] = await Promise.all([
     supabaseAdmin.from('user_profiles').select('taste_prefs, calorie_goal, budget_min, budget_max, household_size').eq('user_id', userId).maybeSingle(),
     supabaseAdmin.from('user_diets').select('diet_types(id, name)').eq('user_id', userId),
-    supabaseAdmin.from('user_allergies').select('allergen_groups(id, code, name)').eq('user_id', userId),
     supabaseAdmin.from('user_disliked_ingredients').select('ingredients(id, name)').eq('user_id', userId),
     supabaseAdmin.from('favorites').select('dishes(id, name)').eq('user_id', userId).order('created_at', { ascending: false }).limit(10),
     supabaseAdmin.from('chat_messages').select('role, content').eq('session_id', sessionId).neq('id', excludeMessageId)
@@ -137,7 +136,8 @@ async function loadUserContext(userId, sessionId, excludeMessageId) {
   ]);
 
   const profile = profileRes.data || {};
-  const allergenGroups = (allergiesRes.data || []).map((r) => r.allergen_groups).filter(Boolean);
+  // Hồ sơ không còn khai dị ứng: chỉ lọc theo nguyên liệu không thích
+  const allergenGroups = [];
   const dislikedIngredients = (dislikesRes.data || []).map((r) => r.ingredients).filter(Boolean);
 
   return {

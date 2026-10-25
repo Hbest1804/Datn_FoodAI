@@ -70,7 +70,7 @@ export function normalizeDish(raw: any): Recipe {
       is_optional: Boolean(item.is_optional),
       allergen: allergenName,
       allergen_group: item.allergen_group || item.ingredient?.allergen_group,
-      isSafe: true,
+      isSafe: !item.is_user_allergen,
     };
   });
 
@@ -134,6 +134,7 @@ export function normalizeDish(raw: any): Recipe {
     favorite_count: favoriteCount,
     matchPercentage: raw.match ? Math.round(raw.match.ratio * 100) : (raw.matchPercentage || 95),
     match: raw.match,
+    contains_user_allergens: Boolean(raw.contains_user_allergens),
     macros: macros,
     nutrition: {
       calories: calo,
@@ -149,6 +150,8 @@ export function normalizeDish(raw: any): Recipe {
     utensils: raw.utensils || ['Chảo chống dính', 'Nồi', 'Dao thớt'],
     status: raw.is_published ? 'published' : (raw.status || 'published'),
     is_published: raw.is_published ?? true,
+    ingredient_count: raw.ingredient_count,
+    has_recipe: raw.has_recipe,
     isAiGenerated: raw.isAiGenerated || false,
     isBookmarked: isFavorite,
     is_favorite: isFavorite,
@@ -158,4 +161,12 @@ export function normalizeDish(raw: any): Recipe {
     my_rating: raw.my_rating,
     related_dishes: raw.related_dishes,
   };
+}
+
+// Phần tử của GET /me/recommendations có dạng { dish, score, reasons }
+export function normalizeRecommendation(item: any): Recipe {
+  const recipe = normalizeDish(item?.dish ?? item);
+  if (typeof item?.score === 'number') recipe.matchPercentage = Math.round(item.score * 100);
+  if (Array.isArray(item?.reasons)) recipe.recommendReasons = item.reasons;
+  return recipe;
 }

@@ -6,6 +6,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { containsBannedWords } from '../utils/bannedWords.js';
 import { invalidateRecommendationCache } from '../services/recommendationService.js';
 import { recomputeUserVectorsInBackground } from '../services/embeddingService.js';
+import { invalidateCatalog } from '../services/cacheService.js';
 import { pageMeta, parseBool, parsePagination, sendError, sendOk } from '../utils/http.js';
 
 const MAX_COMMENT_LENGTH = 1000;
@@ -36,6 +37,8 @@ async function readDishCounters(dishId) {
 
 function onPreferenceChanged(userId) {
   invalidateRecommendationCache(userId);
+  // Lượt yêu thích / điểm đánh giá của món đổi theo
+  invalidateCatalog();
   recomputeUserVectorsInBackground(userId);
 }
 

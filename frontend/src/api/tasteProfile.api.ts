@@ -3,7 +3,7 @@
 
 import { apiClient, authFetch } from './client';
 import { BackendTasteProfile, Recipe } from '../types';
-import { normalizeDish } from '../utils/dishUtils';
+import { normalizeDish, normalizeRecommendation } from '../utils/dishUtils';
 
 export interface UpdateTasteProfilePayload {
   preferred_region_id?: number | null;
@@ -81,7 +81,7 @@ export const tasteProfileApi = {
       success: boolean;
       data: any[];
     }>('/me/recommendations');
-    return (res.data || []).map(normalizeDish);
+    return (res.data || []).map(normalizeRecommendation);
   },
 
   // ── Quản lý dữ liệu cá nhân ────────────────────────────────────────

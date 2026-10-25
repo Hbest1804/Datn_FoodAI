@@ -8,6 +8,8 @@ import { env } from './config/appConfig.js';
 import { testDbConnection } from './config/supabase.js';
 import { ensureAdminUser } from './services/adminInitService.js';
 import { indexStaleDishes } from './services/embeddingService.js';
+import { getPublishedDishes } from './services/cacheService.js';
+import { getFilterData } from './controllers/metaController.js';
 import { requestIdMiddleware, sendError } from './utils/http.js';
 import authRoutes from './routes/auth.js';
 import metaRoutes from './routes/meta.js';
@@ -37,8 +39,11 @@ app.get('/health', (_req, res) => {
 });
 
 // ── Đăng ký các nhóm API ──────────────────────────────────────────────────────
-// Địa chỉ gốc theo tài liệu: /api/v1. Giữ thêm /api để giao diện hiện tại tiếp tục chạy.
+// Địa chỉ gốc theo tài liệu: /api
 const api = express.Router();
+api.get('/health', (_req, res) => {
+  res.json({ status: 'ok', env: env.nodeEnv, timestamp: new Date().toISOString() });
+});
 api.use('/auth', authRoutes);
 api.use('/meta', metaRoutes);
 api.use('/ingredients', ingredientsRoutes);
@@ -49,7 +54,6 @@ api.use('/me', meRoutes);
 api.use('/ratings', ratingsRoutes);
 api.use('/admin', adminRoutes);
 
-app.use('/api/v1', api);
 app.use('/api', api);
 
 // ── Đường dẫn không tồn tại ──────────────────────────────────────────────────
@@ -82,13 +86,17 @@ app.use((err, req, res, _next) => {
 async function bootstrap() {
   try {
     await testDbConnection();
-    await ensureAdminUser();
 
     app.listen(env.port, () => {
-      console.log(`🚀 Server đang chạy tại http://localhost:${env.port}/api/v1`);
+      console.log(`🚀 Server đang chạy tại http://localhost:${env.port}/api`);
       console.log(`   Môi trường : ${env.nodeEnv}`);
       console.log(`   CORS origin: ${env.corsOrigin}`);
     });
+
+    // Không cần chờ: tạo tài khoản admin và nạp sẵn danh sách món để lượt tải trang đầu tiên không phải đợi CSDL
+    ensureAdminUser();
+    Promise.all([getPublishedDishes(), getFilterData()])
+      .catch((err) => console.warn('[Cache] Không nạp sẵn được danh sách món:', err.message));
 
     // Tạo véc-tơ cho các món chưa có hoặc đã đổi nội dung (chạy nền)
     indexStaleDishes()

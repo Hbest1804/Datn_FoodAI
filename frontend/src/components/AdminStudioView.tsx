@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   BarChart3,
   UtensilsCrossed,
@@ -21,6 +21,7 @@ import {
   Volume2,
   Lock,
   ChevronRight,
+  ChevronLeft,
   ThumbsDown,
   ThumbsUp,
   Database,
@@ -45,6 +46,7 @@ import { apiService } from '../services/api';
 import { normalizeDish, formatVND } from '../utils/dishUtils';
 import { toast, showConfirm, showPrompt } from './NotificationModal';
 import type { DishImportResult } from '../api/admin.api';
+import RecipeImportModal from './RecipeImportModal';
 
 // Tên hiển thị của các cột trong file nhập món
 const IMPORT_FIELD_LABELS: Record<string, string> = {
@@ -61,16 +63,8 @@ const IMPORT_FIELD_LABELS: Record<string, string> = {
   fat_g: 'Chất béo',
   tags: 'Thẻ',
   image_url: 'URL ảnh',
-};
-
-const ALLERGEN_GROUP_LABELS: Record<number, string> = {
-  1: 'Dị ứng: Hải sản có vỏ',
-  2: 'Dị ứng: Đậu phộng',
-  3: 'Dị ứng: Sữa bò / Lactose',
-  4: 'Dị ứng: Gluten',
-  5: 'Dị ứng: Trứng',
-  6: 'Dị ứng: Đậu nành',
-  7: 'Dị ứng: Vừng mè',
+  slug: 'Mã món (slug)',
+  source_url: 'Nguồn tham khảo',
 };
 
 const DEFAULT_ADMIN_STATS: AdminStats = {
@@ -112,11 +106,20 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
   const [dishSearch, setDishSearch] = useState('');
   const [selectedDishes, setSelectedDishes] = useState<string[]>([]);
   const [loadingDishes, setLoadingDishes] = useState(false);
+  // Phân trang phía máy chủ: dishesList chỉ chứa các món của trang hiện tại
+  const [dishPage, setDishPage] = useState(1);
+  const [dishTotal, setDishTotal] = useState(0);
+  const DISHES_PER_PAGE = 10;
+  const totalDishPages = Math.max(1, Math.ceil(dishTotal / DISHES_PER_PAGE));
+  const dishRequestSeq = useRef(0);
+  // Toàn bộ món cho ô chọn món ở tab Công thức (không phụ thuộc trang của bảng)
+  const [recipeDishOptions, setRecipeDishOptions] = useState<Recipe[]>(initialRecipes);
   const [showAddDishModal, setShowAddDishModal] = useState(false);
   const [reindexingDishId, setReindexingDishId] = useState<string | null>(null);
 
   // Nhập món từ Excel/CSV
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showRecipeImportModal, setShowRecipeImportModal] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importResult, setImportResult] = useState<DishImportResult | null>(null);
   const [importError, setImportError] = useState('');
@@ -161,9 +164,6 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
     name: string;
     quantity: string | number;
     unit: string;
-    needs_review?: boolean;
-    allergen_group_id?: number | null;
-    no_allergen?: boolean;
   }>>([]);
   const [recipeSteps, setRecipeSteps] = useState<Array<{ step_number: number; title: string; instruction: string; duration_minutes: number }>>([]);
   const [loadingRecipe, setLoadingRecipe] = useState(false);
@@ -175,7 +175,6 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
   const [newIngName, setNewIngName] = useState('');
   const [newIngQty, setNewIngQty] = useState('');
   const [newIngUnit, setNewIngUnit] = useState('g');
-  const [newIngAllergen, setNewIngAllergen] = useState<string>('');
   const [newStepTitle, setNewStepTitle] = useState('');
   const [newStepInstruction, setNewStepInstruction] = useState('');
   const [newStepDuration, setNewStepDuration] = useState('10');
@@ -267,22 +266,50 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
   }, [statsDays, topDishesBy]);
 
   // Fetch dishes from admin endpoint
-  const loadAdminDishes = async () => {
+  const loadAdminDishes = async (page = dishPage) => {
+    const seq = ++dishRequestSeq.current;
     setLoadingDishes(true);
     try {
-      const res = await apiService.admin.getDishes({ q: dishSearch, limit: 100 });
+      const res = await apiService.admin.getDishes({ q: dishSearch, page, limit: DISHES_PER_PAGE });
+      if (seq !== dishRequestSeq.current) return; // Đã có yêu cầu mới hơn
       if (res && res.data) {
-        const normalized = res.data.map(normalizeDish);
-        setDishesList(normalized);
-        if (!selectedRecipeDishId && normalized.length > 0) {
-          setSelectedRecipeDishId(normalized[0].id);
-          loadDishRecipe(normalized[0].id);
+        const total = res.meta?.total ?? res.data.length;
+        const lastPage = Math.max(1, Math.ceil(total / DISHES_PER_PAGE));
+        // Trang hiện tại không còn món (vd. vừa xóa món cuối) → lùi về trang cuối cùng
+        if (res.data.length === 0 && page > lastPage) {
+          loadAdminDishes(lastPage);
+          return;
         }
+        setDishesList(res.data.map(normalizeDish));
+        setDishTotal(total);
+        setDishPage(page);
       }
     } catch {
       // Keep initialRecipes fallback
     } finally {
-      setLoadingDishes(false);
+      if (seq === dishRequestSeq.current) setLoadingDishes(false);
+    }
+  };
+
+  // Tải toàn bộ món (theo từng đợt 100 món) cho ô chọn món ở tab Công thức
+  const loadRecipeDishOptions = async () => {
+    try {
+      const all: Recipe[] = [];
+      let page = 1;
+      let totalPages = 1;
+      do {
+        const res = await apiService.admin.getDishes({ page, limit: 100, sort: 'name' });
+        all.push(...(res?.data || []).map(normalizeDish));
+        totalPages = res?.meta?.total_pages || 1;
+        page++;
+      } while (page <= totalPages);
+      setRecipeDishOptions(all);
+      if (!selectedRecipeDishId && all.length > 0) {
+        setSelectedRecipeDishId(all[0].id);
+        loadDishRecipe(all[0].id);
+      }
+    } catch {
+      // Keep initialRecipes fallback
     }
   };
 
@@ -290,12 +317,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
     if (adminTab === 'dishes') {
       loadAdminDishes();
     } else if (adminTab === 'recipes') {
-      if (dishesList.length === 0) {
-        loadAdminDishes();
-      } else if (!selectedRecipeDishId && dishesList.length > 0) {
-        setSelectedRecipeDishId(dishesList[0].id);
-        loadDishRecipe(dishesList[0].id);
-      }
+      loadRecipeDishOptions();
     } else if (adminTab === 'users') {
       loadAdminUsers();
     } else if (adminTab === 'chatbot') {
@@ -406,14 +428,15 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
   };
 
   const handleConfirmImport = async () => {
-    if (!importFile || !importResult || importResult.valid_rows === 0) return;
+    if (!importFile || !importResult || importResult.valid_dishes === 0) return;
     setIsSubmittingImport(true);
     setImportError('');
     try {
       const result = await apiService.admin.importDishes(importFile, false);
       setImportResult(result);
-      toast.success(`Đã nhập ${result.created_count} món ăn (đang ở trạng thái ẩn).`);
-      loadAdminDishes();
+      toast.success(`Đã nhập ${result.created_count} món ăn (đang ẩn, cần bổ sung công thức).`);
+      loadAdminDishes(1);
+      loadRecipeDishOptions();
     } catch (err: any) {
       setImportError(err.message || 'Lỗi khi nhập món ăn');
     } finally {
@@ -437,7 +460,6 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
           name: ing.name || ing.ingredient?.name || '',
           quantity: ing.quantity || ing.amount || 1,
           unit: ing.unit || '',
-          needs_review: !!ing.needs_review,
         })));
       } else {
         setRecipeIngredients([]);
@@ -456,7 +478,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
       // Món chưa có công thức (RECIPE_NOT_FOUND) không phải lỗi: Admin nhập mới bên dưới
       if (err?.code === 'RECIPE_NOT_FOUND') {
         setRecipeNotice('Món chưa có công thức. Bạn có thể thêm mới bên dưới.');
-        const dish = dishesList.find(d => d.id === dishId);
+        const dish = recipeDishOptions.find(d => d.id === dishId);
         if (dish?.servings) setRecipeServings(dish.servings);
       } else {
         setRecipeError(err.message || 'Không tải được công thức.');
@@ -485,7 +507,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
     setRecipeError('');
     try {
       // Khẩu phần thuộc thông tin món, công thức chỉ gồm nguyên liệu và các bước
-      const dish = dishesList.find(d => d.id === selectedRecipeDishId);
+      const dish = recipeDishOptions.find(d => d.id === selectedRecipeDishId);
       if (dish && dish.servings !== recipeServings) {
         await apiService.admin.updateDish(selectedRecipeDishId, { servings: recipeServings });
       }
@@ -494,8 +516,6 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
           ...(ing.ingredient_id ? { ingredient_id: ing.ingredient_id } : { name: ing.name }),
           quantity: Number(ing.quantity) || 1,
           unit: ing.unit || undefined,
-          ...(ing.allergen_group_id != null ? { allergen_group_id: ing.allergen_group_id } : {}),
-          ...(ing.no_allergen ? { no_allergen: true } : {}),
         })),
         steps: recipeSteps.map((st, idx) => ({ order: idx + 1, content: st.instruction })),
         publish,
@@ -506,7 +526,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
       setRecipeNotice(msg);
       toast.success(msg);
       setTimeout(() => setRecipeNotice(''), 3500);
-      loadAdminDishes();
+      loadRecipeDishOptions();
     } catch (err: any) {
       setRecipeError(err.message || 'Lỗi khi lưu công thức');
       toast.error(err.message || 'Lỗi khi lưu công thức');
@@ -533,7 +553,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
       setRecipeNotice('Đã xóa công thức thành công và ẩn món ăn.');
       toast.success('Đã xóa công thức thành công và chuyển món ăn sang trạng thái ẩn.');
       setTimeout(() => setRecipeNotice(''), 3500);
-      loadAdminDishes();
+      loadRecipeDishOptions();
     } catch (err: any) {
       setRecipeError(err.message || 'Lỗi khi xóa công thức');
       toast.error(err.message || 'Lỗi khi xóa công thức');
@@ -545,33 +565,16 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
 
   const handleAddIngredient = () => {
     if (!newIngName.trim()) return;
-    const allergenVal = newIngAllergen;
-    let allergen_group_id: number | null = null;
-    let no_allergen = false;
-    let needs_review = false;
-
-    if (allergenVal === 'none') {
-      no_allergen = true;
-    } else if (allergenVal) {
-      allergen_group_id = parseInt(allergenVal, 10);
-    } else {
-      needs_review = true;
-    }
-
     setRecipeIngredients(prev => [
       ...prev,
       {
         name: newIngName.trim(),
         quantity: newIngQty.trim() || 1,
         unit: newIngUnit.trim() || 'g',
-        allergen_group_id,
-        no_allergen,
-        needs_review,
       }
     ]);
     setNewIngName('');
     setNewIngQty('');
-    setNewIngAllergen('');
   };
 
   const handleRemoveIngredient = (index: number) => {
@@ -774,7 +777,9 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
         setDishesList(prev => prev.map(d => d.id === dishId ? { ...d, is_published: false } : d));
         toast.warning(res.data.reason || 'Món đã có đánh giá nên chỉ được ẩn khỏi người dùng.');
       } else {
-        setDishesList(prev => prev.filter(d => d.id !== dishId));
+        setRecipeDishOptions(prev => prev.filter(d => d.id !== dishId));
+        // Tải lại trang hiện tại để món của trang sau được kéo lên
+        loadAdminDishes();
         toast.success('Đã xóa món ăn khỏi hệ thống.');
       }
     } catch (err: any) {
@@ -857,7 +862,11 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
     setEditDishCategory(dish.category || 'Món chính');
     setEditDishImageUrl(dish.image && !dish.image.includes('placeholder') ? dish.image : '');
     setEditDishTime(String(dish.cookingTime || 20));
-    setEditDishDifficulty((dish.difficulty as any) || 'medium');
+    // dish.difficulty đã được đổi sang chữ hiển thị (Dễ/Vừa/Nâng cao) → đổi lại mã cho ô chọn
+    const difficultyCode: Record<string, 'easy' | 'medium' | 'hard'> = {
+      'Dễ': 'easy', 'Vừa': 'medium', 'Nâng cao': 'hard', easy: 'easy', medium: 'medium', hard: 'hard',
+    };
+    setEditDishDifficulty(difficultyCode[dish.difficulty as string] || 'medium');
     setEditDishServings(String((dish as any).servings || 2));
     setEditDishCalo(String(dish.macros?.calories || 400));
     setEditDishProtein(String(dish.macros?.protein || 20));
@@ -892,6 +901,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
       });
 
       await loadAdminDishes();
+      loadRecipeDishOptions();
 
       setShowEditDishModal(false);
       setEditingDish(null);
@@ -927,10 +937,9 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
         fat_g: parseFloat(newDishFat) || 10,
       });
 
-      if (res && res.data) {
-        setDishesList(prev => [normalizeDish(res.data), ...prev]);
-      }
-      await loadAdminDishes();
+      // Món mới nhất nằm ở trang 1 (sắp xếp theo updated_at giảm dần)
+      await loadAdminDishes(1);
+      loadRecipeDishOptions();
 
       setShowAddDishModal(false);
       setNewDishName('');
@@ -1328,7 +1337,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
 
               <div className="flex items-center gap-2">
                 <button
-                  onClick={loadAdminDishes}
+                  onClick={() => loadAdminDishes()}
                   className="p-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl transition-colors cursor-pointer"
                   title="Tải lại"
                 >
@@ -1360,13 +1369,13 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                   type="text"
                   value={dishSearch}
                   onChange={(e) => setDishSearch(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && loadAdminDishes()}
+                  onKeyDown={(e) => e.key === 'Enter' && loadAdminDishes(1)}
                   placeholder="Tìm kiếm theo tên món ăn..."
                   className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:border-orange-500"
                 />
               </div>
               <button
-                onClick={loadAdminDishes}
+                onClick={() => loadAdminDishes(1)}
                 className="px-4 py-2 bg-orange-500 text-white rounded-xl text-xs font-bold hover:bg-orange-600 cursor-pointer"
               >
                 Tìm kiếm
@@ -1425,7 +1434,12 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                               </div>
                               <div className="text-[10px] text-slate-400 font-medium">
                                 {r.code ? <span className="font-mono text-slate-500 mr-1">{r.code} •</span> : null}
-                                {r.ingredients?.length || 0} nguyên liệu
+                                {r.ingredient_count ?? r.ingredients?.length ?? 0} nguyên liệu
+                                {r.has_recipe === false && (
+                                  <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-bold">
+                                    Chưa có công thức
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </td>
@@ -1504,6 +1518,49 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                   </tbody>
                 </table>
               </div>
+
+              {dishTotal > DISHES_PER_PAGE && (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-6 py-4 border-t border-slate-100 text-xs">
+                  <div className="text-slate-500">
+                    Hiển thị <span className="font-bold text-slate-900">{(dishPage - 1) * DISHES_PER_PAGE + 1}–{Math.min(dishPage * DISHES_PER_PAGE, dishTotal)}</span> trên <span className="font-bold text-slate-900">{dishTotal}</span> món
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => loadAdminDishes(dishPage - 1)}
+                      disabled={dishPage === 1 || loadingDishes}
+                      className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                      title="Trang trước"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    {Array.from({ length: totalDishPages }, (_, i) => i + 1)
+                      .filter(p => p === 1 || p === totalDishPages || Math.abs(p - dishPage) <= 1)
+                      .map((p, idx, arr) => (
+                        <React.Fragment key={p}>
+                          {idx > 0 && p - arr[idx - 1] > 1 && <span className="px-1 text-slate-400">…</span>}
+                          <button
+                            onClick={() => p !== dishPage && loadAdminDishes(p)}
+                            disabled={loadingDishes}
+                            className={`min-w-[32px] h-8 px-2 rounded-lg font-bold transition-colors cursor-pointer ${p === dishPage
+                              ? 'bg-orange-500 text-white'
+                              : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
+                              }`}
+                          >
+                            {p}
+                          </button>
+                        </React.Fragment>
+                      ))}
+                    <button
+                      onClick={() => loadAdminDishes(dishPage + 1)}
+                      disabled={dishPage === totalDishPages || loadingDishes}
+                      className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                      title="Trang sau"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1525,7 +1582,15 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => setShowRecipeImportModal(true)}
+                  title="Nhập nguyên liệu và các bước cho nhiều món cùng lúc từ file Excel (.xlsx)"
+                  className="px-3.5 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  Nhập công thức từ file
+                </button>
                 <button
                   onClick={handleDeleteRecipe}
                   disabled={savingRecipe || !selectedRecipeDishId}
@@ -1548,7 +1613,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                   className="px-5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
                 >
                   <Eye className="w-3.5 h-3.5" />
-                  {savingRecipe ? 'Đang lưu...' : 'Lưu & Công khai món (publish=true)'}
+                  {savingRecipe ? 'Đang lưu...' : 'Lưu & Công khai món'}
                 </button>
               </div>
             </div>
@@ -1581,7 +1646,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                   }}
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-orange-500 cursor-pointer"
                 >
-                  {dishesList.map(d => (
+                  {recipeDishOptions.map(d => (
                     <option key={d.id} value={d.id}>
                       {d.title}{d.category ? ` (${d.category})` : ''}
                     </option>
@@ -1624,7 +1689,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                       placeholder="Tên nguyên liệu (thịt gà, tôm...)"
                       value={newIngName}
                       onChange={(e) => setNewIngName(e.target.value)}
-                      className="col-span-5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:border-orange-500"
+                      className="col-span-8 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:border-orange-500"
                     />
                     <input
                       type="text"
@@ -1640,22 +1705,6 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                       onChange={(e) => setNewIngUnit(e.target.value)}
                       className="col-span-2 px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:border-orange-500 text-center"
                     />
-                    <select
-                      value={newIngAllergen}
-                      onChange={(e) => setNewIngAllergen(e.target.value)}
-                      className="col-span-3 px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:border-orange-500 text-slate-700 font-medium"
-                      title="Phân loại dị ứng thực phẩm"
-                    >
-                      <option value="">Cần rà soát (?)</option>
-                      <option value="none">Không gây dị ứng</option>
-                      <option value="1">1. Hải sản có vỏ</option>
-                      <option value="2">2. Đậu phộng</option>
-                      <option value="3">3. Sữa bò / Lactose</option>
-                      <option value="4">4. Gluten</option>
-                      <option value="5">5. Trứng</option>
-                      <option value="6">6. Đậu nành</option>
-                      <option value="7">7. Vừng mè</option>
-                    </select>
                   </div>
                   <div className="flex items-center justify-end pt-1">
                     <button
@@ -1683,21 +1732,6 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                             {idx + 1}
                           </span>
                           <span className="font-bold text-slate-800">{ing.name}</span>
-                          {ing.needs_review && (
-                            <span className="px-1.5 py-0.5 bg-amber-100 text-amber-800 border border-amber-300 rounded text-[9px] font-bold">
-                              ⚠️ Cần rà soát dị ứng
-                            </span>
-                          )}
-                          {ing.allergen_group_id && (
-                            <span className="px-1.5 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 rounded text-[9px] font-medium">
-                              {ALLERGEN_GROUP_LABELS[ing.allergen_group_id] || `Nhóm dị ứng ${ing.allergen_group_id}`}
-                            </span>
-                          )}
-                          {ing.no_allergen && (
-                            <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 rounded text-[9px] font-medium">
-                              An toàn
-                            </span>
-                          )}
                         </div>
                         <div className="flex items-center gap-3">
                           <span className="font-mono text-slate-600 font-bold">
@@ -2293,6 +2327,17 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
         </div>
       )}
 
+      {showRecipeImportModal && (
+        <RecipeImportModal
+          onClose={() => setShowRecipeImportModal(false)}
+          onImported={() => {
+            loadAdminDishes();
+            loadRecipeDishOptions();
+            if (selectedRecipeDishId) loadDishRecipe(selectedRecipeDishId);
+          }}
+        />
+      )}
+
       {/* Import Dishes Modal */}
       {showImportModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
@@ -2316,7 +2361,8 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
               <div>
                 <div className="font-bold text-slate-900">1. Tải file mẫu</div>
                 <p className="text-slate-500 mt-0.5">
-                  Điền mỗi món một dòng. Bắt buộc: tên món, danh mục, khẩu phần. Tối đa 500 dòng, 5 MB.
+                  Mỗi món một dòng. Bắt buộc: tên món, danh mục, khẩu phần. Tối đa 500 món, 5 MB.
+                  Món mới ở trạng thái ẩn; nguyên liệu và các bước nhập sau ở Quản lý công thức (theo cột slug).
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -2395,23 +2441,23 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
 
                 <div className="grid grid-cols-3 gap-3">
                   <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200/80">
-                    <div className="text-[11px] text-slate-500 font-bold">Tổng số dòng</div>
-                    <div className="text-xl font-black text-slate-900">{importResult.total_rows}</div>
+                    <div className="text-[11px] text-slate-500 font-bold">Tổng số món</div>
+                    <div className="text-xl font-black text-slate-900">{importResult.total_dishes}</div>
                   </div>
                   <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-200/80">
                     <div className="text-[11px] text-emerald-700 font-bold">
-                      {importResult.dry_run ? 'Hợp lệ' : 'Đã tạo'}
+                      {importResult.dry_run ? 'Món hợp lệ' : 'Đã tạo'}
                     </div>
                     <div className="text-xl font-black text-emerald-700">
-                      {importResult.dry_run ? importResult.valid_rows : importResult.created_count}
+                      {importResult.dry_run ? importResult.valid_dishes : importResult.created_count}
                     </div>
                   </div>
-                  <div className={`p-3 rounded-2xl border ${importResult.error_rows > 0 ? 'bg-red-50 border-red-200/80' : 'bg-slate-50 border-slate-200/80'}`}>
-                    <div className={`text-[11px] font-bold ${importResult.error_rows > 0 ? 'text-red-700' : 'text-slate-500'}`}>
-                      Dòng lỗi {importResult.dry_run ? '' : '(bỏ qua)'}
+                  <div className={`p-3 rounded-2xl border ${importResult.error_dishes > 0 ? 'bg-red-50 border-red-200/80' : 'bg-slate-50 border-slate-200/80'}`}>
+                    <div className={`text-[11px] font-bold ${importResult.error_dishes > 0 ? 'text-red-700' : 'text-slate-500'}`}>
+                      Món lỗi {importResult.dry_run ? '' : '(bỏ qua)'}
                     </div>
-                    <div className={`text-xl font-black ${importResult.error_rows > 0 ? 'text-red-700' : 'text-slate-900'}`}>
-                      {importResult.error_rows}
+                    <div className={`text-xl font-black ${importResult.error_dishes > 0 ? 'text-red-700' : 'text-slate-900'}`}>
+                      {importResult.error_dishes}
                     </div>
                   </div>
                 </div>
@@ -2451,7 +2497,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                   <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 space-y-1">
                     <div className="font-bold flex items-center gap-1.5">
                       <CheckCircle2 className="w-4 h-4" />
-                      Các món vừa tạo đang ở trạng thái ẩn. Hãy bổ sung công thức rồi xuất bản.
+                      Các món vừa tạo đang ẩn. Hãy nhập công thức (từng món hoặc từ file) ở Quản lý công thức rồi công khai.
                     </div>
                     <div className="text-emerald-700">
                       {importResult.created.map((d) => d.name).join(', ')}
@@ -2459,12 +2505,12 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                   </div>
                 )}
 
-                {importResult.dry_run && importResult.valid_rows === 0 && (
-                  <div className="text-slate-500">Không có dòng hợp lệ nào. Hãy sửa file rồi chọn lại.</div>
+                {importResult.dry_run && importResult.valid_dishes === 0 && (
+                  <div className="text-slate-500">Không có món hợp lệ nào. Hãy sửa file rồi chọn lại.</div>
                 )}
-                {importResult.dry_run && importResult.valid_rows > 0 && importResult.error_rows > 0 && (
+                {importResult.dry_run && importResult.valid_dishes > 0 && importResult.error_dishes > 0 && (
                   <div className="text-slate-500">
-                    Các dòng lỗi sẽ bị bỏ qua, chỉ {importResult.valid_rows} dòng hợp lệ được nhập.
+                    Món lỗi sẽ bị bỏ qua, chỉ {importResult.valid_dishes} món hợp lệ được nhập.
                   </div>
                 )}
               </div>
@@ -2483,12 +2529,12 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                 <button
                   type="button"
                   onClick={handleConfirmImport}
-                  disabled={!importResult || importResult.valid_rows === 0 || isCheckingImport || isSubmittingImport}
+                  disabled={!importResult || importResult.valid_dishes === 0 || isCheckingImport || isSubmittingImport}
                   className="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isSubmittingImport ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                  {importResult && importResult.valid_rows > 0
-                    ? `Nhập ${importResult.valid_rows} món`
+                  {importResult && importResult.valid_dishes > 0
+                    ? `Nhập ${importResult.valid_dishes} món hợp lệ`
                     : 'Nhập món'}
                 </button>
               )}

@@ -81,6 +81,7 @@ export interface Recipe {
   favorite_count?: number;
   matchPercentage?: number;
   match?: DishMatch;
+  contains_user_allergens?: boolean;
   macros: MacroInfo;
   nutrition?: {
     calories: number | null;
@@ -98,9 +99,13 @@ export interface Recipe {
   variants?: RecipeVariant[];
   status?: 'published' | 'draft' | 'needs_review' | 'macro_alert';
   is_published?: boolean;
+  /** Chỉ có trong danh sách món của trang quản trị */
+  ingredient_count?: number;
+  has_recipe?: boolean;
   isPublished?: boolean;
   pricePerServing?: number;
   isAiGenerated?: boolean;
+  recommendReasons?: string[];
   isBookmarked?: boolean;
   is_favorite?: boolean;
   addedDate?: string;

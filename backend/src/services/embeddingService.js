@@ -59,7 +59,27 @@ function buildDishText(dish) {
   ].filter(Boolean).join('. ');
 }
 
+const DISH_TEXT_FIELDS = 'id, name, description, category, dish_ingredients(ingredient:ingredients(name)), dish_tags(tag:tags(name))';
+
+function hashText(text) {
+  return crypto.createHash('sha256').update(text).digest('hex');
+}
+
 let dishEmbeddingCache = null;
+
+async function saveDishEmbedding(dishId, text, contentHash) {
+  const { embedding, model } = await generateEmbedding(text, DIM);
+  const { error } = await supabaseAdmin.from('dish_embeddings').upsert({
+    dish_id: dishId,
+    embedding: toPgVector(embedding),
+    content_hash: contentHash,
+    model,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'dish_id' });
+  if (error) throw error;
+  dishEmbeddingCache = null;
+  return model;
+}
 
 /**
  * Tính lại véc-tơ cho một món. Bỏ qua nếu nội dung không đổi (so content_hash) trừ khi force = true.
@@ -67,14 +87,14 @@ let dishEmbeddingCache = null;
 export async function reindexDish(dishId, { force = false } = {}) {
   const { data: dish, error } = await supabaseAdmin
     .from('dishes')
-    .select('id, name, description, category, dish_ingredients(ingredient:ingredients(name)), dish_tags(tag:tags(name))')
+    .select(DISH_TEXT_FIELDS)
     .eq('id', dishId)
     .maybeSingle();
   if (error) throw error;
   if (!dish) return { status: 'not_found' };
 
   const text = buildDishText(dish);
-  const contentHash = crypto.createHash('sha256').update(text).digest('hex');
+  const contentHash = hashText(text);
 
   if (!force) {
     const { data: existing } = await supabaseAdmin
@@ -85,34 +105,70 @@ export async function reindexDish(dishId, { force = false } = {}) {
     if (existing?.content_hash === contentHash) return { status: 'unchanged' };
   }
 
-  const { embedding, model } = await generateEmbedding(text, DIM);
-  const { error: upsertErr } = await supabaseAdmin.from('dish_embeddings').upsert({
-    dish_id: dishId,
-    embedding: toPgVector(embedding),
-    content_hash: contentHash,
-    model,
-    updated_at: new Date().toISOString(),
-  }, { onConflict: 'dish_id' });
-  if (upsertErr) throw upsertErr;
-
-  dishEmbeddingCache = null;
+  const model = await saveDishEmbedding(dishId, text, contentHash);
   return { status: 'updated', model };
 }
 
-/** Chạy nền sau khi lưu món: lỗi chỉ ghi nhật ký, không làm hỏng yêu cầu đang xử lý. */
+// ── Hàng đợi xử lý tuần tự véc-tơ nền nhằm tránh vượt Rate Limit (15 RPM) của Gemini ──
+const reindexQueue = [];
+const queuedDishIds = new Set();
+let isQueueRunning = false;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function processReindexQueue() {
+  if (isQueueRunning) return;
+  isQueueRunning = true;
+
+  while (reindexQueue.length > 0) {
+    const dishId = reindexQueue.shift();
+    queuedDishIds.delete(dishId);
+
+    try {
+      const res = await reindexDish(dishId);
+      if (res.status === 'updated') {
+        // Đã gọi API Gemini cập nhật véc-tơ: nghỉ 2.5s để giữ an toàn rate limit (15 req/phút)
+        await sleep(2500);
+      }
+    } catch (err) {
+      console.warn(`[Embedding] Không cập nhật được véc-tơ món ${dishId}:`, err.message);
+      // Chờ 3s trước khi tiếp tục món kế tiếp nếu vừa gặp lỗi
+      await sleep(3000);
+    }
+  }
+
+  isQueueRunning = false;
+}
+
+/** Chạy nền sau khi lưu món: xếp vào hàng đợi tuần tự có điều tiết tốc độ, tránh gây bùng nổ 429 */
 export function reindexDishInBackground(dishId) {
-  reindexDish(dishId).catch((err) => console.warn(`[Embedding] Không cập nhật được véc-tơ món ${dishId}:`, err.message));
+  if (!dishId || queuedDishIds.has(dishId)) return;
+  queuedDishIds.add(dishId);
+  reindexQueue.push(dishId);
+  processReindexQueue().catch((err) => console.warn('[Embedding] Lỗi hàng đợi reindex:', err.message));
 }
 
 /** Tạo véc-tơ cho các món chưa có hoặc đã đổi nội dung (chạy khi khởi động máy chủ). */
 export async function indexStaleDishes() {
-  const { data: dishes, error } = await supabaseAdmin.from('dishes').select('id');
-  if (error) throw error;
+  // Đọc toàn bộ món và content_hash hiện có trong 2 truy vấn, so sánh tại chỗ thay vì 2 truy vấn cho mỗi món
+  const [dishesRes, hashesRes] = await Promise.all([
+    supabaseAdmin.from('dishes').select(DISH_TEXT_FIELDS),
+    supabaseAdmin.from('dish_embeddings').select('dish_id, content_hash'),
+  ]);
+  if (dishesRes.error) throw dishesRes.error;
+  if (hashesRes.error) throw hashesRes.error;
+  const hashes = new Map((hashesRes.data || []).map((r) => [r.dish_id, r.content_hash]));
+
   let updated = 0;
-  for (const d of dishes || []) {
+  for (const dish of dishesRes.data || []) {
+    const text = buildDishText(dish);
+    const contentHash = hashText(text);
+    if (hashes.get(dish.id) === contentHash) continue;
     try {
-      const r = await reindexDish(d.id);
-      if (r.status === 'updated') updated++;
+      await saveDishEmbedding(dish.id, text, contentHash);
+      updated++;
+      // Giữ tốc độ an toàn dưới 15 RPM
+      await sleep(2500);
     } catch (err) {
       console.warn('[Embedding] Dừng tạo véc-tơ món:', err.message);
       break;
@@ -140,9 +196,8 @@ export async function getDishEmbeddings() {
 const LEVEL_WORDS = ['không', 'rất ít', 'ít', 'vừa', 'nhiều', 'rất nhiều'];
 
 async function buildProfileText(userId, profile) {
-  const [diets, allergies, dislikes] = await Promise.all([
+  const [diets, dislikes] = await Promise.all([
     supabaseAdmin.from('user_diets').select('diet_types(name)').eq('user_id', userId),
-    supabaseAdmin.from('user_allergies').select('allergen_groups(name)').eq('user_id', userId),
     supabaseAdmin.from('user_disliked_ingredients').select('ingredients(name)').eq('user_id', userId),
   ]);
   const prefs = profile?.taste_prefs || {};
@@ -164,8 +219,6 @@ async function buildProfileText(userId, profile) {
   if (dietNames.length) parts.push(`Chế độ ăn: ${dietNames.join(', ')}`);
   const dislikeNames = (dislikes.data || []).map((r) => r.ingredients?.name).filter(Boolean);
   if (dislikeNames.length) parts.push(`Không thích: ${dislikeNames.join(', ')}`);
-  const allergyNames = (allergies.data || []).map((r) => r.allergen_groups?.name).filter(Boolean);
-  if (allergyNames.length) parts.push(`Tránh nhóm dị ứng: ${allergyNames.join(', ')}`);
   if (profile?.calorie_goal) parts.push(`Mục tiêu ${profile.calorie_goal} kcal mỗi ngày`);
   return parts.join('. ');
 }

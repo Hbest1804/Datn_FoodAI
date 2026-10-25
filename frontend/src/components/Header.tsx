@@ -178,28 +178,6 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 Thực đơn tuần
               </button>
-              <button
-                onClick={() => onTabChange('profile')}
-                className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer ${
-                  currentTab === 'profile'
-                    ? 'text-orange-600 bg-orange-50 font-bold'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/70'
-                }`}
-              >
-                Hồ sơ khẩu vị
-              </button>
-              {currentUser.isLoggedIn && (
-                <button
-                  onClick={() => onTabChange('account')}
-                  className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer ${
-                    currentTab === 'account'
-                      ? 'text-orange-600 bg-orange-50 font-bold'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/70'
-                  }`}
-                >
-                  Thông tin cá nhân
-                </button>
-              )}
             </nav>
           ) : null}
 
@@ -380,14 +358,6 @@ export const Header: React.FC<HeaderProps> = ({
               }`}
             >
               Thực đơn
-            </button>
-            <button
-              onClick={() => onTabChange('profile')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg shrink-0 ${
-                currentTab === 'profile' ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-700'
-              }`}
-            >
-              Hồ sơ khẩu vị
             </button>
           </div>
         )}

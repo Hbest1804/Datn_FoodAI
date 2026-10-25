@@ -229,6 +229,7 @@ export const MealPlannerView: React.FC<MealPlannerViewProps> = ({
                     <img
                       src={slot.recipe.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=200&q=80'}
                       alt={slot.recipe.title}
+                      loading="lazy" decoding="async"
                       className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover shrink-0 group-hover:scale-105 transition-transform"
                     />
                     <div className="space-y-1">

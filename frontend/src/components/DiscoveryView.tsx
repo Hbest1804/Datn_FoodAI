@@ -34,7 +34,7 @@ interface DiscoveryViewProps {
 
 export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
   currentUser,
-  recipes,
+  recipes: allRecipes,
   onSelectRecipe,
   onOpenChatWithPrompt,
   onOpenRegisterModal,
@@ -45,6 +45,36 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
   const [selectedFilter, setSelectedFilter] = useState('Tất cả');
   const [activeMealTab, setActiveMealTab] = useState<'lunch' | 'dinner' | 'snack' | 'tomorrow'>('lunch');
   const [goldenMealIndex, setGoldenMealIndex] = useState(0);
+
+  // Gợi ý cá nhân hóa theo hồ sơ khẩu vị (GET /me/recommendations); lỗi hoặc rỗng thì dùng danh sách món chung
+  const [personalRecipes, setPersonalRecipes] = useState<Recipe[]>([]);
+  const profileKey = JSON.stringify([
+    currentUser.id,
+    currentUser.dietPreference,
+    currentUser.targetCalories,
+    currentUser.allergies,
+    currentUser.spicinessLevel,
+    currentUser.saltinessLevel,
+    currentUser.sweetnessLevel,
+    currentUser.sournessLevel,
+  ]);
+
+  useEffect(() => {
+    if (isGuest) {
+      setPersonalRecipes([]);
+      return;
+    }
+    let cancelled = false;
+    apiService.dishes.getRecommendations(20).then(list => {
+      if (!cancelled) {
+        setPersonalRecipes(list);
+        setGoldenMealIndex(0);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [isGuest, profileKey]);
+
+  const recipes = !isGuest && personalRecipes.length > 0 ? personalRecipes : allRecipes;
 
   // Quick dietary filter tags
   const filterPills = [
@@ -454,6 +484,16 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                       <p className="text-sm text-slate-600 mt-1 line-clamp-2 leading-relaxed">
                         {currentGoldenMeal.description}
                       </p>
+                      {currentGoldenMeal.recommendReasons && currentGoldenMeal.recommendReasons.length > 0 && (
+                        <ul className="mt-2 space-y-1">
+                          {currentGoldenMeal.recommendReasons.map(reason => (
+                            <li key={reason} className="text-xs text-emerald-700 font-semibold flex items-start gap-1.5">
+                              <CheckCircle2 className="w-3.5 h-3.5 mt-px shrink-0" />
+                              {reason}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
 
                     <div className="flex flex-wrap gap-1.5">
@@ -514,6 +554,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                     <img
                       src={currentGoldenMeal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'}
                       alt={currentGoldenMeal.title}
+                      decoding="async"
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                     />
                     <div className="absolute top-3 right-3 px-2.5 py-1 rounded-full bg-slate-900/80 backdrop-blur-xs text-white text-xs font-bold flex items-center gap-1">
@@ -698,6 +739,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                   <img
                     src={recipe.image}
                     alt={recipe.title}
+                    loading="lazy" decoding="async"
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   />
                   <div className="absolute top-3 left-3 px-2 py-0.5 rounded-lg bg-emerald-500 text-white text-[11px] font-bold shadow-xs">

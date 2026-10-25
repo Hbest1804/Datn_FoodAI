@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "seed": "node src/scripts/seedDatabase.js",
+    "images:optimize": "node src/scripts/optimizeDishImages.js",
     "start": "node src/server.js",
     "test": "node --test"
   },
@@ -23,9 +24,17 @@
     "multer": "^2.4.0",
     "nodemailer": "^6.9.16",
     "pdfkit": "^0.15.2",
+    "sharp": "^0.34.5",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"
+  },
+  "nodemonConfig": {
+    "watch": [
+      "src",
+      ".env"
+    ],
+    "ext": "js,json"
   }
 }

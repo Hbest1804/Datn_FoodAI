@@ -3,7 +3,10 @@
 
 import { supabase, supabaseAdmin } from '../config/supabase.js';
 import { decodeJwtExp, isTokenRevoked } from '../services/authService.js';
+import { cached, invalidateCache } from '../services/cacheService.js';
 import { sendError } from '../utils/http.js';
+
+const AUTH_CACHE_TTL_MS = 60 * 1000;
 
 /**
  * Trả về { user } nếu mã truy cập hợp lệ, ngược lại trả { status, code, message } mô tả lỗi.
@@ -23,6 +26,27 @@ async function resolveUser(req) {
     return { status: 401, code: 'TOKEN_EXPIRED', message: 'Phiên đăng nhập đã hết hạn.' };
   }
 
+  // Yêu cầu đọc dùng lại kết quả xác thực trong 60 giây (mỗi lần xác thực tốn 2 lượt gọi Supabase);
+  // yêu cầu ghi luôn xác thực lại và xóa đệm của mã này để lượt đọc sau thấy hồ sơ mới
+  const cacheKey = `auth:${token}`;
+  if (req.method !== 'GET') {
+    invalidateCache(cacheKey);
+    req.res?.on('finish', () => invalidateCache(cacheKey));
+    return verifyToken(token);
+  }
+  const result = await cached(cacheKey, AUTH_CACHE_TTL_MS, async () => {
+    const r = await verifyToken(token);
+    // Chỉ đệm kết quả thành công; lỗi được trả về ngay mà không giữ lại
+    if (!r.user) throw Object.assign(new Error('auth failed'), { result: r });
+    return r;
+  }).catch((err) => {
+    if (err.result) return err.result;
+    throw err;
+  });
+  return result;
+}
+
+async function verifyToken(token) {
   const { data: { user: authUser } = {}, error } = await supabase.auth.getUser(token);
   if (error || !authUser) {
     return { status: 401, code: 'UNAUTHORIZED', message: 'Token không hợp lệ.' };

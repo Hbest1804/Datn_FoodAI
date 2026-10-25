@@ -4,6 +4,8 @@
 import { Router } from 'express';
 import { authenticate, requireAdmin } from '../middlewares/authMiddleware.js';
 import { adminLimiter } from '../middlewares/rateLimiter.js';
+import { getPublishedDishes, invalidateCache } from '../services/cacheService.js';
+import { clearRecommendationCache } from '../services/recommendationService.js';
 import { handleDishImageUpload, handleImportUpload } from '../middlewares/uploadMiddleware.js';
 import {
   adminCreateDish,
@@ -21,6 +23,7 @@ import {
   adminUpdateDishRecipe,
   adminUploadImage,
 } from '../controllers/adminDishesController.js';
+import { adminGetRecipeImportTemplate, adminImportRecipes } from '../controllers/adminRecipeImportController.js';
 import {
   adminDeleteRating,
   adminDeleteUser,
@@ -53,6 +56,19 @@ import { uuidParam } from '../utils/http.js';
 const router = Router();
 
 router.use(authenticate, requireAdmin, adminLimiter);
+
+// Mọi thao tác ghi của Admin (món, nguyên liệu, người dùng...) đều xóa bộ nhớ đệm để giao diện thấy ngay thay đổi,
+// rồi nạp lại danh sách món ngay để người dùng kế tiếp không phải chờ CSDL
+router.use((req, res, next) => {
+  if (req.method !== 'GET') {
+    res.on('finish', () => {
+      invalidateCache();
+      clearRecommendationCache();
+      getPublishedDishes().catch((err) => console.warn('[Cache] Không nạp lại được danh sách món:', err.message));
+    });
+  }
+  next();
+});
 router.param('dishId', uuidParam('DISH_NOT_FOUND', 'Món không tồn tại.'));
 router.param('userId', uuidParam('USER_NOT_FOUND', 'Người dùng không tồn tại.'));
 router.param('sessionId', uuidParam('CHAT_SESSION_NOT_FOUND', 'Hội thoại không tồn tại.'));
@@ -75,6 +91,8 @@ router.get('/dishes/:dishId/recipe', adminGetDishRecipe);                  // 4.
 router.post('/dishes/:dishId/recipe', adminCreateDishRecipe);              // 4.14.2
 router.put('/dishes/:dishId/recipe', adminUpdateDishRecipe);               // 4.14.3
 router.delete('/dishes/:dishId/recipe', adminDeleteDishRecipe);            // 4.14.4
+router.get('/recipes/import/template', adminGetRecipeImportTemplate);       // 4.14.5
+router.post('/recipes/import', handleImportUpload, adminImportRecipes);    // 4.14.6
 
 // 4.11 Quản lý người dùng
 router.get('/users', adminGetUsers);                                       // 4.11.1

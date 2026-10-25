@@ -7,6 +7,7 @@
 import { supabaseAdmin } from '../config/supabase.js';
 import { generateEmbedding } from './aiService.js';
 import { cosineSimilarity, getDishEmbeddings } from './embeddingService.js';
+import { getIngredientIndex, getPublishedDishes } from './cacheService.js';
 import { containsBannedWords } from '../utils/bannedWords.js';
 import { normalizeText } from '../utils/textUtils.js';
 import { ApiError } from '../utils/http.js';
@@ -95,18 +96,24 @@ export async function checkTopic(content, settings) {
   return { outOfScope: false, questionVector };
 }
 
-/** Id nguyên liệu bị cấm với người dùng: thuộc nhóm dị ứng, không thích, và (nếu có dị ứng) nguyên liệu needs_review. */
+/** Id nguyên liệu bị cấm với người dùng: thuộc nhóm dị ứng hoặc nằm trong danh sách không thích mà người dùng đã khai. */
 export async function getForbiddenIngredientIds({ allergenGroupIds = [], dislikedIngredientIds = [] }) {
   const forbidden = new Set(dislikedIngredientIds.map(Number));
   if (allergenGroupIds.length > 0) {
-    const [byGroup, unreviewed] = await Promise.all([
-      supabaseAdmin.from('ingredients').select('id').in('allergen_group_id', allergenGroupIds),
-      supabaseAdmin.from('ingredients').select('id').eq('needs_review', true),
-    ]);
-    (byGroup.data || []).forEach((r) => forbidden.add(Number(r.id)));
-    (unreviewed.data || []).forEach((r) => forbidden.add(Number(r.id)));
+    const groups = new Set(allergenGroupIds.map(Number));
+    for (const ing of await getIngredientIndex()) {
+      if (groups.has(Number(ing.allergen_group_id))) forbidden.add(Number(ing.id));
+    }
   }
   return forbidden;
+}
+
+/** Id nguyên liệu kiêng mà người dùng đã khai trong hồ sơ khẩu vị; khách trả tập rỗng. */
+export async function getUserAvoidedIngredientIds(userId) {
+  if (!userId) return new Set();
+  const { data, error } = await supabaseAdmin.from('user_disliked_ingredients').select('ingredient_id').eq('user_id', userId);
+  if (error) throw error;
+  return new Set((data || []).map((r) => Number(r.ingredient_id)));
 }
 
 /**
@@ -114,13 +121,8 @@ export async function getForbiddenIngredientIds({ allergenGroupIds = [], dislike
  * Xếp theo độ tương đồng véc-tơ với câu hỏi, cộng điểm khi dùng được nguyên liệu có sẵn.
  */
 export async function retrieveDishes({ questionVector, content, pantry, forbiddenIngredientIds = new Set(), limit = 8 }) {
-  const { data: dishes, error } = await supabaseAdmin
-    .from('dishes')
-    .select('id, name, slug, description, image_url, category, cook_time_minutes, difficulty, calories, avg_rating, favorite_count, dish_ingredients(ingredient_id)')
-    .eq('is_published', true);
-  if (error) throw error;
-
-  const safe = (dishes || []).filter((d) =>
+  const dishes = await getPublishedDishes();
+  const safe = dishes.filter((d) =>
     !(d.dish_ingredients || []).some((di) => forbiddenIngredientIds.has(Number(di.ingredient_id))));
 
   let embeddings = new Map();
@@ -150,10 +152,19 @@ export async function retrieveDishes({ questionVector, content, pantry, forbidde
   });
 
   scored.sort((a, b) => b.score - a.score || Number(b.dish.avg_rating) - Number(a.dish.avg_rating));
-  return scored.slice(0, limit).map(({ dish }) => {
-    const { dish_ingredients: _ignored, ...rest } = dish;
-    return rest;
-  });
+  return scored.slice(0, limit).map(({ dish: d }) => ({
+    id: d.id,
+    name: d.name,
+    slug: d.slug,
+    description: d.description,
+    image_url: d.image_url,
+    category: d.category,
+    cook_time_minutes: d.cook_time_minutes,
+    difficulty: d.difficulty,
+    calories: d.calories,
+    avg_rating: d.avg_rating,
+    favorite_count: d.favorite_count,
+  }));
 }
 
 /** Định dạng thẻ món trả về cho giao diện. */

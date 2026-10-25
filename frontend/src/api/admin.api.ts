@@ -18,16 +18,34 @@ export interface RecipePayload {
   publish?: boolean;
 }
 
+// 4.10.8 Kết quả nhập món (chỉ thông tin món; món mới luôn ẩn)
 export interface DishImportResult {
   dry_run: boolean;
   file_name: string;
-  total_rows: number;
-  valid_rows: number;
-  error_rows: number;
+  total_dishes: number;
+  valid_dishes: number;
+  error_dishes: number;
   created_count: number;
-  errors: Array<{ row: number; field: string; code: string; message: string }>;
+  errors: Array<{ row: number; slug: string | null; field: string; code: string; message: string }>;
   warnings: string[];
-  created?: Array<{ row: number; id: string; name: string; slug: string }>;
+  created?: Array<{ id: string; name: string; slug: string }>;
+}
+
+// 4.14.6 Kết quả nhập công thức; khi dry_run = true, created_count / replaced_count / published_count / new_ingredients là việc sẽ thực hiện
+export interface RecipeImportResult {
+  dry_run: boolean;
+  file_name: string;
+  total_dishes: number;
+  valid_dishes: number;
+  error_dishes: number;
+  created_count: number;
+  replaced_count: number;
+  published_count: number;
+  new_ingredients: string[];
+  skipped: Array<{ slug: string; dish_id: string; name: string }>;
+  errors: Array<{ sheet: string; row: number; slug: string | null; field: string; code: string; message: string }>;
+  warnings: string[];
+  saved?: Array<{ dish_id: string; name: string; slug: string; replaced: boolean; is_published: boolean }>;
 }
 
 // Tài liệu API dùng from/to (YYYY-MM-DD); quy đổi tham số days của giao diện sang khoảng ngày
@@ -177,6 +195,27 @@ export const adminApi = {
   },
 
   // ── Quản lý công thức ─────────────────────────────────────────────
+  async downloadRecipeImportTemplate(): Promise<Blob> {
+    const res = await authFetch('/admin/recipes/import/template');
+    return res.blob();
+  },
+
+  // Nhập công thức cho nhiều món đã có; on_existing: bỏ qua (skip) hoặc ghi đè (replace) món đã có công thức
+  async importRecipes(
+    file: File,
+    { dryRun = true, onExisting = 'skip', publish = false }: { dryRun?: boolean; onExisting?: 'skip' | 'replace'; publish?: boolean } = {},
+  ): Promise<RecipeImportResult> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('dry_run', String(dryRun));
+    formData.append('on_existing', onExisting);
+    formData.append('publish', String(publish));
+
+    const res = await authFetch('/admin/recipes/import', { method: 'POST', body: formData });
+    const json = await res.json();
+    return json.data;
+  },
+
   async getRecipe(dishId: string) {
     return apiClient<{ success: boolean; data: any }>(`/admin/dishes/${dishId}/recipe`);
   },

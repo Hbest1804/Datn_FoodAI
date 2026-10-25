@@ -45,7 +45,7 @@ export const handleAvatarUpload = createUpload({ maxBytes: 2 * 1024 * 1024, acce
 /** 4.10.6 Ảnh món ăn: tối đa 5 MB */
 export const handleDishImageUpload = createUpload({ maxBytes: 5 * 1024 * 1024, accept: imageOnly, typeMessage: IMAGE_MESSAGE });
 
-/** 4.10.8 File nhập món: .xlsx hoặc .csv, tối đa 5 MB */
+/** 4.10.8 / 4.14.6 File nhập món, nhập công thức: .xlsx hoặc .csv, tối đa 5 MB */
 export const handleImportUpload = createUpload({
   maxBytes: 5 * 1024 * 1024,
   accept: (file) => /\.(xlsx|csv)$/i.test(file.originalname || ''),

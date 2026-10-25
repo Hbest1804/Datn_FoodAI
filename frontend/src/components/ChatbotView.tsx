@@ -783,6 +783,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
                               <img
                                 src={dish.image || dish.image_url || getAppetizingImageForDishName(dish.title || dish.name)}
                                 alt={dish.title || dish.name}
+                                loading="lazy" decoding="async"
                                 className="w-16 h-16 rounded-xl object-cover shrink-0 group-hover:scale-105 transition-transform border border-slate-100"
                               />
                               <div className="min-w-0 flex-1">

@@ -512,9 +512,13 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
                             className="accent-emerald-600 w-3.5 h-3.5 cursor-pointer"
                           />
                           <span className={`font-medium ${haveIngredients.has(ing.name) ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{ing.name}</span>
-                          {ing.allergen && (
+                          {ing.isSafe === false ? (
                             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-50 text-red-700 border border-red-200">
-                              Dị ứng
+                              Bạn kiêng
+                            </span>
+                          ) : ing.allergen && (
+                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-50 text-slate-500 border border-slate-200">
+                              {ing.allergen}
                             </span>
                           )}
                         </div>
