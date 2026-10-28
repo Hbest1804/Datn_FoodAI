@@ -90,13 +90,9 @@ export const Header: React.FC<HeaderProps> = ({
                   <span className="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-900 group-hover:text-orange-600 transition-colors">
                     ChefAI
                   </span>
-                  {isAdminMode ? (
+                  {isAdminMode && (
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-900 text-orange-400 uppercase tracking-wider">
                       Studio
-                    </span>
-                  ) : (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 uppercase tracking-wider">
-                      PRO AI
                     </span>
                   )}
                 </div>

@@ -8,7 +8,6 @@ import {
   Flame, 
   ChevronRight, 
   Sparkles, 
-  Mic, 
   LayoutGrid, 
   List, 
   ArrowUpDown, 
@@ -21,8 +20,8 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { Recipe, UserProfile, MetaFilters } from '../types';
-import { apiService } from '../services/api';
-import { formatVND, formatDifficulty } from '../utils/dishUtils';
+import { apiService } from '../api';
+import { formatVND, formatDifficulty, formatMetric } from '../utils/dishUtils';
 
 interface SearchFilterViewProps {
   currentUser: UserProfile;
@@ -58,7 +57,7 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
   const [sortBy, setSortBy] = useState<'relevance' | 'match' | 'newest' | 'updated' | 'rating' | 'popular' | 'cook_time' | 'calories'>('relevance');
   const [viewLayout, setViewLayout] = useState<'grid' | 'list'>('grid');
 
-  // Smart Fridge State (Tủ lạnh thông minh)
+  // Nguyên liệu có sẵn để tìm món
   const [fridgeIngredients, setFridgeIngredients] = useState<Array<{ id: number; name: string }>>(() => {
     try {
       const saved = localStorage.getItem('culina_search_fridge');
@@ -283,16 +282,6 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
           />
           <div className="absolute right-2 flex items-center gap-1.5">
             <button
-              onClick={() => {
-                setSearchQuery('Phở bò');
-                setPage(1);
-              }}
-              className="p-2 text-slate-400 hover:text-slate-600 rounded-xl cursor-pointer"
-              title="Tìm mẫu"
-            >
-              <Mic className="w-4 h-4" />
-            </button>
-            <button
               onClick={() => fetchDishes()}
               className="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white rounded-xl text-xs font-bold shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
             >
@@ -338,12 +327,12 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
             </button>
           </div>
 
-          {/* SMART FRIDGE MODULE (TỦ LẠNH THÔNG MINH - Section 4.3.1) */}
+          {/* Nguyên liệu có sẵn */}
           <div className="p-4 bg-orange-50/70 rounded-2xl border border-orange-200/80 space-y-3">
             <div className="flex items-center justify-between">
               <label className="text-xs font-bold text-orange-950 flex items-center gap-1.5 uppercase">
                 <ChefHat className="w-4 h-4 text-orange-600" />
-                Tủ Lạnh Có Sẵn
+                Nguyên Liệu Có Sẵn
               </label>
               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-orange-200 text-orange-800 uppercase">
                 AI Match
@@ -584,7 +573,7 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
                   className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-none cursor-pointer"
                 >
                   <option value="relevance">Phù hợp nhất</option>
-                  <option value="match">Khớp tủ lạnh nhất</option>
+                  <option value="match">Khớp nguyên liệu nhất</option>
                   <option value="rating">Đánh giá cao nhất</option>
                   <option value="popular">Phổ biến nhất</option>
                   <option value="cook_time">Nấu nhanh nhất</option>
@@ -618,11 +607,11 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
               <div className="flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
                 <span>
-                  Chưa có món nấu sẵn khớp 100% nguyên liệu tủ lạnh của bạn. Bạn có muốn Bếp trưởng AI sáng tạo công thức riêng?
+                  Chưa có món nấu sẵn khớp 100% nguyên liệu có sẵn của bạn. Bạn có muốn Bếp trưởng AI sáng tạo công thức riêng?
                 </span>
               </div>
               <button
-                onClick={() => onOpenChatWithPrompt(`Tủ lạnh tôi có: ${fridgeIngredients.map(i => i.name).join(', ')}. Hãy sáng tạo món ngon Eat Clean giúp tôi!`)}
+                onClick={() => onOpenChatWithPrompt(`Tôi đang có: ${fridgeIngredients.map(i => i.name).join(', ')}. Hãy sáng tạo món ngon Eat Clean giúp tôi!`)}
                 className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl transition-colors shrink-0 cursor-pointer ml-3"
               >
                 Hỏi AI Sáng Tạo Món →
@@ -673,7 +662,7 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
                       ) : (
                         <div className="absolute top-3 left-3 px-2.5 py-1 rounded-full bg-slate-900/70 backdrop-blur-xs text-white text-xs font-bold shadow-xs flex items-center gap-1">
                           <Sparkles className="w-3 h-3 text-orange-400" />
-                          {recipe.matchPercentage || 95}% Phù hợp
+                          {recipe.matchPercentage != null ? `${recipe.matchPercentage}%` : '—'} Phù hợp
                         </div>
                       )}
 
@@ -683,7 +672,7 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
                       
                       <div className="absolute bottom-3 left-3 px-2.5 py-0.5 rounded-full bg-slate-900/80 backdrop-blur-xs text-white text-[11px] font-semibold flex items-center gap-1">
                         <Clock className="w-3 h-3 text-orange-400" />
-                        {recipe.cookingTime} phút
+                        {formatMetric(recipe.cookingTime)} phút
                       </div>
 
                       {recipe.contains_user_allergens && (
@@ -706,7 +695,7 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
                           {recipe.category}
                         </span>
                         <span className="font-bold text-slate-700 flex items-center gap-0.5">
-                          ★ {recipe.rating || 5.0} ({recipe.reviewCount || 0})
+                          ★ {recipe.reviewCount > 0 ? recipe.rating.toFixed(1) : '—'} ({recipe.reviewCount || 0})
                         </span>
                       </div>
 
@@ -728,11 +717,11 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
 
                       {/* Macro Strip */}
                       <div className="flex items-center justify-between py-2 border-y border-slate-100 text-xs font-semibold text-slate-700">
-                        <span>Calo: <strong className="text-orange-600">{recipe.macros.calories}</strong></span>
+                        <span>Calo: <strong className="text-orange-600">{formatMetric(recipe.macros.calories)}</strong></span>
                         <span className="text-slate-300">•</span>
-                        <span>Đạm: {recipe.macros.protein}g</span>
+                        <span>Đạm: {formatMetric(recipe.macros.protein, 'g')}</span>
                         <span className="text-slate-300">•</span>
-                        <span>Carb: {recipe.macros.carbs}g</span>
+                        <span>Carb: {formatMetric(recipe.macros.carbs, 'g')}</span>
                       </div>
                     </div>
                   </div>
@@ -792,17 +781,17 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
             <div className="space-y-1">
               <span className="text-[11px] font-bold text-orange-700 uppercase tracking-wider flex items-center gap-1.5">
                 <ChefHat className="w-4 h-4" />
-                DỌN SẠCH TỦ LẠNH • KHÔNG LÃNG PHÍ THỰC PHẨM
+                TẬN DỤNG NGUYÊN LIỆU • KHÔNG LÃNG PHÍ THỰC PHẨM
               </span>
               <h4 className="text-base font-bold text-slate-900">
                 Bạn cần AI sáng tạo món mới theo nguyên liệu đang có?
               </h4>
               <p className="text-xs text-slate-500 max-w-xl">
-                Gửi trực tiếp câu hỏi hoặc danh sách đồ ăn thừa trong tủ lạnh cho Trợ lý ChefAI, hệ thống AI thông minh sẽ tức thì lên thực đơn vừa khít và an toàn dị ứng!
+                Gửi trực tiếp câu hỏi hoặc danh sách nguyên liệu đang có cho Trợ lý ChefAI, hệ thống AI thông minh sẽ tức thì lên thực đơn vừa khít và an toàn dị ứng!
               </p>
             </div>
             <button
-              onClick={() => onOpenChatWithPrompt(`Tôi muốn dọn sạch tủ lạnh hôm nay với: ${fridgeIngredients.map(i => i.name).join(', ')}. Hãy gợi ý món ngon giúp tôi!`)}
+              onClick={() => onOpenChatWithPrompt(`Tôi muốn tận dụng nguyên liệu hôm nay: ${fridgeIngredients.map(i => i.name).join(', ')}. Hãy gợi ý món ngon giúp tôi!`)}
               className="px-5 py-3 bg-orange-600 hover:bg-orange-700 text-white rounded-2xl text-xs font-bold shadow-md shadow-orange-600/20 transition-all shrink-0 cursor-pointer"
             >
               Hỏi Chatbot AI Tạo Món Ngay →

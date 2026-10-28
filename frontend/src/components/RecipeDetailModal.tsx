@@ -8,7 +8,6 @@ import {
   Share2, 
   Printer, 
   Sparkles, 
-  Volume2, 
   Star, 
   Plus, 
   Minus, 
@@ -22,8 +21,8 @@ import {
   MessageSquare
 } from 'lucide-react';
 import { Recipe, UserProfile } from '../types';
-import { apiService } from '../services/api';
-import { formatVND } from '../utils/dishUtils';
+import { apiService } from '../api';
+import { formatVND, formatMetric } from '../utils/dishUtils';
 import { toast } from './NotificationModal';
 
 interface RecipeDetailModalProps {
@@ -58,7 +57,7 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [servings, setServings] = useState(initialRecipe.servings || 2);
   const [activeStep, setActiveStep] = useState(1);
-  const [isCookingAudioMode, setIsCookingAudioMode] = useState(false);
+  const [showTimer, setShowTimer] = useState(false);
   const [activeTimerSeconds, setActiveTimerSeconds] = useState(240);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [isMarkedCooked, setIsMarkedCooked] = useState(false);
@@ -111,7 +110,7 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
           if (items && Array.isArray(items)) {
             const mapped: CommunityReviewItem[] = items.map((r: any) => ({
               id: r.id,
-              author: r.user?.display_name || r.user?.name || 'Thành viên Culina',
+              author: r.user?.display_name || r.user?.name || 'Thành viên ChefAI',
               avatar: r.user?.avatar_url || r.user?.avatar,
               rating: r.stars || 5,
               comment: r.comment || '',
@@ -138,17 +137,17 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
       }, 1000);
     } else if (activeTimerSeconds === 0) {
       setIsTimerRunning(false);
-      if ('speechSynthesis' in window) {
-        const msg = new SpeechSynthesisUtterance('Đã hết thời gian nấu cho bước này!');
-        msg.lang = 'vi-VN';
-        window.speechSynthesis.speak(msg);
-      }
     }
     return () => clearInterval(interval);
   }, [isTimerRunning, activeTimerSeconds]);
 
   // Dynamic ingredient scale factor
   const scale = servings / (recipe.servings || 2);
+  const scaleMacro = (v: number | null) => (v == null ? null : Math.round(v * scale));
+
+  // Điểm đánh giá thật: ưu tiên số liệu mới nhất từ API đánh giá, sau đó tới số liệu của món
+  const ratingCount = reviewSummary?.count ?? recipe.reviewCount ?? 0;
+  const ratingAverage = reviewSummary?.average ?? recipe.rating ?? 0;
 
   const allIngredientNames = (recipe.ingredients || []).map(ing => ing.name).filter(Boolean);
   const missingIngredients = allIngredientNames.filter(name => !haveIngredients.has(name));
@@ -170,20 +169,10 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
     onOpenChatWithPrompt(prompt, have);
   };
 
-  const handleSpeechStep = (text: string) => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'vi-VN';
-      utterance.rate = 0.95;
-      window.speechSynthesis.speak(utterance);
-    }
-  };
-
   const handleStartTimer = (durationMinutes: number) => {
     setActiveTimerSeconds(Math.max(1, durationMinutes) * 60);
     setIsTimerRunning(true);
-    setIsCookingAudioMode(true);
+    setShowTimer(true);
   };
 
   const handleToggleFavorite = async () => {
@@ -358,19 +347,19 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
             <div className="flex flex-wrap items-center gap-4 text-xs font-semibold text-slate-600 pt-1">
               <div className="flex items-center gap-1 text-amber-500">
                 <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-                <span className="text-slate-900 font-bold">{recipe.rating || (reviewSummary?.average || 5.0)}</span>
+                <span className="text-slate-900 font-bold">{ratingCount > 0 ? ratingAverage.toFixed(1) : '—'}</span>
                 <span className="text-slate-400 font-normal">
-                  ({recipe.reviewCount || (reviewSummary?.count || reviewsList.length)} đánh giá)
+                  ({ratingCount} đánh giá)
                 </span>
               </div>
               <span>•</span>
               <div className="flex items-center gap-1">
-                <span>Độ khó: <strong className="text-slate-800">{recipe.difficulty}</strong></span>
+                <span>Độ khó: <strong className="text-slate-800">{recipe.difficulty || '—'}</strong></span>
               </div>
               <span>•</span>
               <div className="flex items-center gap-1">
                 <Clock className="w-3.5 h-3.5 text-orange-500" />
-                <span>Nấu: <strong className="text-slate-800">{recipe.cookingTime} phút</strong></span>
+                <span>Nấu: <strong className="text-slate-800">{formatMetric(recipe.cookingTime)} phút</strong></span>
               </div>
               <span>•</span>
               <div className="flex items-center gap-1">
@@ -394,23 +383,6 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
                 alt={recipe.title}
                 className="w-full h-full object-cover group-hover:scale-102 transition-transform duration-500"
               />
-              <div className="absolute bottom-4 left-4 right-4 sm:right-auto bg-slate-900/85 backdrop-blur-md p-3 rounded-2xl text-white flex items-center justify-between gap-4 border border-white/10 shadow-lg">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-orange-500 flex items-center justify-center text-white font-bold shrink-0">
-                    <Play className="w-5 h-5 ml-0.5" />
-                  </div>
-                  <div>
-                    <h5 className="text-xs font-bold">Video hướng dẫn chuẩn Chef</h5>
-                    <p className="text-[11px] text-slate-300">Độ phân giải Full HD • Phụ đề tiếng Việt chuẩn xác</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => toast.info('Chức năng video hướng dẫn 4K sẽ phát trực tiếp tại bản cập nhật tiếp theo!', 'Video chuẩn Chef')}
-                  className="px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-xl text-xs font-bold cursor-pointer"
-                >
-                  Xem ngay
-                </button>
-              </div>
             </div>
 
             {/* Nutrients & Macro Dashboard */}
@@ -428,22 +400,22 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
                 <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-2xs">
                   <span className="text-[10px] font-bold text-slate-400 uppercase">Năng lượng</span>
-                  <div className="text-lg font-black text-slate-900 mt-0.5">{Math.round(recipe.macros.calories * (servings / (recipe.servings || 2)))}</div>
+                  <div className="text-lg font-black text-slate-900 mt-0.5">{formatMetric(scaleMacro(recipe.macros.calories))}</div>
                   <span className="text-[10px] text-slate-400">kcal</span>
                 </div>
                 <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-2xs">
                   <span className="text-[10px] font-bold text-slate-400 uppercase">Protein (Đạm)</span>
-                  <div className="text-lg font-black text-orange-600 mt-0.5">{Math.round(recipe.macros.protein * (servings / (recipe.servings || 2)))}g</div>
+                  <div className="text-lg font-black text-orange-600 mt-0.5">{formatMetric(scaleMacro(recipe.macros.protein), 'g')}</div>
                   <span className="text-[10px] text-emerald-600 font-semibold">Tốt cho cơ bắp</span>
                 </div>
                 <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-2xs">
                   <span className="text-[10px] font-bold text-slate-400 uppercase">Carbs (Tinh bột)</span>
-                  <div className="text-lg font-black text-slate-900 mt-0.5">{Math.round(recipe.macros.carbs * (servings / (recipe.servings || 2)))}g</div>
+                  <div className="text-lg font-black text-slate-900 mt-0.5">{formatMetric(scaleMacro(recipe.macros.carbs), 'g')}</div>
                   <span className="text-[10px] text-slate-400">Năng lượng sạch</span>
                 </div>
                 <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-2xs">
                   <span className="text-[10px] font-bold text-slate-400 uppercase">Chất béo (Fat)</span>
-                  <div className="text-lg font-black text-slate-900 mt-0.5">{Math.round(recipe.macros.fat * (servings / (recipe.servings || 2)))}g</div>
+                  <div className="text-lg font-black text-slate-900 mt-0.5">{formatMetric(scaleMacro(recipe.macros.fat), 'g')}</div>
                   <span className="text-[10px] text-slate-400">Lipid lành mạnh</span>
                 </div>
               </div>
@@ -454,8 +426,8 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
                   onClick={() => handleStartTimer(recipe.steps[0]?.durationMinutes || 5)}
                   className="px-5 py-3 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-xs sm:text-sm rounded-2xl shadow-md shadow-orange-500/20 transition-all flex items-center gap-2 cursor-pointer"
                 >
-                  <Volume2 className="w-4 h-4" />
-                  Bắt đầu nấu (AI Audio Hướng dẫn)
+                  <Clock className="w-4 h-4" />
+                  Bắt đầu nấu
                 </button>
                 <button
                   onClick={() => onAddToPlanner(recipe)}
@@ -499,6 +471,22 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
                   </div>
                 </div>
 
+                {/* Cảnh báo món có nguyên liệu người dùng kiêng (kể cả nguyên liệu cùng nhóm) */}
+                {recipe.ingredients?.some(ing => ing.isSafe === false) && (
+                  <div className="flex items-start gap-2 p-3 rounded-2xl bg-red-50 border border-red-200 text-[11px] text-red-800">
+                    <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold">Món này có nguyên liệu bạn kiêng</p>
+                      <p>
+                        {recipe.ingredients
+                          .filter(ing => ing.isSafe === false)
+                          .map(ing => ing.avoidedVia ? `${ing.name} (thuộc nhóm ${ing.avoidedVia.name})` : ing.name)
+                          .join(', ')}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {/* Ingredients List */}
                 <div className="space-y-2.5 text-xs">
                   {recipe.ingredients && recipe.ingredients.length > 0 ? (
@@ -514,7 +502,7 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
                           <span className={`font-medium ${haveIngredients.has(ing.name) ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{ing.name}</span>
                           {ing.isSafe === false ? (
                             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-50 text-red-700 border border-red-200">
-                              Bạn kiêng
+                              {ing.avoidedVia ? `Thuộc nhóm ${ing.avoidedVia.name} bạn kiêng` : 'Bạn kiêng'}
                             </span>
                           ) : ing.allergen && (
                             <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-50 text-slate-500 border border-slate-200">
@@ -523,7 +511,7 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
                           )}
                         </div>
                         <span className="font-extrabold text-slate-900">
-                          {Math.round((ing.amount || 1) * scale * 10) / 10} {ing.unit || 'phần'}
+                          {ing.amount != null ? Math.round(ing.amount * scale * 10) / 10 : '—'} {ing.unit}
                         </span>
                       </label>
                     ))
@@ -621,7 +609,7 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
                             <h4 className="text-sm font-bold text-slate-900">{step.title || `Bước ${step.stepNumber || idx + 1}`}</h4>
                             <span className="text-xs font-semibold text-slate-400 flex items-center gap-1">
                               <Clock className="w-3 h-3 text-orange-500" />
-                              Thời gian: {step.durationMinutes || 5} phút
+                              Thời gian: {formatMetric(step.durationMinutes)} phút
                               {step.temperature && ` • Nhiệt độ: ${step.temperature}`}
                             </span>
                           </div>
@@ -631,21 +619,11 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleSpeechStep(step.instruction || step.content || '');
-                            }}
-                            className="p-2 text-slate-400 hover:text-orange-600 hover:bg-orange-50 rounded-xl transition-colors cursor-pointer"
-                            title="Đọc to chỉ dẫn"
-                          >
-                            <Volume2 className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
                               handleStartTimer(step.durationMinutes || 5);
                             }}
                             className="px-2.5 py-1 bg-slate-100 hover:bg-orange-50 hover:text-orange-700 text-slate-600 rounded-lg text-xs font-bold transition-colors cursor-pointer"
                           >
-                            Hẹn giờ {step.durationMinutes || 5}m
+                            Hẹn giờ {formatMetric(step.durationMinutes)}m
                           </button>
                         </div>
                       </div>
@@ -704,19 +682,21 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
               <div>
                 <h3 className="text-xl font-black text-slate-900 flex items-center gap-2">
                   <Sparkles className="w-5 h-5 text-orange-500" />
-                  Đánh giá từ Cộng đồng Culina ({reviewsList.length})
+                  Đánh giá từ Cộng đồng ChefAI ({reviewsList.length})
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Trải nghiệm thực tế, cảm nhận hương vị và đóng góp từ những người đã nấu món ăn này.
+                  Trải nghiệm thực tế, cảm nhận hương vị từ những người đã nấu món ăn này.
                 </p>
               </div>
               <div className="flex items-center gap-3 bg-amber-50 px-4 py-2 rounded-2xl border border-amber-200">
                 <span className="text-2xl font-black text-amber-600">
-                  {reviewSummary?.average ? reviewSummary.average.toFixed(1) : (recipe.rating || 5.0)}
+                  {ratingCount > 0 ? ratingAverage.toFixed(1) : '—'}
                 </span>
                 <div className="text-xs">
-                  <div className="flex text-amber-400">★★★★★</div>
-                  <span className="text-slate-500 font-semibold">Được đánh giá cao</span>
+                  <div className="flex text-amber-400">
+                    {'★'.repeat(Math.round(ratingAverage))}<span className="text-slate-300">{'★'.repeat(5 - Math.round(ratingAverage))}</span>
+                  </div>
+                  <span className="text-slate-500 font-semibold">{ratingCount > 0 ? `${ratingCount} lượt đánh giá` : 'Chưa có đánh giá'}</span>
                 </div>
               </div>
             </div>
@@ -808,11 +788,11 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
           </div>
         </div>
 
-        {/* Floating Interactive Audio Cooking Modal if activated */}
-        {isCookingAudioMode && (
+        {/* Floating cooking timer */}
+        {showTimer && (
           <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white p-4 rounded-3xl shadow-2xl border border-slate-700 flex items-center gap-4 animate-in slide-in-from-bottom-4">
             <div className="w-10 h-10 rounded-2xl bg-orange-500 flex items-center justify-center font-bold">
-              <Volume2 className="w-5 h-5 text-white" />
+              <Clock className="w-5 h-5 text-white" />
             </div>
             <div>
               <div className="text-xs font-bold text-orange-400">Đang nấu: Bước 0{activeStep}</div>
@@ -827,7 +807,7 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
               {isTimerRunning ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
             </button>
             <button
-              onClick={() => setIsCookingAudioMode(false)}
+              onClick={() => { setShowTimer(false); setIsTimerRunning(false); }}
               className="p-2 rounded-xl text-slate-400 hover:text-white cursor-pointer"
             >
               <X className="w-4 h-4" />

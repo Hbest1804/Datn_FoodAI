@@ -7,7 +7,7 @@
 import { supabaseAdmin } from '../config/supabase.js';
 import { generateEmbedding } from './aiService.js';
 import { cosineSimilarity, getDishEmbeddings } from './embeddingService.js';
-import { getIngredientIndex, getPublishedDishes } from './cacheService.js';
+import { getIngredientChildren, getIngredientIndex, getPublishedDishes } from './cacheService.js';
 import { containsBannedWords } from '../utils/bannedWords.js';
 import { normalizeText } from '../utils/textUtils.js';
 import { ApiError } from '../utils/http.js';
@@ -96,7 +96,26 @@ export async function checkTopic(content, settings) {
   return { outOfScope: false, questionVector };
 }
 
-/** Id nguyên liệu bị cấm với người dùng: thuộc nhóm dị ứng hoặc nằm trong danh sách không thích mà người dùng đã khai. */
+/**
+ * Mở rộng tập nguyên liệu sang mọi nguyên liệu con, cháu (bảng ingredient_parents):
+ * kiêng "Tôm" thì loại cả "Tôm sú tươi", "Mắm tôm", "Mắm tôm ngon"…
+ * Trả về Map id nguyên liệu → id nguyên liệu kiêng gốc dẫn tới nó (chính nó nếu kiêng trực tiếp).
+ */
+async function withDescendants(ids) {
+  const result = new Map([...ids].map((id) => [id, id]));
+  if (ids.size === 0) return result;
+  const children = await getIngredientChildren();
+  const queue = [...ids];
+  while (queue.length) {
+    const id = queue.pop();
+    for (const child of children.get(id) || []) {
+      if (!result.has(child)) { result.set(child, result.get(id)); queue.push(child); }
+    }
+  }
+  return result;
+}
+
+/** Id nguyên liệu bị cấm với người dùng: thuộc nhóm dị ứng hoặc danh sách không thích đã khai, kèm mọi nguyên liệu con của chúng. */
 export async function getForbiddenIngredientIds({ allergenGroupIds = [], dislikedIngredientIds = [] }) {
   const forbidden = new Set(dislikedIngredientIds.map(Number));
   if (allergenGroupIds.length > 0) {
@@ -105,15 +124,18 @@ export async function getForbiddenIngredientIds({ allergenGroupIds = [], dislike
       if (groups.has(Number(ing.allergen_group_id))) forbidden.add(Number(ing.id));
     }
   }
-  return forbidden;
+  return new Set((await withDescendants(forbidden)).keys());
 }
 
-/** Id nguyên liệu kiêng mà người dùng đã khai trong hồ sơ khẩu vị; khách trả tập rỗng. */
+/**
+ * Nguyên liệu kiêng mà người dùng đã khai trong hồ sơ khẩu vị, kèm nguyên liệu cùng nhóm;
+ * Map id → id nguyên liệu đã khai dẫn tới nó. Khách trả Map rỗng.
+ */
 export async function getUserAvoidedIngredientIds(userId) {
-  if (!userId) return new Set();
+  if (!userId) return new Map();
   const { data, error } = await supabaseAdmin.from('user_disliked_ingredients').select('ingredient_id').eq('user_id', userId);
   if (error) throw error;
-  return new Set((data || []).map((r) => Number(r.ingredient_id)));
+  return withDescendants(new Set((data || []).map((r) => Number(r.ingredient_id))));
 }
 
 /**

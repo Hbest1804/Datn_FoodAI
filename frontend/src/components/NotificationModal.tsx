@@ -41,13 +41,6 @@ export interface PromptOptions {
   required?: boolean;
 }
 
-export interface AlertModalOptions {
-  title?: string;
-  message: string;
-  buttonText?: string;
-  variant?: 'danger' | 'warning' | 'info' | 'primary';
-}
-
 // Global Event Emitter for Toasts and Modals
 type EventCallback = (data: any) => void;
 
@@ -97,15 +90,6 @@ export const showConfirm = (options: ConfirmOptions): Promise<boolean> => {
 export const showPrompt = (options: PromptOptions): Promise<string | null> => {
   return new Promise<string | null>((resolve) => {
     bus.emit('prompt', { ...options, resolve });
-  });
-};
-
-export const showAlert = (messageOrOptions: string | AlertModalOptions, title?: string): Promise<void> => {
-  return new Promise<void>((resolve) => {
-    const opts: AlertModalOptions = typeof messageOrOptions === 'string'
-      ? { message: messageOrOptions, title }
-      : messageOrOptions;
-    bus.emit('alert-modal', { ...opts, resolve });
   });
 };
 
@@ -204,7 +188,7 @@ const ToastCard: React.FC<{
       iconBg: 'bg-orange-50 text-orange-600',
       progressBg: 'bg-orange-500',
       titleColor: 'text-orange-950',
-      badge: 'Culina AI',
+      badge: 'ChefAI',
       Icon: Info,
     },
   }[item.type];
@@ -257,7 +241,7 @@ const ToastCard: React.FC<{
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// NOTIFICATION CONTAINER COMPONENT (Toast + Confirm + Prompt + Alert)
+// NOTIFICATION CONTAINER COMPONENT (Toast + Confirm + Prompt)
 // ─────────────────────────────────────────────────────────────────────────────
 export const NotificationContainer: React.FC = () => {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -270,9 +254,6 @@ export const NotificationContainer: React.FC = () => {
   const [promptInput, setPromptInput] = useState<string>('');
   const [promptError, setPromptError] = useState<string>('');
   const promptInputRef = useRef<HTMLInputElement>(null);
-
-  // Alert Modal state
-  const [alertData, setAlertData] = useState<(AlertModalOptions & { resolve: () => void }) | null>(null);
 
   useEffect(() => {
     // 1. Toast handler
@@ -304,21 +285,14 @@ export const NotificationContainer: React.FC = () => {
       }, 50);
     };
 
-    // 4. Alert modal handler
-    const handleAlertModal = (payload: AlertModalOptions & { resolve: () => void }) => {
-      setAlertData(payload);
-    };
-
     bus.on('toast', handleToast);
     bus.on('confirm', handleConfirm);
     bus.on('prompt', handlePrompt);
-    bus.on('alert-modal', handleAlertModal);
 
     return () => {
       bus.off('toast', handleToast);
       bus.off('confirm', handleConfirm);
       bus.off('prompt', handlePrompt);
-      bus.off('alert-modal', handleAlertModal);
     };
   }, []);
 
@@ -354,13 +328,6 @@ export const NotificationContainer: React.FC = () => {
       setPromptData(null);
       setPromptInput('');
       setPromptError('');
-    }
-  };
-
-  const handleAlertDismiss = () => {
-    if (alertData) {
-      alertData.resolve();
-      setAlertData(null);
     }
   };
 
@@ -543,69 +510,6 @@ export const NotificationContainer: React.FC = () => {
               </button>
             </div>
           </form>
-        </div>
-      )}
-
-      {/* ── Alert Modal ──────────────────────────────────────────────── */}
-      {alertData && (
-        <div className="fixed inset-0 z-[100000] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div
-            className="w-full max-w-md bg-white rounded-3xl p-6 sm:p-7 shadow-2xl border border-slate-200/90 relative overflow-hidden animate-in zoom-in-95 duration-200"
-            role="dialog"
-            aria-modal="true"
-          >
-            <div
-              className={`absolute top-0 left-0 right-0 h-1.5 ${
-                alertData.variant === 'danger'
-                  ? 'bg-rose-500'
-                  : alertData.variant === 'warning'
-                  ? 'bg-amber-500'
-                  : 'bg-orange-500'
-              }`}
-            />
-
-            <div className="flex items-start gap-4 mb-4">
-              <div
-                className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-sm ${
-                  alertData.variant === 'danger'
-                    ? 'bg-rose-100 text-rose-600'
-                    : alertData.variant === 'warning'
-                    ? 'bg-amber-100 text-amber-600'
-                    : 'bg-orange-100 text-orange-600'
-                }`}
-              >
-                {alertData.variant === 'danger' ? (
-                  <AlertCircle className="w-6 h-6" />
-                ) : alertData.variant === 'warning' ? (
-                  <AlertTriangle className="w-6 h-6" />
-                ) : (
-                  <Info className="w-6 h-6" />
-                )}
-              </div>
-              <div className="flex-1">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                  Thông báo hệ thống
-                </span>
-                <h3 className="text-base sm:text-lg font-bold text-slate-900 leading-snug">
-                  {alertData.title || 'Thông báo'}
-                </h3>
-              </div>
-            </div>
-
-            <p className="text-sm text-slate-600 leading-relaxed mb-6 bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
-              {alertData.message}
-            </p>
-
-            <div className="flex items-center justify-end">
-              <button
-                type="button"
-                onClick={handleAlertDismiss}
-                className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-bold text-xs sm:text-sm text-white bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 shadow-lg shadow-orange-500/25 transition-all cursor-pointer"
-              >
-                {alertData.buttonText || 'Đã hiểu'}
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </>

@@ -42,8 +42,8 @@ import {
   Settings
 } from 'lucide-react';
 import { Recipe, AdminStats } from '../types';
-import { apiService } from '../services/api';
-import { normalizeDish, formatVND } from '../utils/dishUtils';
+import { apiService } from '../api';
+import { normalizeDish, formatVND, formatMetric } from '../utils/dishUtils';
 import { toast, showConfirm, showPrompt } from './NotificationModal';
 import type { DishImportResult } from '../api/admin.api';
 import RecipeImportModal from './RecipeImportModal';
@@ -76,10 +76,46 @@ const DEFAULT_ADMIN_STATS: AdminStats = {
   visits: 0,
   dishesCount: 0,
   hiddenDishesCount: 0,
-  aiSuccessRate: 100,
+  aiSuccessRate: null,
   avgResponseMs: 0,
   flaggedMessagesCount: 0,
+  chatHourly: [],
+  dietDistribution: [],
 };
+
+// Màu cho các dòng phân phối chế độ ăn (lặp lại nếu nhiều hơn 4 chế độ)
+const DIET_COLORS = [
+  { text: 'text-emerald-600', bar: 'bg-emerald-500' },
+  { text: 'text-orange-600', bar: 'bg-orange-500' },
+  { text: 'text-blue-600', bar: 'bg-blue-500' },
+  { text: 'text-purple-600', bar: 'bg-purple-500' },
+];
+
+/** Đường cong mượt (Catmull-Rom → Bézier) đi qua 24 điểm theo giờ, khung vẽ 500×120. */
+function buildHourlyCurve(hourly: Array<{ hour: number; count: number }>) {
+  const counts = Array.from({ length: 24 }, (_, h) => hourly.find(x => x.hour === h)?.count || 0);
+  const max = Math.max(...counts);
+  const pts = counts.map((c, h) => ({ x: (h / 23) * 500, y: max > 0 ? 105 - (c / max) * 85 : 105 }));
+  let d = `M ${pts[0].x},${pts[0].y}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[i + 2] || p2;
+    const c1x = p1.x + (p2.x - p0.x) / 6;
+    const c1y = Math.min(110, Math.max(10, p1.y + (p2.y - p0.y) / 6));
+    const c2x = p2.x - (p3.x - p1.x) / 6;
+    const c2y = Math.min(110, Math.max(10, p2.y - (p3.y - p1.y) / 6));
+    d += ` C ${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
+  }
+  // Giờ cao điểm trong khung trưa (11h–13h) và tối (17h–20h)
+  const peakIn = (from: number, to: number) => {
+    let best = from;
+    for (let h = from; h <= to; h++) if (counts[h] > counts[best]) best = h;
+    return counts[best] > 0 ? { hour: best, ...pts[best] } : null;
+  };
+  return { d, total: counts.reduce((a, b) => a + b, 0), lunch: peakIn(11, 13), dinner: peakIn(17, 20) };
+}
 
 interface AdminStudioViewProps {
   onBackToUserMode: () => void;
@@ -97,6 +133,8 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
   // Stats state
   const [stats, setStats] = useState<AdminStats>(DEFAULT_ADMIN_STATS);
   const [loadingStats, setLoadingStats] = useState(false);
+  // Trạng thái dịch vụ AI (GET /admin/chatbot/health); null khi chưa kiểm tra được
+  const [systemHealthy, setSystemHealthy] = useState<boolean | null>(null);
   const [topDishes, setTopDishes] = useState<any[]>([]);
   const [statsDays, setStatsDays] = useState<number>(30);
   const [topDishesBy, setTopDishesBy] = useState<'views' | 'favorites' | 'rating'>('views');
@@ -226,17 +264,23 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
   const [isUploadingEditImage, setIsUploadingEditImage] = useState(false);
   const [isUpdatingDish, setIsUpdatingDish] = useState(false);
 
+  const hourlyCurve = buildHourlyCurve(stats.chatHourly);
+  const dietPicks = stats.dietDistribution.reduce((sum, d) => sum + d.users, 0) || 1;
+
   // Fetch admin stats & top dishes
   const fetchStats = async (days = statsDays, by = topDishesBy) => {
     setLoadingStats(true);
     try {
-      const [statsRes, topData, chatRes] = await Promise.all([
+      const [statsRes, topData, chatRes, healthRes] = await Promise.all([
         apiService.admin.getStats({ days }),
         apiService.admin.getTopDishes({ by, days }),
         apiService.admin.getChatbotOverview({ days }),
+        apiService.admin.getChatbotHealth().catch(() => null),
       ]);
+      setSystemHealthy(healthRes ? (healthRes.data || healthRes).status === 'up' : null);
       if (statsRes) {
         const errorRate = Number(chatRes?.error_rate) || 0;
+        const repliesCount = Object.values(chatRes?.outcomes || {}).reduce((sum: number, v: any) => sum + (Number(v) || 0), 0);
         setStats({
           chatbotInteractions: (statsRes.chat?.messages || 0) + (chatRes?.guest_messages || 0),
           chatSessions: statsRes.chat?.sessions || 0,
@@ -246,9 +290,11 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
           visits: statsRes.visits || 0,
           dishesCount: statsRes.dishes?.total || 0,
           hiddenDishesCount: Math.max(0, (statsRes.dishes?.total || 0) - (statsRes.dishes?.published || 0)),
-          aiSuccessRate: Math.round((1 - errorRate) * 1000) / 10,
+          aiSuccessRate: repliesCount > 0 ? Math.round((1 - errorRate) * 1000) / 10 : null,
           avgResponseMs: chatRes?.avg_response_ms || 0,
           flaggedMessagesCount: chatRes?.flagged_count || 0,
+          chatHourly: statsRes.chat_hourly || [],
+          dietDistribution: statsRes.diet_distribution?.items || [],
         });
       }
       if (topData && Array.isArray(topData)) {
@@ -359,7 +405,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `culina_stats_${statsDays}d_${new Date().toISOString().slice(0, 10)}.${format}`;
+      a.download = `chefai_stats_${statsDays}d_${new Date().toISOString().slice(0, 10)}.${format}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -861,19 +907,22 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
     setEditDishDesc(dish.description || '');
     setEditDishCategory(dish.category || 'Món chính');
     setEditDishImageUrl(dish.image && !dish.image.includes('placeholder') ? dish.image : '');
-    setEditDishTime(String(dish.cookingTime || 20));
+    setEditDishTime(dish.cookingTime != null ? String(dish.cookingTime) : '');
     // dish.difficulty đã được đổi sang chữ hiển thị (Dễ/Vừa/Nâng cao) → đổi lại mã cho ô chọn
     const difficultyCode: Record<string, 'easy' | 'medium' | 'hard'> = {
       'Dễ': 'easy', 'Vừa': 'medium', 'Nâng cao': 'hard', easy: 'easy', medium: 'medium', hard: 'hard',
     };
     setEditDishDifficulty(difficultyCode[dish.difficulty as string] || 'medium');
     setEditDishServings(String((dish as any).servings || 2));
-    setEditDishCalo(String(dish.macros?.calories || 400));
-    setEditDishProtein(String(dish.macros?.protein || 20));
-    setEditDishCarbs(String(dish.macros?.carbs || 30));
-    setEditDishFat(String(dish.macros?.fat || 10));
+    setEditDishCalo(dish.macros.calories != null ? String(dish.macros.calories) : '');
+    setEditDishProtein(dish.macros.protein != null ? String(dish.macros.protein) : '');
+    setEditDishCarbs(dish.macros.carbs != null ? String(dish.macros.carbs) : '');
+    setEditDishFat(dish.macros.fat != null ? String(dish.macros.fat) : '');
     setShowEditDishModal(true);
   };
+
+  // Ô số để trống → null (món chưa có chỉ số này)
+  const optionalNumber = (v: string) => (v.trim() === '' || isNaN(Number(v)) ? null : Number(v));
 
   // Update dish submit
   const handleUpdateDishSubmit = async (e: React.FormEvent) => {
@@ -891,13 +940,13 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
         description: editDishDesc.trim() || undefined,
         category: editDishCategory.trim() || 'Món chính',
         image_url: editDishImageUrl.trim() || undefined,
-        cook_time_minutes: parseInt(editDishTime, 10) || 20,
+        cook_time_minutes: optionalNumber(editDishTime),
         difficulty: editDishDifficulty,
         servings: parseInt(editDishServings, 10) || 2,
-        calories: parseInt(editDishCalo, 10) || 400,
-        protein_g: parseFloat(editDishProtein) || 20,
-        carbs_g: parseFloat(editDishCarbs) || 30,
-        fat_g: parseFloat(editDishFat) || 10,
+        calories: optionalNumber(editDishCalo),
+        protein_g: optionalNumber(editDishProtein),
+        carbs_g: optionalNumber(editDishCarbs),
+        fat_g: optionalNumber(editDishFat),
       });
 
       await loadAdminDishes();
@@ -1028,7 +1077,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
             <ArrowRight className="w-4 h-4" />
           </button>
           <div className="mt-3 px-3 text-[10px] text-slate-400">
-            Culina Admin Studio • Hệ Thống Trực Tuyến
+            ChefAI Admin Studio • Hệ Thống Trực Tuyến
           </div>
         </div>
       </div>
@@ -1041,11 +1090,11 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <span className="text-xs font-bold text-orange-600 uppercase tracking-wider flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  HỆ THỐNG TRỰC TUYẾN • HOẠT ĐỘNG ỔN ĐỊNH
+                  <span className={`w-2 h-2 rounded-full animate-pulse ${systemHealthy === false ? 'bg-red-500' : 'bg-emerald-500'}`} />
+                  HỆ THỐNG TRỰC TUYẾN • {systemHealthy === null ? 'ĐANG KIỂM TRA' : systemHealthy ? 'HOẠT ĐỘNG ỔN ĐỊNH' : 'DỊCH VỤ AI KHÔNG PHẢN HỒI'}
                 </span>
                 <h2 className="text-2xl font-black text-slate-900 tracking-tight mt-0.5">
-                  Tổng Quan & Thống Kê Hệ Thống Culina
+                  Tổng Quan & Thống Kê Hệ Thống ChefAI
                 </h2>
                 <p className="text-xs text-slate-500">
                   Phân tích thời gian thực hiệu suất AI, hành vi dinh dưỡng ẩm thực và lưu lượng hội thoại toàn nền tảng.
@@ -1135,9 +1184,9 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                     <ShieldCheck className="w-4 h-4" />
                   </div>
                 </div>
-                <div className="text-2xl font-black text-slate-900">{stats.aiSuccessRate}%</div>
+                <div className="text-2xl font-black text-slate-900">{stats.aiSuccessRate != null ? `${stats.aiSuccessRate}%` : '—'}</div>
                 <div className="text-[11px] text-emerald-600 font-bold">
-                  Độ trễ phản hồi: {stats.avgResponseMs}ms
+                  Độ trễ phản hồi: {stats.avgResponseMs > 0 ? `${stats.avgResponseMs}ms` : '—'}
                 </div>
               </div>
             </div>
@@ -1165,25 +1214,30 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                   </div>
                 </div>
 
-                <div className="h-44 w-full flex items-end pt-4 pb-2">
+                <div className="h-44 w-full flex items-end pt-4 pb-2 relative">
                   <svg className="w-full h-full overflow-visible" viewBox="0 0 500 120">
                     <path
-                      d="M 0,100 Q 80,95 120,40 T 200,85 T 320,30 T 420,70 T 500,90"
+                      d={hourlyCurve.d}
                       fill="none"
                       stroke="#F97316"
                       strokeWidth="3.5"
                     />
-                    <circle cx="120" cy="40" r="5" fill="#F97316" />
-                    <circle cx="320" cy="30" r="5" fill="#10B981" />
+                    {hourlyCurve.lunch && <circle cx={hourlyCurve.lunch.x} cy={hourlyCurve.lunch.y} r="5" fill="#F97316" />}
+                    {hourlyCurve.dinner && <circle cx={hourlyCurve.dinner.x} cy={hourlyCurve.dinner.y} r="5" fill="#10B981" />}
                   </svg>
+                  {hourlyCurve.total === 0 && (
+                    <div className="absolute inset-0 flex items-center justify-center text-xs text-slate-400">
+                      Chưa có câu hỏi chatbot nào trong {statsDays} ngày qua.
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex justify-between text-[11px] text-slate-400 font-mono pt-2 border-t border-slate-100">
                   <span>00:00</span>
                   <span>06:00</span>
-                  <span className="font-bold text-orange-600">11:30 (Trưa)</span>
+                  <span className="font-bold text-orange-600">{hourlyCurve.lunch ? `${String(hourlyCurve.lunch.hour).padStart(2, '0')}:00` : '—'} (Trưa)</span>
                   <span>15:00</span>
-                  <span className="font-bold text-emerald-600">18:45 (Tối đỉnh)</span>
+                  <span className="font-bold text-emerald-600">{hourlyCurve.dinner ? `${String(hourlyCurve.dinner.hour).padStart(2, '0')}:00` : '—'} (Tối đỉnh)</span>
                   <span>23:59</span>
                 </div>
               </div>
@@ -1195,42 +1249,25 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                   <p className="text-xs text-slate-500 mt-0.5">Sở thích ẩm thực do người dùng thiết lập</p>
 
                   <div className="space-y-3 text-xs pt-4">
-                    <div className="space-y-1">
-                      <div className="flex justify-between font-semibold">
-                        <span>Eat Clean & Rau củ</span>
-                        <span className="font-bold text-emerald-600">42%</span>
-                      </div>
-                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-emerald-500 w-[42%]" />
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <div className="flex justify-between font-semibold">
-                        <span>Tăng cơ (High Protein)</span>
-                        <span className="font-bold text-orange-600">28%</span>
-                      </div>
-                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-orange-500 w-[28%]" />
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <div className="flex justify-between font-semibold">
-                        <span>Cơm gia đình truyền thống</span>
-                        <span className="font-bold text-blue-600">18%</span>
-                      </div>
-                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-500 w-[18%]" />
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <div className="flex justify-between font-semibold">
-                        <span>Ăn chay & Thuần chay</span>
-                        <span className="font-bold text-purple-600">12%</span>
-                      </div>
-                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-purple-500 w-[12%]" />
-                      </div>
-                    </div>
+                    {stats.dietDistribution.length === 0 ? (
+                      <div className="py-6 text-center text-slate-400">Chưa có người dùng nào thiết lập chế độ ăn.</div>
+                    ) : (
+                      stats.dietDistribution.map((diet, idx) => {
+                        const color = DIET_COLORS[idx % DIET_COLORS.length];
+                        const pct = Math.round((diet.users / dietPicks) * 100);
+                        return (
+                          <div key={diet.id} className="space-y-1">
+                            <div className="flex justify-between font-semibold">
+                              <span>{diet.name}</span>
+                              <span className={`font-bold ${color.text}`} title={`${diet.users} người dùng`}>{pct}%</span>
+                            </div>
+                            <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                              <div className={`h-full ${color.bar}`} style={{ width: `${pct}%` }} />
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
                 </div>
 
@@ -1301,7 +1338,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                           {item.name || item.dish?.name || 'Món ăn'}
                         </div>
                         <div className="text-[10px] text-slate-400 flex items-center gap-1.5 mt-0.5">
-                          <span>{item.category || item.dish?.category?.name || 'Món ngon'}</span>
+                          <span>{item.category || item.dish?.category || '—'}</span>
                           <span>•</span>
                           <span className="font-bold text-orange-600">
                             {topDishesBy === 'views' && `${item.views || 0} lượt xem`}
@@ -1455,9 +1492,9 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                             <div className="text-[10px] text-slate-400">Độ khó: {r.difficulty}</div>
                           </td>
                           <td className="py-4">
-                            <div className="font-black text-slate-900">{r.macros.calories} kcal</div>
+                            <div className="font-black text-slate-900">{formatMetric(r.macros.calories, ' kcal')}</div>
                             <div className="text-[10px] text-slate-400">
-                              P: {r.macros.protein}g | C: {r.macros.carbs}g | F: {r.macros.fat}g
+                              P: {formatMetric(r.macros.protein, 'g')} | C: {formatMetric(r.macros.carbs, 'g')} | F: {formatMetric(r.macros.fat, 'g')}
                             </div>
                           </td>
                           <td className="py-4 text-center">
@@ -1970,7 +2007,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                 GIÁM SÁT HỆ THỐNG / AI SAFETY & QUALITY
               </span>
               <h2 className="text-2xl font-black text-slate-900 tracking-tight mt-0.5">
-                Giám Sát Chatbot Culina AI
+                Giám Sát Chatbot ChefAI
               </h2>
               <p className="text-xs text-slate-500">
                 Theo dõi độ trễ hệ thống AI, tỷ lệ giải đáp thành công và hệ thống bộ lọc cảnh báo dị ứng.
@@ -1980,18 +2017,20 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="p-5 bg-white rounded-3xl border border-slate-200/80 shadow-xs space-y-1">
                 <span className="text-[10px] font-bold text-slate-400 uppercase">ĐỘ TRỄ PHẢN HỒI AI</span>
-                <div className="text-2xl font-black text-slate-900">410 ms</div>
-                <div className="text-xs text-emerald-600 font-semibold">Tốc độ phản hồi cực nhanh</div>
+                <div className="text-2xl font-black text-slate-900">{chatbotOverview?.avg_response_ms ? `${chatbotOverview.avg_response_ms} ms` : '—'}</div>
+                <div className="text-xs text-emerald-600 font-semibold">
+                  {chatbotOverview?.avg_response_ms ? (chatbotOverview.avg_response_ms < 3000 ? 'Tốc độ phản hồi nhanh' : 'Phản hồi còn chậm') : 'Chưa có dữ liệu trong 30 ngày'}
+                </div>
               </div>
               <div className="p-5 bg-white rounded-3xl border border-slate-200/80 shadow-xs space-y-1">
                 <span className="text-[10px] font-bold text-slate-400 uppercase">TỶ LỆ KHÁCH CHUYỂN ĐỔI</span>
-                <div className="text-2xl font-black text-slate-900">74.2%</div>
-                <div className="text-xs text-orange-600 font-semibold">Đạt giới hạn 5 tin nhắn/ngày</div>
+                <div className="text-2xl font-black text-slate-900">—</div>
+                <div className="text-xs text-orange-600 font-semibold">Đạt giới hạn {chatbotConfig.guest_message_limit} tin nhắn/{chatbotConfig.guest_window_hours} giờ</div>
               </div>
               <div className="p-5 bg-white rounded-3xl border border-slate-200/80 shadow-xs space-y-1">
                 <span className="text-[10px] font-bold text-slate-400 uppercase">CHẶN DỊ ỨNG NGUY HIỂM</span>
-                <div className="text-2xl font-black text-emerald-700">100%</div>
-                <div className="text-xs text-emerald-600 font-semibold">Không có rủi ro thực phẩm</div>
+                <div className="text-2xl font-black text-emerald-700">—</div>
+                <div className="text-xs text-emerald-600 font-semibold">Chưa có số liệu thống kê</div>
               </div>
             </div>
 
@@ -2100,7 +2139,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                             }`}
                         >
                           <div className="flex items-center justify-between text-[10px] font-bold text-slate-400">
-                            <span>{m.sender === 'user' || m.role === 'user' ? 'Người dùng' : 'Trợ lý Culina AI'}</span>
+                            <span>{m.sender === 'user' || m.role === 'user' ? 'Người dùng' : 'Trợ lý ChefAI'}</span>
                             {(m.sender === 'assistant' || m.role === 'assistant' || m.sender === 'bot') && (
                               <button
                                 onClick={() => handleFlagMessage(m.id, !!m.is_flagged)}
@@ -2202,7 +2241,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                           ...chatbotConfig,
                           system_prompt: e.target.value
                         })}
-                        placeholder="Bạn là trợ lý dinh dưỡng và ẩm thực Culina AI..."
+                        placeholder="Bạn là trợ lý dinh dưỡng và ẩm thực ChefAI..."
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-orange-500"
                       />
                     </div>
@@ -2344,7 +2383,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-3xl w-full max-h-[90vh] overflow-y-auto space-y-5 shadow-2xl text-xs">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div>
-                <span className="text-[11px] font-bold text-orange-600 uppercase tracking-wider">KHO DỮ LIỆU CULINA</span>
+                <span className="text-[11px] font-bold text-orange-600 uppercase tracking-wider">KHO DỮ LIỆU CHEFAI</span>
                 <h3 className="text-lg font-black text-slate-900">Nhập Món Ăn Từ File Excel</h3>
               </div>
               <button
@@ -2549,7 +2588,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto space-y-5 shadow-2xl">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div>
-                <span className="text-[11px] font-bold text-orange-600 uppercase tracking-wider">KHO DỮ LIỆU CULINA</span>
+                <span className="text-[11px] font-bold text-orange-600 uppercase tracking-wider">KHO DỮ LIỆU CHEFAI</span>
                 <h3 className="text-lg font-black text-slate-900">Thêm Món Ăn Mới Vào Hệ Thống</h3>
               </div>
               <button

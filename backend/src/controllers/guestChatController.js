@@ -17,7 +17,7 @@ const ipQuotaMap = new Map();
 // Số tin nhắn của khách theo ngày, dùng cho GET /admin/chatbot/overview: ngày (YYYY-MM-DD) → số tin nhắn
 const guestDailyCounts = new Map();
 
-export function getClientIp(req) {
+function getClientIp(req) {
   const forwarded = req.headers['x-forwarded-for'];
   if (typeof forwarded === 'string' && forwarded) return forwarded.split(',')[0].trim();
   return req.socket?.remoteAddress || req.ip || '127.0.0.1';

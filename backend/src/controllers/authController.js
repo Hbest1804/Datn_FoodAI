@@ -2,6 +2,8 @@
 // API xác thực – mục 4.1 của tài liệu API
 
 import {
+  completeGoogleLogin,
+  googleAuthorizeUrl,
   loginUser,
   logoutUser,
   refreshSession,
@@ -65,6 +67,28 @@ export async function login(req, res) {
     ]);
   }
   return sendOk(res, await loginUser({ email, password }));
+}
+
+/**
+ * Đăng nhập Google – GET /auth/google → chuyển hướng tới trang chọn tài khoản Google
+ */
+export function googleRedirect(_req, res) {
+  return res.redirect(302, googleAuthorizeUrl());
+}
+
+/**
+ * Hoàn tất đăng nhập Google – POST /auth/google
+ * Nhận mã do Supabase trả về /auth/callback; lần đầu đăng nhập thì tự tạo tài khoản.
+ */
+export async function googleLogin(req, res) {
+  const body = req.body || {};
+  const accessToken = body.access_token ?? body.accessToken;
+  const refreshToken = body.refresh_token ?? body.refreshToken;
+  if (typeof accessToken !== 'string' || !accessToken || typeof refreshToken !== 'string' || !refreshToken) {
+    return sendError(res, 422, 'VALIDATION_ERROR', 'Thiếu mã đăng nhập Google.');
+  }
+  const expiresIn = Number(body.expires_in) || undefined;
+  return sendOk(res, await completeGoogleLogin({ accessToken, refreshToken, expiresIn }));
 }
 
 /**

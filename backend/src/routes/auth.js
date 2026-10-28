@@ -3,6 +3,8 @@
 
 import { Router } from 'express';
 import {
+  googleLogin,
+  googleRedirect,
   login,
   logout,
   me,
@@ -21,6 +23,8 @@ router.use(authLimiter);
 
 router.post('/register', register);                          // 4.1.1
 router.post('/login', login);                                // 4.1.2
+router.get('/google', googleRedirect);                       // đăng nhập Google: chuyển tới Google
+router.post('/google', googleLogin);                         // đăng nhập Google: hoàn tất
 router.post('/logout', authenticate, logout);                // 4.1.3
 router.post('/refresh', refresh);                            // 4.1.4
 router.post('/forgot-password', forgotPasswordLimiter, requestPasswordReset); // 4.1.5

@@ -63,12 +63,30 @@ export function getPublishedDishes() {
   }, { stale: true });
 }
 
-/** id và nhóm dị ứng của mọi nguyên liệu (đệm 60 giây). */
+/** id, tên và nhóm dị ứng của mọi nguyên liệu (đệm 60 giây). */
 export function getIngredientIndex() {
   return cached('catalog:ingredients', CATALOG_TTL_MS, async () => {
-    const { data, error } = await supabaseAdmin.from('ingredients').select('id, allergen_group_id');
+    const { data, error } = await supabaseAdmin.from('ingredients').select('id, name, allergen_group_id');
     if (error) throw error;
     return data || [];
+  }, { stale: true });
+}
+
+/** Nguyên liệu gốc → danh sách id nguyên liệu con trực tiếp, từ bảng ingredient_parents (đệm 60 giây). */
+export function getIngredientChildren() {
+  return cached('catalog:ingredient_children', CATALOG_TTL_MS, async () => {
+    const { data, error } = await supabaseAdmin.from('ingredient_parents').select('ingredient_id, parent_id');
+    const children = new Map();
+    if (error) {
+      // Chưa có bảng: vẫn lọc theo nguyên liệu kiêng trực tiếp, chỉ không mở rộng theo nhóm
+      console.warn('[Cache] Không đọc được ingredient_parents:', error.message);
+      return children;
+    }
+    for (const { ingredient_id: id, parent_id: pid } of data || []) {
+      if (!children.has(Number(pid))) children.set(Number(pid), []);
+      children.get(Number(pid)).push(Number(id));
+    }
+    return children;
   }, { stale: true });
 }
 

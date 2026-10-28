@@ -1,7 +1,7 @@
 // frontend/src/api/auth.api.ts
 // Authentication API module
 
-import { apiClient, setAuthToken, clearAuthToken, getAuthToken, refreshAccessToken } from './client';
+import { apiClient, setAuthToken, clearAuthToken, refreshAccessToken, BASE_API_URL } from './client';
 
 export interface AuthUser {
   id: string;
@@ -12,6 +12,7 @@ export interface AuthUser {
   phone?: string;
   avatar_url?: string;
   status?: 'active' | 'locked';
+  created_at?: string;
 }
 
 export interface LoginResult {
@@ -88,6 +89,26 @@ export const authApi = {
     };
   },
 
+  // ── Đăng nhập Google ─────────────────────────────────────────────
+  /** Chuyển sang trang chọn tài khoản Google; xong sẽ quay về /auth/callback */
+  startGoogleLogin(): void {
+    window.location.href = `${BASE_API_URL}/auth/google`;
+  },
+
+  /** Gửi mã Supabase nhận ở /auth/callback lên máy chủ để lấy (hoặc tạo) tài khoản */
+  async completeGoogleLogin(accessToken: string, refreshToken: string, expiresIn?: number): Promise<LoginResult> {
+    const res = await apiClient<any>('/auth/google', {
+      method: 'POST',
+      body: JSON.stringify({ access_token: accessToken, refresh_token: refreshToken, expires_in: expiresIn }),
+    });
+    const user = res.data?.user;
+    setAuthToken(res.data?.access_token || accessToken, res.data?.refresh_token || refreshToken);
+    if (user) {
+      localStorage.setItem('culina_user', JSON.stringify(user));
+    }
+    return { accessToken: res.data?.access_token || accessToken, refreshToken: res.data?.refresh_token || refreshToken, user };
+  },
+
   async getMe(): Promise<{ user: AuthUser }> {
     const res = await apiClient<any>('/auth/me');
     const user = res.user || res.data?.user || res.data;
@@ -136,9 +157,5 @@ export const authApi = {
     return {
       message: res.data?.message || res.message || 'Đặt lại mật khẩu thành công.',
     };
-  },
-
-  isAuthenticated(): boolean {
-    return !!getAuthToken();
   },
 };

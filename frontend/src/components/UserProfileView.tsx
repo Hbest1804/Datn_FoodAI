@@ -21,8 +21,8 @@ import {
   Loader2
 } from 'lucide-react';
 import { UserProfile, Recipe } from '../types';
-import { apiService } from '../services/api';
-import { formatVND, DEFAULT_AVATAR } from '../utils/dishUtils';
+import { apiService } from '../api';
+import { formatVND, DEFAULT_AVATAR, formatMetric } from '../utils/dishUtils';
 import { toast, showConfirm, showPrompt } from './NotificationModal';
 
 interface UserProfileViewProps {
@@ -362,7 +362,7 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
           <div className="flex-1 text-center sm:text-left space-y-2">
             <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
               <span className="px-2.5 py-0.5 rounded-full bg-white/20 text-white text-[11px] font-bold uppercase tracking-wider backdrop-blur-xs">
-                {currentUser.role === 'admin' ? 'Quản trị viên' : 'Thành viên Culina'}
+                {currentUser.role === 'admin' ? 'Quản trị viên' : 'Thành viên ChefAI'}
               </span>
               <span className="px-2.5 py-0.5 rounded-full bg-black/20 text-orange-100 text-[11px] font-medium">
                 ID: {currentUser.id ? currentUser.id.substring(0, 8) : 'user'}
@@ -373,7 +373,7 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
               {displayName || 'Đầu bếp tại gia'}
             </h1>
             <p className="text-xs sm:text-sm text-orange-100 max-w-lg">
-              {email || 'Chưa cập nhật email'} • Tham gia từ {currentUser.joinedDate || 'Hôm nay'}
+              {email || 'Chưa cập nhật email'} • Tham gia từ {currentUser.joinedDate || '—'}
             </p>
 
             <div className="pt-2 flex flex-wrap items-center justify-center sm:justify-start gap-2.5">
@@ -673,8 +673,8 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
                       </p>
                     </div>
                     <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100">
-                      <span>⏱ {dish.cookingTime} phút</span>
-                      <span className="font-bold text-orange-600">{dish.macros.calories} kcal</span>
+                      <span>⏱ {formatMetric(dish.cookingTime)} phút</span>
+                      <span className="font-bold text-orange-600">{formatMetric(dish.macros.calories, ' kcal')}</span>
                     </div>
                   </div>
                 </div>
@@ -694,7 +694,7 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
                 Lịch Sử Duyệt Món Ăn ({viewHistoryList.length})
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Các món ăn bạn đã mở xem chi tiết gần đây. Culina AI dùng lịch sử này để tinh chỉnh gợi ý phù hợp.
+                Các món ăn bạn đã mở xem chi tiết gần đây. ChefAI dùng lịch sử này để tinh chỉnh gợi ý phù hợp.
               </p>
             </div>
 
@@ -774,7 +774,7 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
                   Lịch Sử Hội Thoại Chatbot AI ({chatSessionsList.length})
                 </span>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  Bao gồm các đoạn chat tư vấn nguyên liệu, đề xuất bữa ăn và tinh chỉnh công thức cùng Trợ lý Culina.
+                  Bao gồm các đoạn chat tư vấn nguyên liệu, đề xuất bữa ăn và tinh chỉnh công thức cùng Trợ lý ChefAI.
                 </p>
               </div>
               <button

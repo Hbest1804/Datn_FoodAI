@@ -8,7 +8,7 @@ import { RecipeDetailModal } from './components/RecipeDetailModal';
 import { AuthModals } from './components/AuthModals';
 import { FloatingChefWidget } from './components/FloatingChefWidget';
 import { UserProfile, UserRole, Recipe } from './types';
-import { apiService } from './services/api';
+import { apiService } from './api';
 import { DEFAULT_AVATAR } from './utils/dishUtils';
 import { NotificationContainer, toast } from './components/NotificationModal';
 
@@ -29,17 +29,14 @@ const DEFAULT_GUEST: UserProfile = {
   roleLabel: 'Khách vãng lai',
   isLoggedIn: false,
   isPro: false,
-  joinedDate: 'Hôm nay',
-  lastActive: 'Vừa xong',
-  dietPreference: 'Bình thường',
-  targetCalories: 2000,
+  joinedDate: '',
+  lastActive: '',
+  // Chưa thiết lập hồ sơ khẩu vị: để trống / 0, giao diện sẽ ẩn các mục này
+  dietPreference: '',
+  targetCalories: 0,
   targetProtein: 90,
   targetCarbs: 220,
   targetFat: 60,
-  todayConsumedCalories: 0,
-  todayConsumedProtein: 0,
-  todayConsumedWaterLiters: 0,
-  todayTargetWaterLiters: 2.0,
   allergiesHardLock: [],
   intolerances: {
     lactose: false,
@@ -91,6 +88,8 @@ export default function App() {
   // Đã kiểm tra xong phiên đăng nhập hay chưa (tránh đá Admin ra khỏi /admin khi F5)
   const [sessionChecked, setSessionChecked] = useState<boolean>(false);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
+  // Tổng số món đang công khai trong CSDL (meta.total), dùng cho số liệu trên trang chủ
+  const [totalRecipes, setTotalRecipes] = useState<number>(0);
   const [selectedRecipeForModal, setSelectedRecipeForModal] = useState<Recipe | null>(null);
   const [resetTokenFromLink, setResetTokenFromLink] = useState<string>('');
 
@@ -117,6 +116,7 @@ export default function App() {
         const res = await apiService.dishes.getDishes({ limit: 12, sort: 'updated' });
         if (isMounted && res.dishes && res.dishes.length > 0) {
           setRecipes(res.dishes);
+          setTotalRecipes(res.total);
           return;
         }
       } catch (err) {
@@ -153,6 +153,7 @@ export default function App() {
             roleLabel: isAdmin ? 'Quản trị viên' : 'Đầu bếp tại gia',
             isLoggedIn: true,
             isPro: true,
+            joinedDate: u.created_at ? new Date(u.created_at).toLocaleDateString('vi-VN') : '',
           }));
 
           // Try to fetch user's taste profile
@@ -169,7 +170,7 @@ export default function App() {
                 targetCalories: p.calorie_goal ?? prev.targetCalories,
                 householdSize: p.household_size ?? prev.householdSize,
                 budgetPerMeal: p.budget_max ?? prev.budgetPerMeal,
-                dietPreference: p.diet_types?.[0]?.name || prev.dietPreference,
+                dietPreference: p.diet_types?.map((d: any) => d.name).join(', ') || '',
                 allergies: p.allergen_groups?.map((a: any) => a.name) || prev.allergies,
               }));
             }
@@ -259,6 +260,42 @@ export default function App() {
     setAuthModalType('forgot-password');
     setIsAuthModalOpen(true);
     navigate('/', { replace: true });
+  }, [location.pathname]);
+
+  // Google chuyển về /auth/callback#access_token=...&refresh_token=... sau khi chọn tài khoản
+  useEffect(() => {
+    if (location.pathname !== '/auth/callback') return;
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const accessToken = hash.get('access_token');
+    const refreshToken = hash.get('refresh_token');
+    const oauthError = hash.get('error_description') || searchParams.get('error_description');
+    navigate('/', { replace: true });
+
+    if (!accessToken || !refreshToken) {
+      toast.error(oauthError || 'Đăng nhập Google không thành công. Vui lòng thử lại.');
+      setAuthModalType('login');
+      setIsAuthModalOpen(true);
+      return;
+    }
+    apiService.auth.completeGoogleLogin(accessToken, refreshToken, Number(hash.get('expires_in')) || undefined)
+      .then(({ user }) => {
+        handleLoginSuccess({
+          id: user.id,
+          name: user.display_name || user.email.split('@')[0],
+          email: user.email,
+          ...(user.avatar_url ? { avatar: user.avatar_url, avatar_url: user.avatar_url } : {}),
+          role: user.role,
+          joinedDate: user.created_at ? new Date(user.created_at).toLocaleDateString('vi-VN') : '',
+        });
+        toast.success(`Chào mừng ${user.display_name || user.email}!`, 'Đăng nhập Google');
+      })
+      .catch((err: any) => {
+        localStorage.removeItem('culina_token');
+        localStorage.removeItem('culina_refresh_token');
+        toast.error(err.message || 'Đăng nhập Google không thành công. Vui lòng thử lại.');
+        setAuthModalType('login');
+        setIsAuthModalOpen(true);
+      });
   }, [location.pathname]);
 
   // Vai trò chỉ lấy từ phiên đăng nhập (máy chủ trả về); giao diện không được tự nâng lên quản trị viên
@@ -368,6 +405,7 @@ export default function App() {
               <DiscoveryView
                 currentUser={currentUser}
                 recipes={recipes}
+                totalRecipes={totalRecipes}
                 onSelectRecipe={openRecipe}
                 onOpenChatWithPrompt={handleOpenChatWithPrompt}
                 onOpenRegisterModal={openRegisterModal}
@@ -474,6 +512,7 @@ export default function App() {
 
           {/* /reset-password được xử lý bằng effect phía trên rồi chuyển về trang chủ */}
           <Route path="/reset-password" element={null} />
+          <Route path="/auth/callback" element={null} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         </Suspense>

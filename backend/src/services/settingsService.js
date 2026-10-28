@@ -4,7 +4,7 @@
 import { supabaseAdmin } from '../config/supabase.js';
 
 // Giá trị mặc định trùng với dữ liệu khởi tạo trong lược đồ CSDL
-export const DEFAULT_SETTINGS = {
+const DEFAULT_SETTINGS = {
   guest_message_limit: 10,
   guest_window_hours: 24,
   system_prompt: 'Bạn là "Trợ lý ẩm thực" của website gợi ý món ăn Việt Nam.',
