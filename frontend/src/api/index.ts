@@ -1,5 +1,5 @@
 // frontend/src/api/index.ts
-// Unified API Gateway connecting Culina Frontend to Backend Services
+// Unified API Gateway connecting ChefAI Frontend to Backend Services
 
 import { authApi } from './auth.api';
 import { dishesApi } from './dishes.api';

@@ -1,5 +1,5 @@
 // frontend/src/api/client.ts
-// Core HTTP Client connecting Frontend to CulinaAI Backend (Express + Supabase + Gemini)
+// Core HTTP Client connecting Frontend to ChefAI Backend (Express + Supabase + Gemini)
 
 export class ApiError extends Error {
   code: string;
@@ -29,7 +29,7 @@ function resolveBaseUrl(): string {
 export const BASE_API_URL = resolveBaseUrl();
 
 // Guest ID management (Guest 5-turn free tier)
-export function getGuestId(): string {
+function getGuestId(): string {
   let gid = localStorage.getItem('culina_guest_id');
   if (!gid) {
     gid = `guest_${Math.random().toString(36).substring(2, 11)}_${Date.now()}`;

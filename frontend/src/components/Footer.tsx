@@ -55,7 +55,7 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab, onOpenLoginModal })
                   onClick={() => onSelectTab('chat')}
                   className="hover:text-orange-600 transition-colors text-left cursor-pointer"
                 >
-                  Tìm món từ tủ lạnh (Chống lãng phí)
+                  Tìm món từ nguyên liệu có sẵn
                 </button>
               </li>
               <li>
@@ -79,7 +79,7 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab, onOpenLoginModal })
                   onClick={() => onSelectTab('planner')}
                   className="hover:text-orange-600 transition-colors text-left cursor-pointer"
                 >
-                  Lên thực đơn tuần & Quản lý tủ lạnh
+                  Lên thực đơn tuần
                 </button>
               </li>
             </ul>

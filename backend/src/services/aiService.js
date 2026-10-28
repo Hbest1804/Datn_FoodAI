@@ -50,7 +50,7 @@ function setToCache(key, data) {
 const PRESEEDED_QUICK_REPLIES = {
   'gợi ý món canh cho bữa trưa nhanh gọn': {
     type: 'recipe',
-    content: `Chào bạn! Cho bữa trưa nhanh gọn mà vẫn thanh mát, ngon miệng, **CulinaAI** gợi ý bạn 3 món canh chuẩn vị chỉ tốn 10 - 15 phút:
+    content: `Chào bạn! Cho bữa trưa nhanh gọn mà vẫn thanh mát, ngon miệng, **ChefAI** gợi ý bạn 3 món canh chuẩn vị chỉ tốn 10 - 15 phút:
 
 1. **Canh trứng cà chua hành hoa (10 phút):**
    - *Nguyên liệu:* 2 quả trứng gà, 2 quả cà chua, hành tím, hành lá, ngò rí.
@@ -148,7 +148,7 @@ Bảo quản trong hũ thủy tinh kín ở ngăn mát tủ lạnh được từ
   },
   'gợi ý 3 món ăn chuẩn vị cho cả gia đình': {
     type: 'recipe',
-    content: `CulinaAI xin gợi ý mâm cơm gia đình 3 món cân bằng dinh dưỡng, thanh đạm và cực kỳ đưa cơm:
+    content: `ChefAI xin gợi ý mâm cơm gia đình 3 món cân bằng dinh dưỡng, thanh đạm và cực kỳ đưa cơm:
 
 1. **Món mặn: Thịt ba chỉ kho tộ đậm đà (40 phút):**
    - Thịt ba chỉ thái vuông con chì, ướp nước mắm cốt, tiêu, hành tím băm và chút đường thốt nốt. Kho liu riu đến khi nước sốt keo màu cánh gián thơm phức.
@@ -161,7 +161,7 @@ Mâm cơm này cung cấp đầy đủ đạm, chất xơ, vitamin và khoáng c
   },
   'tôi muốn 1 bữa cơm 5 người thì nên nấu những món gì': {
     type: 'recipe',
-    content: `Chào bạn! Cho mâm cơm **5 người ăn** ngon miệng, đủ chất và hài hòa khẩu vị, **CulinaAI** gợi ý thực đơn 4 món chuẩn vị cơm gia đình Việt:
+    content: `Chào bạn! Cho mâm cơm **5 người ăn** ngon miệng, đủ chất và hài hòa khẩu vị, **ChefAI** gợi ý thực đơn 4 món chuẩn vị cơm gia đình Việt:
 
 1. **Món mặn chính: Thịt ba chỉ kho trứng cút (40 phút):**
    - *Định lượng:* 600g thịt ba chỉ + 15 quả trứng cút.
@@ -629,7 +629,7 @@ function parsePersonalizedResponse(rawText, dishesContext, tokenCount = 150) {
     ? parsed.outcome
     : (parsed.type === 'out_of_scope' ? 'out_of_scope' : 'answered');
 
-  const rawContent = parsed.content || 'Dạ, CulinaAI rất hân hạnh đồng hành cùng bữa ăn của bạn!';
+  const rawContent = parsed.content || 'Dạ, ChefAI rất hân hạnh đồng hành cùng bữa ăn của bạn!';
   const { cleanedContent, extractedIds } = sanitizeDishIdsFromContent(rawContent);
 
   const rawMatched = Array.isArray(parsed.matched_dish_ids) ? parsed.matched_dish_ids : [];
@@ -677,14 +677,14 @@ function matchDishesByNameOrContext(content, dishesContext = []) {
 /**
  * Câu trả lời dự phòng cho chế độ khách khi chưa cấu hình khóa API (môi trường thử nghiệm)
  */
-export function fallbackResponse(content, dishesContext = [], fridge = {}) {
+function fallbackResponse(content, dishesContext = [], fridge = {}) {
   const c = (content || '').toLowerCase();
   const isCooking = /(nấu|món|canh|kho|xào|nướng|thịt|cá|rau|trứng|ăn gì|bữa|calo|công thức|tủ lạnh|thực đơn|chay|diet|dinh dưỡng|mẹo|khử|sốt|hải sản|gà|bò)/i.test(c);
 
   if (!isCooking && c.length > 5) {
     return {
       type: 'out_of_scope',
-      content: 'Dạ, CulinaAI là trợ lý chuyên sâu về ẩm thực, dinh dưỡng và nấu nướng. Em chỉ có thể hỗ trợ bạn các công thức món ăn ngon, mẹo làm bếp hoặc lên thực đơn hàng ngày thôi ạ! Hôm nay bạn có muốn em gợi ý món ngon nào không?',
+      content: 'Dạ, ChefAI là trợ lý chuyên sâu về ẩm thực, dinh dưỡng và nấu nướng. Em chỉ có thể hỗ trợ bạn các công thức món ăn ngon, mẹo làm bếp hoặc lên thực đơn hàng ngày thôi ạ! Hôm nay bạn có muốn em gợi ý món ngon nào không?',
       dishes: [],
     };
   }
@@ -693,7 +693,7 @@ export function fallbackResponse(content, dishesContext = [], fridge = {}) {
   const sampleDishes = matched.length > 0 ? matched.slice(0, 3) : dishesContext.slice(0, 2);
   const dishNames = sampleDishes.map((d) => `**${d.name}**`).join(', ');
 
-  let replyText = `Dạ chào bạn! Để giải đáp nhanh cho câu hỏi về **"${content.trim()}"**, CulinaAI xin gợi ý cho bạn như sau:\n\n`;
+  let replyText = `Dạ chào bạn! Để giải đáp nhanh cho câu hỏi về **"${content.trim()}"**, ChefAI xin gợi ý cho bạn như sau:\n\n`;
 
   if (sampleDishes.length > 0) {
     replyText += `🍲 **Món ăn phù hợp hàng đầu:** Bạn có thể tham khảo ${dishNames}.\n`;
@@ -720,7 +720,7 @@ export function fallbackResponse(content, dishesContext = [], fridge = {}) {
 /**
  * Câu trả lời dự phòng cho chế độ cá nhân hóa khi chưa cấu hình khóa API (môi trường thử nghiệm)
  */
-export function fallbackPersonalizedResponse({
+function fallbackPersonalizedResponse({
   content,
   userProfile = {},
   favoriteDishes = [],
@@ -733,7 +733,7 @@ export function fallbackPersonalizedResponse({
   if (!isCooking && c.length > 5) {
     return {
       outcome: 'out_of_scope',
-      content: 'Dạ em là trợ lý ẩm thực CulinaAI, em chỉ có thể hỗ trợ các câu hỏi liên quan đến ẩm thực, món ăn, dinh dưỡng và gợi ý thực đơn cá nhân hóa thôi ạ. Bạn có muốn tìm gợi ý món ngon cho hôm nay không?',
+      content: 'Dạ em là trợ lý ẩm thực ChefAI, em chỉ có thể hỗ trợ các câu hỏi liên quan đến ẩm thực, món ăn, dinh dưỡng và gợi ý thực đơn cá nhân hóa thôi ạ. Bạn có muốn tìm gợi ý món ngon cho hôm nay không?',
       dishes: [],
       tokens: 65,
     };
@@ -760,7 +760,7 @@ export function fallbackPersonalizedResponse({
     ? ` (phù hợp mục tiêu ~${userProfile.calorie_goal} kcal)`
     : '';
 
-  let replyText = `Dạ chào bạn! Để chuẩn bị bữa ăn ${dietNote}thanh lành và thơm ngon${caloNote}, CulinaAI xin gợi ý bạn có thể thưởng thức ${dishNames || 'các món ăn giàu dinh dưỡng trong thư viện'}.\n\n`;
+  let replyText = `Dạ chào bạn! Để chuẩn bị bữa ăn ${dietNote}thanh lành và thơm ngon${caloNote}, ChefAI xin gợi ý bạn có thể thưởng thức ${dishNames || 'các món ăn giàu dinh dưỡng trong thư viện'}.\n\n`;
 
   if (userProfile.allergen_groups?.length) {
     replyText += `🛡️ *Tất cả gợi ý trên đã được hệ thống tự động lọc bỏ hoàn toàn các thành phần liên quan đến: ${userProfile.allergen_groups.map((a) => a.name).join(', ')}.*\n\n`;

@@ -4,7 +4,7 @@
 /**
  * Loại bỏ dấu tiếng Việt và chuẩn hóa về chữ thường
  */
-export function removeVietnameseTones(str) {
+function removeVietnameseTones(str) {
   if (!str || typeof str !== 'string') return '';
   let result = str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   result = result.replace(/[đĐ]/g, (m) => (m === 'đ' ? 'd' : 'D'));

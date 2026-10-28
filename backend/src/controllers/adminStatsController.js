@@ -63,6 +63,35 @@ async function computeOverview(range) {
   };
 }
 
+// Giờ Việt Nam (UTC+7, không đổi giờ theo mùa)
+const VN_OFFSET_HOURS = 7;
+
+/** Số câu hỏi người dùng gửi chatbot theo từng giờ trong ngày (0–23, giờ Việt Nam). Chat khách không lưu từng tin nên không tính. */
+async function computeChatHourly(range) {
+  const rows = await rowsIn('chat_messages', 'created_at', range, (q) => q.eq('role', 'user'));
+  const hours = Array(24).fill(0);
+  rows.forEach((r) => { hours[(new Date(r.created_at).getUTCHours() + VN_OFFSET_HOURS) % 24] += 1; });
+  return hours.map((count, hour) => ({ hour, count }));
+}
+
+/** Số người dùng theo từng chế độ ăn đã chọn trong hồ sơ khẩu vị (một người có thể chọn nhiều chế độ). */
+async function computeDietDistribution() {
+  const [types, picks] = await Promise.all([
+    supabaseAdmin.from('diet_types').select('id, name').order('id'),
+    fetchAll(() => supabaseAdmin.from('user_diets').select('user_id, diet_type_id')),
+  ]);
+  if (types.error) throw types.error;
+  const counts = new Map();
+  picks.forEach((p) => counts.set(p.diet_type_id, (counts.get(p.diet_type_id) || 0) + 1));
+  return {
+    users_with_diet: new Set(picks.map((p) => p.user_id)).size,
+    items: (types.data || [])
+      .map((t) => ({ id: t.id, name: t.name, users: counts.get(t.id) || 0 }))
+      .filter((t) => t.users > 0)
+      .sort((a, b) => b.users - a.users),
+  };
+}
+
 async function computeTopDishes(range, by, limit) {
   const [views, favs, ratings] = await Promise.all([
     rowsIn('interaction_logs', 'dish_id', range, (q) => q.eq('event_type', 'view').not('dish_id', 'is', null)),
@@ -89,7 +118,7 @@ async function computeTopDishes(range, by, limit) {
 
   const ids = top.map(([id]) => id);
   const { data: dishes } = ids.length
-    ? await supabaseAdmin.from('dishes').select('id, name, slug').in('id', ids)
+    ? await supabaseAdmin.from('dishes').select('id, name, slug, image_url, category').in('id', ids)
     : { data: [] };
   const dishMap = new Map((dishes || []).map((d) => [d.id, d]));
   return top
@@ -187,7 +216,13 @@ function readLimit(query, def, max) {
 
 /** 4.13.1 Thống kê tổng quan – GET /admin/stats/overview?from=&to= */
 export async function adminGetStatsOverview(req, res) {
-  return sendOk(res, await computeOverview(parseDateRange(req.query)));
+  const range = parseDateRange(req.query);
+  const [overview, chatHourly, diets] = await Promise.all([
+    computeOverview(range),
+    computeChatHourly(range),
+    computeDietDistribution(),
+  ]);
+  return sendOk(res, { ...overview, chat_hourly: chatHourly, diet_distribution: diets });
 }
 
 /** 4.13.2 Món được xem/yêu thích nhiều – GET /admin/stats/top-dishes?by=&limit=&from=&to= */

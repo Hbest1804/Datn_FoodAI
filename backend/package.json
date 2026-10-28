@@ -1,7 +1,7 @@
 {
-  "name": "culina-ai-backend",
+  "name": "chefai-backend",
   "version": "1.0.0",
-  "description": "Backend Node.js (Express + Supabase + Gemini) cho CulinaAI",
+  "description": "Backend Node.js (Express + Supabase + Gemini) cho ChefAI",
   "type": "module",
   "main": "src/server.js",
   "scripts": {

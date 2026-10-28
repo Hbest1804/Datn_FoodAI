@@ -156,6 +156,64 @@ export async function loginUser({ email, password }) {
   return { ...tokenPayload(data.session), user: publicUser };
 }
 
+// ── Đăng nhập bằng Google (OAuth qua Supabase Auth) ─────────────────────────
+
+/** Địa chỉ trang đăng nhập Google của Supabase; đăng nhập xong Google chuyển về /auth/callback của giao diện. */
+export function googleAuthorizeUrl() {
+  const params = new URLSearchParams({
+    provider: 'google',
+    redirect_to: `${env.frontendUrl}/auth/callback`,
+  });
+  return `${env.supabase.url}/auth/v1/authorize?${params}`;
+}
+
+/**
+ * Hoàn tất đăng nhập Google: kiểm tra mã truy cập Supabase vừa cấp, lần đầu thì tạo hồ sơ trong bảng users.
+ * Google đã xác minh email nên không cần bước đăng ký riêng; email đã đăng ký bằng mật khẩu được Supabase gộp chung tài khoản.
+ */
+export async function completeGoogleLogin({ accessToken, refreshToken, expiresIn }) {
+  const { data: { user: authUser } = {}, error } = await supabase.auth.getUser(accessToken);
+  if (error || !authUser?.email) {
+    throw new ApiError(401, 'UNAUTHORIZED', 'Đăng nhập Google không thành công. Vui lòng thử lại.');
+  }
+
+  let { data: user, error: findErr } = await supabaseAdmin
+    .from('users')
+    .select(USER_FIELDS)
+    .eq('id', authUser.id)
+    .maybeSingle();
+  if (findErr) throw findErr;
+
+  if (!user) {
+    const meta = authUser.user_metadata || {};
+    const email = authUser.email.trim().toLowerCase();
+    const displayName = String(meta.full_name || meta.name || email.split('@')[0]).trim().slice(0, 100);
+    const { data: created, error: insertErr } = await supabaseAdmin
+      .from('users')
+      .insert({ id: authUser.id, email, display_name: displayName, avatar_url: meta.avatar_url || meta.picture || null, role: 'user', status: 'active' })
+      .select(USER_FIELDS)
+      .single();
+    if (insertErr) {
+      if (insertErr.code === '23505') {
+        throw new ApiError(409, 'EMAIL_ALREADY_EXISTS', 'Email này đã gắn với một tài khoản khác. Vui lòng đăng nhập bằng mật khẩu.');
+      }
+      throw insertErr;
+    }
+    await supabaseAdmin.from('user_profiles').insert({ user_id: created.id });
+    user = created;
+  }
+
+  if (user.status === 'locked') {
+    await supabaseAdmin.auth.admin.signOut(accessToken, 'local').catch(() => {});
+    throw new ApiError(403, 'ACCOUNT_LOCKED', 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.');
+  }
+
+  return {
+    ...tokenPayload({ access_token: accessToken, refresh_token: refreshToken, expires_in: expiresIn }),
+    user,
+  };
+}
+
 // ── 4.1.3 Đăng xuất / 4.1.4 Làm mới mã truy cập ──────────────────────────────
 
 export async function logoutUser(accessToken) {

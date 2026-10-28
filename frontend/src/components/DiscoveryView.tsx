@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Sparkles, 
-  Flame, 
   Clock, 
   ChevronRight, 
   Heart, 
@@ -20,11 +19,13 @@ import {
 } from 'lucide-react';
 import { UserProfile, Recipe } from '../types';
 import { ChefLogo3D } from './ChefLogo3D';
-import { apiService } from '../services/api';
+import { apiService } from '../api';
+import { formatMetric } from '../utils/dishUtils';
 
 interface DiscoveryViewProps {
   currentUser: UserProfile;
   recipes: Recipe[];
+  totalRecipes: number;
   onSelectRecipe: (recipe: Recipe) => void;
   onOpenChatWithPrompt: (prompt: string) => void;
   onOpenRegisterModal: () => void;
@@ -35,6 +36,7 @@ interface DiscoveryViewProps {
 export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
   currentUser,
   recipes: allRecipes,
+  totalRecipes,
   onSelectRecipe,
   onOpenChatWithPrompt,
   onOpenRegisterModal,
@@ -91,39 +93,39 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
   const currentGoldenMeal = goldenMeals.length > 0 ? goldenMeals[goldenMealIndex % goldenMeals.length] : null;
 
   // Filter meals based on activeMealTab (for users) or selectedFilter (for guests)
-  const displayedMeals = useMemo(() => {
+  const mealsFor = (tab: 'lunch' | 'dinner' | 'snack' | 'tomorrow'): Recipe[] => {
     if (!recipes || recipes.length === 0) return [];
 
     if (isGuest) {
       if (selectedFilter === 'Tất cả') return recipes.slice(1, 5);
       const filtered = recipes.filter(r => {
         const text = `${r.title} ${r.description} ${r.category} ${(r.tags || []).join(' ')}`.toLowerCase();
-        if (selectedFilter.includes('15 phút')) return (r.cookingTime <= 20) || text.includes('sáng');
-        if (selectedFilter.includes('Eat Clean')) return (r.macros?.calories < 500) || text.includes('clean') || text.includes('salad');
+        if (selectedFilter.includes('15 phút')) return (r.cookingTime != null && r.cookingTime <= 20) || text.includes('sáng');
+        if (selectedFilter.includes('Eat Clean')) return (r.macros.calories != null && r.macros.calories < 500) || text.includes('clean') || text.includes('salad');
         if (selectedFilter.includes('chay')) return text.includes('chay') || text.includes('rau') || text.includes('nấm');
         if (selectedFilter.includes('Cơm nhà')) return text.includes('cơm') || text.includes('kho') || text.includes('xào') || text.includes('canh');
-        if (selectedFilter.includes('Keto')) return (r.macros?.carbs < 25) || text.includes('keto');
-        if (selectedFilter.includes('Tăng cơ') || selectedFilter.includes('đạm')) return (r.macros?.protein >= 25);
+        if (selectedFilter.includes('Keto')) return (r.macros.carbs != null && r.macros.carbs < 25) || text.includes('keto');
+        if (selectedFilter.includes('Tăng cơ') || selectedFilter.includes('đạm')) return (r.macros.protein != null && r.macros.protein >= 25);
         return text.includes(selectedFilter.toLowerCase());
       });
       return filtered.length > 0 ? filtered.slice(0, 4) : recipes.slice(1, 5);
     }
 
     // For logged-in users: separate dishes per meal slot
-    if (activeMealTab === 'lunch') {
-      // Bữa trưa: Món chính giàu năng lượng, no lâu
+    if (tab === 'lunch') {
+      // Bữa trưa hôm nay ({lunchCount}): Món chính giàu năng lượng, no lâu
       const lunchDishes = recipes.filter(r => {
         const text = `${r.title} ${r.category} ${(r.tags || []).join(' ')}`.toLowerCase();
-        return (r.macros?.calories >= 380) || text.includes('cơm') || text.includes('xào') || text.includes('kho') || text.includes('bò') || text.includes('gà');
+        return (r.macros.calories != null && r.macros.calories >= 380) || text.includes('cơm') || text.includes('xào') || text.includes('kho') || text.includes('bò') || text.includes('gà');
       });
       return lunchDishes.length >= 2 ? lunchDishes.slice(0, 4) : recipes.slice(1, 5);
     }
 
-    if (activeMealTab === 'dinner') {
+    if (tab === 'dinner') {
       // Bữa tối: Thanh đạm, nhẹ bụng, ít calo/carbs hơn hoặc lấy slot khác để không trùng bữa trưa
       const dinnerDishes = recipes.filter(r => {
         const text = `${r.title} ${r.category} ${(r.tags || []).join(' ')}`.toLowerCase();
-        return (r.macros?.calories < 480) || text.includes('canh') || text.includes('hấp') || text.includes('súp') || text.includes('salad') || text.includes('cá');
+        return (r.macros.calories != null && r.macros.calories < 480) || text.includes('canh') || text.includes('hấp') || text.includes('súp') || text.includes('salad') || text.includes('cá');
       });
       // Nếu có món phân loại theo calo/từ khóa, ưu tiên hiển thị; nếu ít quá thì lấy các món từ vị trí thứ 5 trở đi để không trùng bữa trưa
       if (dinnerDishes.length >= 4) return dinnerDishes.slice(0, 4);
@@ -131,11 +133,11 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
       return fallback.length > 0 ? fallback : dinnerDishes;
     }
 
-    if (activeMealTab === 'snack') {
-      // Snack & Năng lượng: món nấu nhanh, sinh tố, tráng miệng, hoặc nhẹ bụng
+    if (tab === 'snack') {
+      // Snack & Năng lượng ({snackCount}): món nấu nhanh, sinh tố, tráng miệng, hoặc nhẹ bụng
       const snackDishes = recipes.filter(r => {
         const text = `${r.title} ${r.category} ${(r.tags || []).join(' ')}`.toLowerCase();
-        return (r.cookingTime <= 20) || (r.macros?.calories < 320) || text.includes('snack') || text.includes('bánh') || text.includes('nước') || text.includes('tráng miệng') || text.includes('salad');
+        return (r.cookingTime != null && r.cookingTime <= 20) || (r.macros.calories != null && r.macros.calories < 320) || text.includes('snack') || text.includes('bánh') || text.includes('nước') || text.includes('tráng miệng') || text.includes('salad');
       });
       if (snackDishes.length >= 3) return snackDishes.slice(0, 4);
       const fallback = recipes.slice(9, 13);
@@ -143,21 +145,35 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
     }
 
     return recipes.slice(1, 5);
-  }, [recipes, isGuest, selectedFilter, activeMealTab]);
+  };
+  const displayedMeals = useMemo(() => mealsFor(activeMealTab), [recipes, isGuest, selectedFilter, activeMealTab]);
+  const lunchCount = isGuest ? 0 : mealsFor('lunch').length;
+  const dinnerCount = isGuest ? 0 : mealsFor('dinner').length;
+  const snackCount = isGuest ? 0 : mealsFor('snack').length;
 
   // Live in-page AI widget state
+  // Thanh tiến độ = tỉ lệ calo của món so với mục tiêu calo/ngày (mặc định 2000 kcal nếu chưa đặt mục tiêu)
+  const dailyCalories = currentUser.targetCalories > 0 ? currentUser.targetCalories : 2000;
+  const caloPercent = (calo: number | null) => (calo == null ? 0 : Math.min(100, Math.round((calo / dailyCalories) * 100)));
+
   const [widgetQuery, setWidgetQuery] = useState('');
   const [widgetLoading, setWidgetLoading] = useState(false);
-  const [widgetData, setWidgetData] = useState(() => {
+  const [widgetData, setWidgetData] = useState<{
+    userPrompt: string;
+    dishTitle: string;
+    dishCalo: number | null;
+    dishTime: number | null;
+    protein: number | null;
+    carbs: number | null;
+  }>(() => {
     const first = recipes.length > 0 ? recipes[0] : null;
     return {
       userPrompt: 'Gợi ý món ăn dinh dưỡng phù hợp hôm nay nhé AI!',
       dishTitle: first ? first.title : 'Đang chọn món phù hợp...',
-      dishCalo: first?.macros?.calories || 400,
-      dishTime: first?.cookingTime || 20,
-      protein: first?.macros?.protein || 30,
-      carbs: first?.macros?.carbs || 35,
-      barPercentage: 75,
+      dishCalo: first?.macros.calories ?? null,
+      dishTime: first?.cookingTime ?? null,
+      protein: first?.macros.protein ?? null,
+      carbs: first?.macros.carbs ?? null,
     };
   });
 
@@ -167,10 +183,10 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
       setWidgetData(prev => ({
         ...prev,
         dishTitle: first.title,
-        dishCalo: first.macros?.calories || 400,
-        dishTime: first.cookingTime || 20,
-        protein: first.macros?.protein || 30,
-        carbs: first.macros?.carbs || 35,
+        dishCalo: first.macros.calories,
+        dishTime: first.cookingTime,
+        protein: first.macros.protein,
+        carbs: first.macros.carbs,
       }));
     }
   }, [recipes, widgetData.dishTitle]);
@@ -190,22 +206,20 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
         setWidgetData({
           userPrompt: promptText,
           dishTitle: firstDish.name,
-          dishCalo: dishAny.calories || 420,
-          dishTime: firstDish.cook_time_minutes || 20,
-          protein: Math.round(dishAny.protein_g || 30),
-          carbs: Math.round(dishAny.carbs_g || 35),
-          barPercentage: 85,
+          dishCalo: dishAny.calories ?? null,
+          dishTime: firstDish.cook_time_minutes ?? null,
+          protein: dishAny.protein_g ?? null,
+          carbs: dishAny.carbs_g ?? null,
         });
       } else {
         // Parse from AI text
         setWidgetData({
           userPrompt: promptText,
           dishTitle: reply.content.slice(0, 48) + '...',
-          dishCalo: 380,
-          dishTime: 15,
-          protein: 30,
-          carbs: 35,
-          barPercentage: 75,
+          dishCalo: null,
+          dishTime: null,
+          protein: null,
+          carbs: null,
         });
       }
     } catch {
@@ -214,11 +228,10 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
         setWidgetData({
           userPrompt: promptText,
           dishTitle: fallbackDish.title,
-          dishCalo: fallbackDish.macros?.calories || 400,
-          dishTime: fallbackDish.cookingTime || 20,
-          protein: fallbackDish.macros?.protein || 30,
-          carbs: fallbackDish.macros?.carbs || 35,
-          barPercentage: 75,
+          dishCalo: fallbackDish.macros.calories,
+          dishTime: fallbackDish.cookingTime,
+          protein: fallbackDish.macros.protein,
+          carbs: fallbackDish.macros.carbs,
         });
       }
     } finally {
@@ -226,6 +239,29 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
       setWidgetQuery('');
     }
   };
+
+  const hour = new Date().getHours();
+  const greeting = hour < 11 ? 'Chào buổi sáng' : hour < 14 ? 'Chào buổi trưa' : hour < 18 ? 'Chào buổi chiều' : 'Chào buổi tối';
+  const hasTasteGoal = Boolean(currentUser.dietPreference) || currentUser.targetCalories > 0;
+
+  // Đánh giá của người dùng trong 7 ngày gần nhất (GET /me/ratings)
+  const [recentRatings, setRecentRatings] = useState<Array<{ id: number; stars: number; dishName: string }>>([]);
+  useEffect(() => {
+    if (isGuest) {
+      setRecentRatings([]);
+      return;
+    }
+    let cancelled = false;
+    apiService.me.getMyRatings().then(list => {
+      if (cancelled) return;
+      const since = Date.now() - 7 * 86400000;
+      setRecentRatings((list || [])
+        .filter((r: any) => r?.dish && Date.parse(r.created_at) >= since)
+        .map((r: any) => ({ id: r.id, stars: r.stars, dishName: r.dish.name })));
+    }).catch(() => { if (!cancelled) setRecentRatings([]); });
+    return () => { cancelled = true; };
+  }, [isGuest, currentUser.id]);
+  const likedRecent = recentRatings.filter(r => r.stars >= 4);
 
   const handleNextGoldenMeal = () => {
     setGoldenMealIndex(prev => prev + 1);
@@ -269,7 +305,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
               {/* System Highlights */}
               <div className="grid grid-cols-3 gap-4 pt-6 border-t border-slate-200/80">
                 <div>
-                  <div className="text-xl sm:text-2xl font-black text-slate-900">{recipes.length > 0 ? `${recipes.length}+` : 'Kho món'}</div>
+                  <div className="text-xl sm:text-2xl font-black text-slate-900">{totalRecipes > 0 ? `${totalRecipes} món` : 'Kho món'}</div>
                   <div className="text-xs text-slate-500">Món ăn chuẩn vị</div>
                 </div>
                 <div>
@@ -306,7 +342,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
 
               <div className="space-y-2.5 text-xs">
                 <div className="p-2.5 bg-slate-50 rounded-2xl rounded-tl-xs text-slate-700 leading-relaxed text-[11px]">
-                  Chào bạn! Hôm nay trong tủ lạnh có nguyên liệu gì, hoặc bạn cần thực đơn bao nhiêu calo? Mình gợi ý ngay!
+                  Chào bạn! Hôm nay bạn có nguyên liệu gì, hoặc cần thực đơn bao nhiêu calo? Mình gợi ý ngay!
                 </div>
 
                 <div className="p-2.5 bg-orange-500 text-white rounded-2xl rounded-tr-xs ml-auto max-w-[90%] leading-relaxed font-medium text-[11px]">
@@ -322,17 +358,17 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                   <div className="p-3 bg-slate-50 rounded-2xl rounded-tl-xs border border-slate-200/60 space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="font-bold text-slate-900 text-xs">{widgetData.dishTitle}</span>
-                      <span className="font-bold text-orange-600 text-xs">{widgetData.dishCalo} kcal</span>
+                      <span className="font-bold text-orange-600 text-xs">{formatMetric(widgetData.dishCalo, ' kcal')}</span>
                     </div>
                     <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
                       <div 
                         className="h-full bg-emerald-500 transition-all duration-500" 
-                        style={{ width: `${widgetData.barPercentage}%` }}
+                        style={{ width: `${caloPercent(widgetData.dishCalo)}%` }}
                       />
                     </div>
                     <div className="flex justify-between text-[11px] text-slate-500 font-medium">
-                      <span>Đạm: {widgetData.protein}g • Tinh bột: {widgetData.carbs}g</span>
-                      <span>⏱ {widgetData.dishTime} phút</span>
+                      <span>Đạm: {formatMetric(widgetData.protein, 'g')} • Tinh bột: {formatMetric(widgetData.carbs, 'g')}</span>
+                      <span>⏱ {formatMetric(widgetData.dishTime)} phút</span>
                     </div>
                   </div>
                 )}
@@ -351,12 +387,6 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                   className="px-2 py-1 bg-slate-100 hover:bg-orange-50 hover:text-orange-600 rounded-lg text-slate-600 font-medium transition-colors cursor-pointer"
                 >
                   Ăn chay giàu đạm →
-                </button>
-                <button
-                  onClick={() => handleWidgetAsk('Vét tủ lạnh: Tủ lạnh còn cá hồi và măng tây')}
-                  className="px-2 py-1 bg-slate-100 hover:bg-orange-50 hover:text-orange-600 rounded-lg text-slate-600 font-medium transition-colors cursor-pointer"
-                >
-                  Vét tủ lạnh →
                 </button>
               </div>
 
@@ -403,17 +433,17 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                   THỰC ĐƠN CÁ NHÂN HÓA THỜI GIAN THỰC
                 </span>
                 <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200">
-                  Mục tiêu: {currentUser.dietPreference} • {currentUser.targetCalories} kcal/ngày
+                  Mục tiêu: {currentUser.dietPreference || 'Chưa thiết lập'} • {currentUser.targetCalories > 0 ? currentUser.targetCalories : '—'} kcal/ngày
                 </span>
               </div>
               <div className="flex items-center gap-3.5 mt-2">
                 <ChefLogo3D size="md" />
                 <div>
                   <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-                    Chào buổi trưa, {currentUser.name}! 👋
+                    {greeting}, {currentUser.name}! 👋
                   </h1>
                   <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-                    Hệ thống AI vừa tính toán lại dinh dưỡng theo nhịp độ buổi sáng của bạn. Sẵn sàng cho một bữa trưa tràn hương vị!
+                    ChefAI đã chọn sẵn các món phù hợp với khẩu vị và mục tiêu của bạn. Sẵn sàng cho một bữa trưa tràn hương vị!
                   </p>
                 </div>
               </div>
@@ -422,7 +452,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
             <div className="flex items-center gap-2.5">
               <div className="px-3.5 py-1.5 rounded-xl bg-white border border-slate-200 text-xs text-slate-700 shadow-2xs flex items-center gap-2">
                 <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Hồ sơ khẩu vị: <strong className="text-emerald-600 font-bold">{currentUser.isLoggedIn ? 'Đã kích hoạt' : 'Chưa lưu'}</strong></span>
+                <span>Hồ sơ khẩu vị: <strong className="text-emerald-600 font-bold">{hasTasteGoal ? 'Đã kích hoạt' : 'Chưa lưu'}</strong></span>
               </div>
               <button
                 onClick={onGoToProfile}
@@ -445,10 +475,9 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                   <span className="text-[10px] font-extrabold uppercase tracking-widest bg-white/20 px-2 py-0.5 rounded-md">
                     AI INSIGHT THỜI GIAN THỰC
                   </span>
-                  <span className="text-[11px] text-orange-100">Đã nạp: 650 kcal (Sáng)</span>
                 </div>
                 <p className="text-xs sm:text-sm font-medium leading-relaxed">
-                  Hôm nay bạn cần nạp thêm <strong className="font-extrabold underline">45g Protein</strong> và <strong className="font-extrabold underline">chất béo Omega-3</strong> cho bữa trưa để hỗ trợ phục hồi cơ bắp. ChefAI đã chuẩn bị sẵn 4 đề xuất hoàn hảo.
+                  Dựa trên hồ sơ khẩu vị và mục tiêu <strong className="font-extrabold underline">{currentUser.targetCalories > 0 ? currentUser.targetCalories : '—'} kcal/ngày</strong>, ChefAI đã chuẩn bị sẵn {lunchCount} đề xuất hoàn hảo cho bữa trưa.
                 </p>
               </div>
             </div>
@@ -460,17 +489,17 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
             </button>
           </div>
 
-          {/* Golden Recommendation of the Day + Daily Macro Progress Card */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Golden Recommendation of the Day */}
+          <div className="grid grid-cols-1 gap-6">
             {/* 2 Cols: Golden Recommendation Card */}
             {currentGoldenMeal ? (
-              <div className="lg:col-span-2 bg-white rounded-3xl p-6 sm:p-7 border border-slate-200/80 shadow-xs relative overflow-hidden group">
+              <div className="bg-white rounded-3xl p-6 sm:p-7 border border-slate-200/80 shadow-xs relative overflow-hidden group">
                 <div className="flex flex-col sm:flex-row gap-6">
                   <div className="sm:w-1/2 space-y-4">
                     <div className="flex items-center justify-between">
                       <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-200 flex items-center gap-1.5">
                         <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                        {currentGoldenMeal.matchPercentage || 95}% Khớp Khẩu Vị
+                        {currentGoldenMeal.matchPercentage != null ? `${currentGoldenMeal.matchPercentage}%` : '—'} Khớp Khẩu Vị
                       </span>
                       <span className="text-xs font-bold text-orange-600 uppercase tracking-wider">
                         Món gợi ý vàng trưa nay
@@ -508,19 +537,19 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                     <div className="grid grid-cols-4 gap-2 py-3 px-3.5 bg-slate-50 rounded-2xl border border-slate-100 text-center">
                       <div>
                         <div className="text-[10px] text-slate-400 font-bold uppercase">Năng lượng</div>
-                        <div className="text-sm sm:text-base font-extrabold text-slate-900">{currentGoldenMeal.macros?.calories || 400} <span className="text-[10px] font-normal text-slate-500">kcal</span></div>
+                        <div className="text-sm sm:text-base font-extrabold text-slate-900">{formatMetric(currentGoldenMeal.macros.calories)} <span className="text-[10px] font-normal text-slate-500">kcal</span></div>
                       </div>
                       <div>
                         <div className="text-[10px] text-slate-400 font-bold uppercase">Protein</div>
-                        <div className="text-sm sm:text-base font-extrabold text-orange-600">{currentGoldenMeal.macros?.protein || 25}g</div>
+                        <div className="text-sm sm:text-base font-extrabold text-orange-600">{formatMetric(currentGoldenMeal.macros.protein, 'g')}</div>
                       </div>
                       <div>
                         <div className="text-[10px] text-slate-400 font-bold uppercase">Carbs</div>
-                        <div className="text-sm sm:text-base font-extrabold text-slate-900">{currentGoldenMeal.macros?.carbs || 35}g</div>
+                        <div className="text-sm sm:text-base font-extrabold text-slate-900">{formatMetric(currentGoldenMeal.macros.carbs, 'g')}</div>
                       </div>
                       <div>
                         <div className="text-[10px] text-slate-400 font-bold uppercase">Chất béo</div>
-                        <div className="text-sm sm:text-base font-extrabold text-slate-900">{currentGoldenMeal.macros?.fat || 12}g</div>
+                        <div className="text-sm sm:text-base font-extrabold text-slate-900">{formatMetric(currentGoldenMeal.macros.fat, 'g')}</div>
                       </div>
                     </div>
 
@@ -559,104 +588,16 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                     />
                     <div className="absolute top-3 right-3 px-2.5 py-1 rounded-full bg-slate-900/80 backdrop-blur-xs text-white text-xs font-bold flex items-center gap-1">
                       <Clock className="w-3.5 h-3.5 text-orange-400" />
-                      {currentGoldenMeal.cookingTime || 20} phút nấu
+                      {formatMetric(currentGoldenMeal.cookingTime)} phút nấu
                     </div>
                   </div>
                 </div>
               </div>
             ) : (
-              <div className="lg:col-span-2 p-8 text-center bg-white rounded-3xl border border-slate-200 text-xs text-slate-400 flex items-center justify-center">
+              <div className="p-8 text-center bg-white rounded-3xl border border-slate-200 text-xs text-slate-400 flex items-center justify-center">
                 Đang tải món ăn từ máy chủ...
               </div>
             )}
-
-            {/* 1 Col: Daily Nutrition Donut Progress Card */}
-            <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs flex flex-col justify-between space-y-4">
-              <div>
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                    Tiến trình nạp mục tiêu
-                  </h4>
-                  <button onClick={onGoToProfile} className="text-slate-400 hover:text-slate-600 cursor-pointer">
-                    <RefreshCw className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                {/* Donut Chart Simulation */}
-                <div className="flex items-center justify-center py-4">
-                  <div className="relative w-36 h-36 flex items-center justify-center">
-                    <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
-                      <circle
-                        cx="50"
-                        cy="50"
-                        r="40"
-                        className="stroke-slate-100"
-                        strokeWidth="12"
-                        fill="transparent"
-                      />
-                      <circle
-                        cx="50"
-                        cy="50"
-                        r="40"
-                        className="stroke-orange-500"
-                        strokeWidth="12"
-                        strokeDasharray="251.2"
-                        strokeDashoffset={251.2 * (1 - 0.53)}
-                        strokeLinecap="round"
-                        fill="transparent"
-                      />
-                    </svg>
-                    <div className="absolute text-center">
-                      <span className="text-2xl font-black text-slate-900">53%</span>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase">
-                        1,110 / {currentUser.targetCalories} kcal
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Progress Lines */}
-                <div className="space-y-2 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-600 flex items-center gap-1.5 font-medium">
-                      <span className="w-2.5 h-2.5 rounded-full bg-orange-500" />
-                      Protein (Đạm sạch)
-                    </span>
-                    <span className="font-bold text-slate-900">{currentUser.todayConsumedProtein}g / {currentUser.targetProtein}g (61%)</span>
-                  </div>
-                  <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                    <div className="w-[61%] h-full bg-orange-500 rounded-full" />
-                  </div>
-
-                  <div className="flex items-center justify-between pt-1">
-                    <span className="text-slate-600 flex items-center gap-1.5 font-medium">
-                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                      Chất xơ tự nhiên
-                    </span>
-                    <span className="font-bold text-slate-900">22g / 30g (73%)</span>
-                  </div>
-                  <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                    <div className="w-[73%] h-full bg-emerald-500 rounded-full" />
-                  </div>
-
-                  <div className="flex items-center justify-between pt-1">
-                    <span className="text-slate-600 flex items-center gap-1.5 font-medium">
-                      <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-                      Lượng nước uống
-                    </span>
-                    <span className="font-bold text-slate-900">{currentUser.todayConsumedWaterLiters}L / {currentUser.todayTargetWaterLiters}L (72%)</span>
-                  </div>
-                  <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                    <div className="w-[72%] h-full bg-blue-500 rounded-full" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="p-2.5 bg-emerald-50 rounded-xl border border-emerald-200/60 text-[11px] text-emerald-800 flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>Bữa trưa này sẽ hoàn tất 95% mục tiêu Protein trong ngày của bạn.</span>
-              </div>
-            </div>
           </div>
         </section>
       )}
@@ -681,7 +622,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                   activeMealTab === 'lunch' ? 'bg-white text-orange-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Bữa trưa hôm nay (4)
+                Bữa trưa
               </button>
               <button
                 onClick={() => setActiveMealTab('dinner')}
@@ -689,7 +630,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                   activeMealTab === 'dinner' ? 'bg-white text-orange-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Bữa tối nhẹ bụng (4)
+                Bữa tối nhẹ bụng ({dinnerCount})
               </button>
               <button
                 onClick={() => setActiveMealTab('snack')}
@@ -697,12 +638,12 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                   activeMealTab === 'snack' ? 'bg-white text-orange-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Snack & Năng lượng (3)
+                Snack & Năng lượng
               </button>
             </div>
           ) : (
             <div className="text-xs text-slate-400">
-              Hiển thị 4 món gợi ý cho Khách
+              Hiển thị {displayedMeals.length} món gợi ý cho Khách
             </div>
           )}
         </div>
@@ -743,14 +684,14 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   />
                   <div className="absolute top-3 left-3 px-2 py-0.5 rounded-lg bg-emerald-500 text-white text-[11px] font-bold shadow-xs">
-                    {recipe.matchPercentage}% Match
+                    {recipe.matchPercentage != null ? `${recipe.matchPercentage}%` : '—'} Match
                   </div>
                   <div className="absolute top-3 right-3 p-1.5 rounded-full bg-white/80 backdrop-blur-xs text-slate-600 hover:text-orange-600 transition-colors">
                     <Bookmark className="w-4 h-4" />
                   </div>
                   <div className="absolute bottom-3 left-3 px-2 py-0.5 rounded-full bg-slate-900/75 backdrop-blur-xs text-white text-[11px] font-semibold flex items-center gap-1">
                     <Clock className="w-3 h-3 text-orange-400" />
-                    {recipe.cookingTime} phút
+                    {formatMetric(recipe.cookingTime)} phút
                   </div>
                 </div>
 
@@ -759,16 +700,16 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                     {recipe.title}
                   </h4>
                   <div className="flex items-center gap-2 text-xs font-semibold">
-                    <span className="text-orange-600">{recipe.macros.calories} kcal</span>
+                    <span className="text-orange-600">{formatMetric(recipe.macros.calories, ' kcal')}</span>
                     <span className="text-slate-300">•</span>
-                    <span className="text-slate-600">{recipe.macros.protein}g Protein</span>
+                    <span className="text-slate-600">{formatMetric(recipe.macros.protein, 'g')} Protein</span>
                   </div>
                 </div>
               </div>
 
               <div className="px-4 pb-4 pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
                 <span className="text-slate-500 font-medium">
-                  {recipe.difficulty} làm • {recipe.category}
+                  {recipe.difficulty || '—'} làm • {recipe.category}
                 </span>
                 <span className="font-bold text-orange-600 flex items-center gap-0.5 group-hover:translate-x-0.5 transition-transform">
                   Xem công thức
@@ -780,61 +721,31 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
         </div>
       </section>
 
-      {/* ======================= WEEKLY BEHAVIOR & FRIDGE ZERO-WASTE ======================= */}
+      {/* ======================= WEEKLY BEHAVIOR ======================= */}
       {!isGuest ? (
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
-          {/* Left: 7-Day behavior taste insight */}
+        <section className="pt-4">
+          {/* 7-Day behavior taste insight */}
           <div className="bg-gradient-to-br from-orange-50/70 to-amber-50/50 rounded-3xl p-6 border border-orange-200/70 space-y-3">
             <div className="flex items-center gap-2 text-xs font-bold text-orange-800 uppercase tracking-wider">
               <Sparkles className="w-4 h-4 text-orange-500" />
               Khám Phá Dựa Trên Hành Vi 7 Ngày Qua Của Bạn
             </div>
             <h3 className="text-base sm:text-lg font-bold text-slate-900">
-              Gu ẩm thực tuần: Chuộng bơ tỏi áp chảo & xốt chanh tươi
+              Gu ẩm thực tuần: {likedRecent.length > 0 ? likedRecent.slice(0, 3).map(r => r.dishName).join(', ') : 'chưa có dữ liệu'}
             </h3>
             <p className="text-xs text-slate-600 leading-relaxed">
-              Bạn đã chấm 5 sao cho 3 món có kỹ thuật áp chảo bơ tỏi và sốt chua thanh (lemon vinaigrette). ChefAI đã tự động tăng trọng số các món Địa Trung Hải thanh nhẹ trong danh sách gợi ý mỗi trưa.
+              {recentRatings.length > 0
+                ? `Bạn đã đánh giá ${recentRatings.length} món trong 7 ngày qua, trong đó ${likedRecent.length} món từ 4 sao trở lên.`
+                : 'Bạn chưa đánh giá món nào trong 7 ngày qua.'}
             </p>
             <div className="pt-2 flex items-center justify-between text-xs">
-              <span className="font-bold text-slate-700">Tỉ lệ hài lòng công thức: <strong className="text-emerald-600">98.4%</strong></span>
+              <span className="font-bold text-slate-700">
+                {personalRecipes.length > 0 && (
+                  <>Đang gợi ý <strong className="text-emerald-600">{personalRecipes.length}</strong> món hợp khẩu vị của bạn</>
+                )}
+              </span>
               <button onClick={onGoToProfile} className="font-bold text-orange-600 hover:underline cursor-pointer">
                 Xem phân tích khẩu vị chi tiết →
-              </button>
-            </div>
-          </div>
-
-          {/* Right: Anti-waste fridge alert */}
-          <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-3 flex flex-col justify-between">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-                  <Flame className="w-4 h-4 text-orange-500" />
-                  CHỐNG LÃNG PHÍ TỦ LẠNH
-                </span>
-                <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-red-100 text-red-700">
-                  Ưu tiên hôm nay
-                </span>
-              </div>
-              <h4 className="text-base font-bold text-slate-900">
-                200g Măng tây tươi còn dư
-              </h4>
-              <p className="text-xs text-slate-500 leading-relaxed">
-                Được lưu trữ trong tủ lạnh từ 3 ngày trước. Đề xuất kết hợp ngay cùng món <strong className="text-slate-800 font-semibold">Cá hồi sốt bơ tỏi</strong> ở trên để đạt độ giòn ngon nhất trước ngày mai!
-              </p>
-            </div>
-
-            <div className="pt-2 flex items-center justify-between">
-              <button
-                onClick={() => onOpenChatWithPrompt('Tủ lạnh còn 200g măng tây tươi, hãy gợi ý món xào hoặc áp chảo nhanh nhất')}
-                className="px-4 py-2 bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-bold rounded-xl transition-colors cursor-pointer"
-              >
-                Hỏi Chatbot nấu măng tây →
-              </button>
-              <button
-                onClick={onGoToPlanner}
-                className="text-xs font-semibold text-slate-500 hover:text-slate-800 cursor-pointer"
-              >
-                Kiểm tra tủ lạnh (6 món)
               </button>
             </div>
           </div>
@@ -846,11 +757,13 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
             <div className="flex items-center gap-2">
               <Lock className="w-5 h-5 text-orange-400" />
               <h3 className="text-lg sm:text-xl font-bold">
-                Bạn đang xem 4 trong số 50,000+ công thức miễn phí
+                {totalRecipes > 0
+                  ? `Bạn đang xem ${displayedMeals.length} trong số ${totalRecipes} công thức miễn phí`
+                  : 'Bạn đang xem bản xem trước thư viện công thức'}
               </h3>
             </div>
             <p className="text-xs sm:text-sm text-slate-300 max-w-xl">
-              Đăng ký tài khoản để xem chi tiết từng bước nấu có canh thời gian, video 4K chuẩn Chef và đề xuất thay thế nguyên liệu theo AI.
+              Đăng ký tài khoản để xem chi tiết từng bước nấu có canh thời gian và đề xuất thay thế nguyên liệu theo AI.
             </p>
           </div>
           <button
@@ -867,7 +780,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
         <div className="p-6 bg-white rounded-3xl border border-slate-200/80 shadow-xs flex items-center justify-between gap-4">
           <div>
             <h4 className="text-sm font-bold text-slate-900">Muốn biến tấu món ăn hôm nay?</h4>
-            <p className="text-xs text-slate-500 mt-1">Nhờ Trợ lý Bếp AI thay thế nguyên liệu nếu tủ lạnh đang thiếu đồ.</p>
+            <p className="text-xs text-slate-500 mt-1">Nhờ Trợ lý Bếp AI thay thế nguyên liệu nếu đang thiếu đồ.</p>
           </div>
           <button
             onClick={() => onOpenChatWithPrompt('Hôm nay tôi muốn nấu món gì đó nhanh dưới 20 phút từ nguyên liệu sẵn có')}
