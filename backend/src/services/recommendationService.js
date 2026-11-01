@@ -105,18 +105,22 @@ export async function getPersonalizedRecommendations({ userId, limit = 12, categ
   let profile = { completeness: 0, allergen_group_ids: [], disliked_ingredient_ids: [] };
   let tasteVector = null;
   let favSet = new Set();
+  let lowRatedSet = new Set();
   let hasInteractions = false;
   if (userId) {
-    const [p, vecRes, favs, ratings, views] = await Promise.all([
+    const [p, vecRes, favs, ratings, views, lowRated] = await Promise.all([
       fetchTasteProfile(userId),
       supabaseAdmin.from('user_profiles').select('taste_vector').eq('user_id', userId).maybeSingle(),
       supabaseAdmin.from('favorites').select('dish_id').eq('user_id', userId),
       supabaseAdmin.from('ratings').select('dish_id', { count: 'exact', head: true }).eq('user_id', userId),
       supabaseAdmin.from('view_history').select('dish_id', { count: 'exact', head: true }).eq('user_id', userId),
+      supabaseAdmin.from('ratings').select('dish_id').eq('user_id', userId).lte('stars', 2),
     ]);
     profile = p;
     tasteVector = parseVector(vecRes.data?.taste_vector);
     favSet = new Set((favs.data || []).map((f) => f.dish_id));
+    // Món người dùng đã chấm từ 2★ trở xuống không được gợi ý lại (FR-26)
+    lowRatedSet = new Set((lowRated.data || []).map((r) => r.dish_id));
     hasInteractions = favSet.size > 0 || (ratings.count || 0) > 0 || (views.count || 0) > 0;
   }
 
@@ -134,7 +138,9 @@ export async function getPersonalizedRecommendations({ userId, limit = 12, categ
     personalized ? getDishEmbeddings() : Promise.resolve(new Map()),
   ]);
   const candidates = allDishes.filter((d) =>
-    (!categoryKey || d.category_normalized === categoryKey) && !(d.dish_ingredients || []).some((di) => forbidden.has(Number(di.ingredient_id))));
+    (!categoryKey || d.category_normalized === categoryKey)
+    && !lowRatedSet.has(d.id)
+    && !(d.dish_ingredients || []).some((di) => forbidden.has(Number(di.ingredient_id))));
 
   // 3. Chấm điểm
   const maxPop = Math.max(1, ...candidates.map((d) => (d.favorite_count || 0) + (d.rating_count || 0)));

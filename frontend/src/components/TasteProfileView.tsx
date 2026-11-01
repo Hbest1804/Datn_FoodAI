@@ -318,7 +318,7 @@ export const TasteProfileView: React.FC<TasteProfileViewProps> = ({
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-300 max-w-5xl mx-auto pb-16">
+    <div className="space-y-8 animate-in fade-in duration-300 pb-16">
       {/* ── Top Hero Header Card ────────────────────────────────────────────── */}
       <div className="bg-gradient-to-r from-orange-500 via-amber-500 to-orange-600 rounded-3xl p-6 sm:p-8 text-white shadow-lg shadow-orange-500/15 relative overflow-hidden">
         <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-white/10 rounded-full blur-2xl pointer-events-none" />

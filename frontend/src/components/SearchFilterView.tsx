@@ -310,7 +310,7 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
       </div>
 
       {/* Main Grid: Left Filters, Right Results */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-4 2xl:grid-cols-5 gap-8">
         {/* Left 1 Col: Filter Sidebar */}
         <div className="space-y-6 bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs h-fit">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100">
@@ -548,7 +548,7 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
         </div>
 
         {/* Right 3 Cols: Results Grid */}
-        <div className="lg:col-span-3 space-y-6">
+        <div className="lg:col-span-3 2xl:col-span-4 space-y-6">
           {/* Top Sort & Count Bar */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs">
             <div className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-2">
@@ -635,7 +635,7 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
               </button>
             </div>
           ) : (
-            <div className={`grid gap-6 ${viewLayout === 'grid' ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'}`}>
+            <div className={`grid gap-6 ${viewLayout === 'grid' ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4' : 'grid-cols-1'}`}>
               {displayRecipes.map(recipe => (
                 <div
                   key={recipe.id}

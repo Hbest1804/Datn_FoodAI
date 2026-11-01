@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   BarChart3,
   UtensilsCrossed,
@@ -47,6 +48,7 @@ import { normalizeDish, formatVND, formatMetric } from '../utils/dishUtils';
 import { toast, showConfirm, showPrompt } from './NotificationModal';
 import type { DishImportResult } from '../api/admin.api';
 import RecipeImportModal from './RecipeImportModal';
+import { ADMIN_TABS, type AdminTab } from './adminTabs';
 
 // Tên hiển thị của các cột trong file nhập món
 const IMPORT_FIELD_LABELS: Record<string, string> = {
@@ -117,6 +119,9 @@ function buildHourlyCurve(hourly: Array<{ hour: number; count: number }>) {
   return { d, total: counts.reduce((a, b) => a + b, 0), lunch: peakIn(11, 13), dinner: peakIn(17, 20) };
 }
 
+// Số món mỗi trang trong bảng công thức
+const RECIPES_PER_PAGE = 15;
+
 interface AdminStudioViewProps {
   onBackToUserMode: () => void;
   recipes: Recipe[];
@@ -128,7 +133,16 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
   recipes: initialRecipes,
   onOpenRecipe,
 }) => {
-  const [adminTab, setAdminTab] = useState<'overview' | 'dishes' | 'recipes' | 'categories' | 'users' | 'chatbot'>('overview');
+  // Tab đang mở lấy từ ?tab= trên URL để Sidebar chung điều hướng được và F5 vẫn giữ đúng tab
+  const [searchParams, setSearchParams] = useSearchParams();
+  const adminTab: AdminTab = ADMIN_TABS.includes(searchParams.get('tab') as AdminTab)
+    ? (searchParams.get('tab') as AdminTab)
+    : 'overview';
+  const setAdminTab = (tab: AdminTab) => setSearchParams(prev => {
+    const next = new URLSearchParams(prev);
+    next.set('tab', tab);
+    return next;
+  });
 
   // Stats state
   const [stats, setStats] = useState<AdminStats>(DEFAULT_ADMIN_STATS);
@@ -205,6 +219,14 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
   }>>([]);
   const [recipeSteps, setRecipeSteps] = useState<Array<{ step_number: number; title: string; instruction: string; duration_minutes: number }>>([]);
   const [loadingRecipe, setLoadingRecipe] = useState(false);
+  // Ô tìm kiếm và bộ lọc danh mục để chọn món ở tab Công thức (lọc tại chỗ, không gọi API)
+  const [recipeSearch, setRecipeSearch] = useState('');
+  const [recipeCategoryFilter, setRecipeCategoryFilter] = useState('');
+  const [recipeStatusFilter, setRecipeStatusFilter] = useState<'all' | 'has' | 'missing'>('all');
+  const [recipePage, setRecipePage] = useState(1);
+  // Form thêm/sửa công thức mở dạng hộp thoại khi chọn một món trong bảng
+  const [recipeFormOpen, setRecipeFormOpen] = useState(false);
+  const [recipeFormDish, setRecipeFormDish] = useState<Recipe | null>(null);
   const [savingRecipe, setSavingRecipe] = useState(false);
   const [recipeNotice, setRecipeNotice] = useState('');
   const [recipeError, setRecipeError] = useState('');
@@ -350,10 +372,6 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
         page++;
       } while (page <= totalPages);
       setRecipeDishOptions(all);
-      if (!selectedRecipeDishId && all.length > 0) {
-        setSelectedRecipeDishId(all[0].id);
-        loadDishRecipe(all[0].id);
-      }
     } catch {
       // Keep initialRecipes fallback
     }
@@ -536,18 +554,18 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
     }
   };
 
-  const handleSaveRecipe = async (publish = false) => {
+  const handleSaveRecipe = async (publish = false): Promise<boolean> => {
     if (!selectedRecipeDishId) {
       toast.warning('Vui lòng chọn món ăn trước.');
-      return;
+      return false;
     }
     if (recipeIngredients.length === 0) {
       toast.warning('Công thức cần có ít nhất 1 nguyên liệu.');
-      return;
+      return false;
     }
-    if (recipeSteps.length === 0) {
-      toast.warning('Công thức cần có ít nhất 1 bước chế biến.');
-      return;
+    if (recipeSteps.length === 0 || recipeSteps.some(st => !st.instruction.trim())) {
+      toast.warning('Công thức cần có ít nhất 1 bước chế biến và các bước không được để trống.');
+      return false;
     }
     setSavingRecipe(true);
     setRecipeError('');
@@ -573,41 +591,75 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
       toast.success(msg);
       setTimeout(() => setRecipeNotice(''), 3500);
       loadRecipeDishOptions();
+      return true;
     } catch (err: any) {
       setRecipeError(err.message || 'Lỗi khi lưu công thức');
       toast.error(err.message || 'Lỗi khi lưu công thức');
+      return false;
     } finally {
       setSavingRecipe(false);
     }
   };
 
-  const handleDeleteRecipe = async () => {
-    if (!selectedRecipeDishId) return;
+  const handleDeleteRecipe = async (dishId: string = selectedRecipeDishId): Promise<boolean> => {
+    if (!dishId) return false;
+    const dishName = recipeDishOptions.find(d => d.id === dishId)?.title;
     const ok = await showConfirm({
       title: 'Xóa công thức món ăn',
-      message: 'Bạn có chắc muốn xóa công thức của món này? Hệ thống sẽ tự động chuyển món ăn sang trạng thái ẩn khỏi người dùng.',
+      message: `Bạn có chắc muốn xóa công thức của món${dishName ? ` "${dishName}"` : ' này'}? Hệ thống sẽ tự động chuyển món ăn sang trạng thái ẩn khỏi người dùng.`,
       confirmText: 'Xóa công thức',
       cancelText: 'Giữ lại',
       variant: 'danger',
     });
-    if (!ok) return;
+    if (!ok) return false;
     try {
       setSavingRecipe(true);
-      await apiService.admin.deleteRecipe(selectedRecipeDishId);
-      setRecipeIngredients([]);
-      setRecipeSteps([]);
+      await apiService.admin.deleteRecipe(dishId);
+      if (dishId === selectedRecipeDishId) {
+        setRecipeIngredients([]);
+        setRecipeSteps([]);
+      }
       setRecipeNotice('Đã xóa công thức thành công và ẩn món ăn.');
       toast.success('Đã xóa công thức thành công và chuyển món ăn sang trạng thái ẩn.');
       setTimeout(() => setRecipeNotice(''), 3500);
       loadRecipeDishOptions();
+      return true;
     } catch (err: any) {
       setRecipeError(err.message || 'Lỗi khi xóa công thức');
       toast.error(err.message || 'Lỗi khi xóa công thức');
+      return false;
     } finally {
       setSavingRecipe(false);
     }
   };
 
+
+  // Mở form cho một món: món đã có công thức thì tải về để sửa, chưa có thì bắt đầu form trống
+  const openRecipeForm = (dish: Recipe) => {
+    setSelectedRecipeDishId(dish.id);
+    setRecipeFormDish(dish);
+    setNewIngName('');
+    setNewIngQty('');
+    setNewStepInstruction('');
+    setRecipeError('');
+    setRecipeNotice('');
+    if (dish.has_recipe) {
+      loadDishRecipe(dish.id);
+    } else {
+      setRecipeServings(dish.servings || 2);
+      setRecipeIngredients([]);
+      setRecipeSteps([]);
+    }
+    setRecipeFormOpen(true);
+  };
+
+  const updateIngredient = (index: number, patch: { quantity?: string; unit?: string }) => {
+    setRecipeIngredients(prev => prev.map((ing, i) => (i === index ? { ...ing, ...patch } : ing)));
+  };
+
+  const updateStep = (index: number, instruction: string) => {
+    setRecipeSteps(prev => prev.map((st, i) => (i === index ? { ...st, instruction } : st)));
+  };
 
   const handleAddIngredient = () => {
     if (!newIngName.trim()) return;
@@ -1083,7 +1135,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
       </div>
 
       {/* Admin Content Area */}
-      <div className="flex-1 space-y-8">
+      <div className="flex-1 min-w-0 space-y-8">
         {/* ===================== TAB 1: SYSTEM OVERVIEW & STATS ===================== */}
         {adminTab === 'overview' && (
           <div className="space-y-6">
@@ -1516,9 +1568,8 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                               </button>
                               <button
                                 onClick={() => {
-                                  setSelectedRecipeDishId(r.id);
-                                  loadDishRecipe(r.id);
                                   setAdminTab('recipes');
+                                  openRecipeForm(r);
                                 }}
                                 className="p-1.5 hover:bg-blue-50 rounded-lg text-slate-500 hover:text-blue-600 cursor-pointer transition-colors"
                                 title="Soạn công thức chi tiết cho món này"
@@ -1603,279 +1654,445 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
         )}
 
         {/* ===================== TAB: RECIPE MANAGEMENT ===================== */}
-        {adminTab === 'recipes' && (
+        {adminTab === 'recipes' && (() => {
+          const recipeCategories = Array.from(new Set(recipeDishOptions.map(d => d.category).filter(Boolean)));
+          const keyword = recipeSearch.trim().toLowerCase();
+          const withRecipeCount = recipeDishOptions.filter(d => d.has_recipe).length;
+          const filteredDishOptions = recipeDishOptions.filter(d =>
+            (!recipeCategoryFilter || d.category === recipeCategoryFilter) &&
+            (recipeStatusFilter === 'all' || (recipeStatusFilter === 'has') === Boolean(d.has_recipe)) &&
+            (!keyword || d.title.toLowerCase().includes(keyword))
+          );
+          const totalPages = Math.max(1, Math.ceil(filteredDishOptions.length / RECIPES_PER_PAGE));
+          const page = Math.min(recipePage, totalPages);
+          const pageItems = filteredDishOptions.slice((page - 1) * RECIPES_PER_PAGE, page * RECIPES_PER_PAGE);
+
+          const statusButton = (value: 'all' | 'has' | 'missing', label: string, count: number) => (
+            <button
+              onClick={() => { setRecipeStatusFilter(value); setRecipePage(1); }}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-colors cursor-pointer ${
+                recipeStatusFilter === value ? 'bg-orange-500 text-white shadow-xs' : 'bg-surface text-slate-600 hover:bg-orange-50 hover:text-orange-600'
+              }`}
+            >
+              {label} ({count})
+            </button>
+          );
+
+          return (
           <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            {/* Tiêu đề */}
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
               <div>
                 <span className="text-xs font-bold text-orange-600 uppercase tracking-wider flex items-center gap-1.5">
                   <BookOpen className="w-3.5 h-3.5" />
-                  QUẢN LÝ CÔNG THỨC CHI TIẾT
+                  Quản lý công thức
                 </span>
-                <h2 className="text-2xl font-black text-slate-900 tracking-tight mt-0.5">
-                  Thiết Lập Công Thức & Quy Trình Chế Biến
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Quản lý định lượng nguyên liệu, đơn vị, trạng thái bắt buộc và các bước nấu theo chuẩn hệ thống.
+                <h2 className="text-2xl font-bold text-ink mt-0.5">Công Thức Nấu Của Toàn Bộ Món Ăn</h2>
+                <p className="text-xs text-slate-500 mt-1">
+                  Chọn một món để thêm, sửa hoặc xóa công thức (nguyên liệu, định lượng và các bước chế biến).
                 </p>
               </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={() => setShowRecipeImportModal(true)}
-                  title="Nhập nguyên liệu và các bước cho nhiều món cùng lúc từ file Excel (.xlsx)"
-                  className="px-3.5 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
-                >
-                  <Upload className="w-3.5 h-3.5" />
-                  Nhập công thức từ file
-                </button>
-                <button
-                  onClick={handleDeleteRecipe}
-                  disabled={savingRecipe || !selectedRecipeDishId}
-                  className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  Xóa công thức
-                </button>
-                <button
-                  onClick={() => handleSaveRecipe(false)}
-                  disabled={savingRecipe || !selectedRecipeDishId}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Check className="w-3.5 h-3.5 text-slate-600" />
-                  {savingRecipe ? 'Đang lưu...' : 'Lưu công thức'}
-                </button>
-                <button
-                  onClick={() => handleSaveRecipe(true)}
-                  disabled={savingRecipe || !selectedRecipeDishId}
-                  className="px-5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Eye className="w-3.5 h-3.5" />
-                  {savingRecipe ? 'Đang lưu...' : 'Lưu & Công khai món'}
-                </button>
-              </div>
+              <button
+                onClick={() => setShowRecipeImportModal(true)}
+                title="Nhập nguyên liệu và các bước cho nhiều món cùng lúc từ file Excel (.xlsx)"
+                className="px-4 py-2.5 bg-white hover:bg-surface text-ink text-xs font-bold rounded-xl shadow-xs border border-line transition-colors cursor-pointer flex items-center gap-2 shrink-0"
+              >
+                <Upload className="w-4 h-4 text-emerald-600" />
+                Nhập công thức từ file .xlsx
+              </button>
             </div>
 
-            {/* Notifications */}
-            {recipeNotice && (
-              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs font-bold text-emerald-800 flex items-center gap-2 animate-in fade-in">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                {recipeNotice}
-              </div>
-            )}
-            {recipeError && (
-              <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-xs font-bold text-amber-800 flex items-center gap-2 animate-in fade-in">
-                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                {recipeError}
-              </div>
-            )}
-
-            {/* Dish selector & Servings */}
-            <div className="p-5 bg-white rounded-3xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex-1">
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Chọn món ăn cần chỉnh sửa công thức:
-                </label>
-                <select
-                  value={selectedRecipeDishId}
-                  onChange={(e) => {
-                    setSelectedRecipeDishId(e.target.value);
-                    loadDishRecipe(e.target.value);
-                  }}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-orange-500 cursor-pointer"
-                >
-                  {recipeDishOptions.map(d => (
-                    <option key={d.id} value={d.id}>
-                      {d.title}{d.category ? ` (${d.category})` : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="w-full md:w-48">
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Khẩu phần ăn (người):
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  max="20"
-                  value={recipeServings}
-                  onChange={(e) => setRecipeServings(parseInt(e.target.value, 10) || 1)}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-orange-500 text-center"
-                />
-              </div>
+            {/* Thẻ số liệu */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {[
+                { label: 'Tổng số món', value: recipeDishOptions.length, icon: <UtensilsCrossed className="w-5 h-5" />, tone: 'text-orange-600 bg-orange-50' },
+                { label: 'Đã có công thức', value: withRecipeCount, icon: <CheckCircle2 className="w-5 h-5" />, tone: 'text-emerald-600 bg-emerald-50' },
+                { label: 'Chưa có công thức', value: recipeDishOptions.length - withRecipeCount, icon: <AlertTriangle className="w-5 h-5" />, tone: 'text-rose-600 bg-rose-50' },
+              ].map(card => (
+                <div key={card.label} className="bg-white rounded-2xl p-5 shadow-[0_1px_2px_rgba(0,0,0,0.05)] flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{card.label}</div>
+                    <div className="mt-1 font-display text-3xl font-bold text-ink">{card.value.toLocaleString('vi-VN')}</div>
+                  </div>
+                  <span className={`w-11 h-11 rounded-xl flex items-center justify-center ${card.tone}`}>{card.icon}</span>
+                </div>
+              ))}
             </div>
 
-            {/* 2 Columns: Ingredients & Steps */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Column 1: Ingredients */}
-              <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                    <UtensilsCrossed className="w-4 h-4 text-orange-500" />
-                    Danh sách nguyên liệu ({recipeIngredients.length})
-                  </h3>
-                </div>
-
-                {/* Quick Add Ingredient */}
-                <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2.5">
-                  <span className="text-[11px] font-bold text-slate-600 block">Thêm nguyên liệu mới:</span>
-                  <div className="grid grid-cols-12 gap-2">
+            {/* Bảng món ăn */}
+            <div className="bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.05)] overflow-hidden">
+              <div className="p-4 space-y-3 border-b border-line">
+                <div className="flex flex-col lg:flex-row gap-3">
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                     <input
                       type="text"
-                      placeholder="Tên nguyên liệu (thịt gà, tôm...)"
-                      value={newIngName}
-                      onChange={(e) => setNewIngName(e.target.value)}
-                      className="col-span-8 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:border-orange-500"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Số lượng (200, 1...)"
-                      value={newIngQty}
-                      onChange={(e) => setNewIngQty(e.target.value)}
-                      className="col-span-2 px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:border-orange-500 text-center"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Đơn vị (g, ml...)"
-                      value={newIngUnit}
-                      onChange={(e) => setNewIngUnit(e.target.value)}
-                      className="col-span-2 px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:border-orange-500 text-center"
+                      value={recipeSearch}
+                      onChange={(e) => { setRecipeSearch(e.target.value); setRecipePage(1); }}
+                      placeholder="Tìm theo tên món..."
+                      className="w-full h-10 pl-10 pr-4 bg-surface rounded-xl text-sm text-ink placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-orange-500/30"
                     />
                   </div>
-                  <div className="flex items-center justify-end pt-1">
-                    <button
-                      type="button"
-                      onClick={handleAddIngredient}
-                      className="px-3 py-1 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold rounded-lg cursor-pointer flex items-center gap-1"
-                    >
-                      <Plus className="w-3 h-3" />
-                      Thêm
-                    </button>
+                  <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+                    {statusButton('all', 'Tất cả', recipeDishOptions.length)}
+                    {statusButton('has', 'Đã có công thức', withRecipeCount)}
+                    {statusButton('missing', 'Chưa có công thức', recipeDishOptions.length - withRecipeCount)}
                   </div>
                 </div>
-
-                {/* List of Ingredients */}
-                <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
-                  {recipeIngredients.length === 0 ? (
-                    <div className="py-8 text-center text-xs text-slate-400">
-                      Chưa có nguyên liệu nào trong công thức này.
-                    </div>
-                  ) : (
-                    recipeIngredients.map((ing, idx) => (
-                      <div key={idx} className="p-3 bg-slate-50 hover:bg-orange-50/40 rounded-xl border border-slate-200/70 flex items-center justify-between text-xs transition-colors">
-                        <div className="flex flex-wrap items-center gap-1.5 max-w-[70%]">
-                          <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center text-[10px] font-bold">
-                            {idx + 1}
-                          </span>
-                          <span className="font-bold text-slate-800">{ing.name}</span>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <span className="font-mono text-slate-600 font-bold">
-                            {ing.quantity} {ing.unit}
-                          </span>
-                          <button
-                            onClick={() => handleRemoveIngredient(idx)}
-                            className="text-slate-400 hover:text-red-500 cursor-pointer p-1"
-                            title="Xóa"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
+                {recipeCategories.length > 0 && (
+                  <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 shrink-0">Danh mục:</span>
+                    {['', ...recipeCategories].map(cat => (
+                      <button
+                        key={cat || 'all'}
+                        onClick={() => { setRecipeCategoryFilter(cat); setRecipePage(1); }}
+                        className={`px-3 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap transition-colors cursor-pointer ${
+                          recipeCategoryFilter === cat ? 'bg-orange-100 text-orange-700' : 'bg-surface-2 text-slate-600 hover:bg-orange-50 hover:text-orange-600'
+                        }`}
+                      >
+                        {cat || 'Tất cả'}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {/* Column 2: Cooking Steps */}
-              <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-orange-500" />
-                    Các bước chế biến ({recipeSteps.length})
-                  </h3>
-                </div>
-
-                {/* Quick Add Step */}
-                <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2.5">
-                  <span className="text-[11px] font-bold text-slate-600 block">Thêm bước thực hiện:</span>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      placeholder="Tiêu đề bước (Sơ chế, Nấu canh...)"
-                      value={newStepTitle}
-                      onChange={(e) => setNewStepTitle(e.target.value)}
-                      className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:border-orange-500"
-                    />
-                    <div className="flex items-center gap-1 w-28">
-                      <input
-                        type="number"
-                        placeholder="Thời gian"
-                        value={newStepDuration}
-                        onChange={(e) => setNewStepDuration(e.target.value)}
-                        className="w-14 px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:border-orange-500 text-center"
-                      />
-                      <span className="text-[11px] text-slate-500">phút</span>
-                    </div>
-                  </div>
-                  <textarea
-                    placeholder="Hướng dẫn chi tiết thao tác chế biến..."
-                    rows={2}
-                    value={newStepInstruction}
-                    onChange={(e) => setNewStepInstruction(e.target.value)}
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:border-orange-500"
-                  />
-                  <div className="flex justify-end pt-1">
-                    <button
-                      type="button"
-                      onClick={handleAddStep}
-                      className="px-3 py-1 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold rounded-lg cursor-pointer flex items-center gap-1"
-                    >
-                      <Plus className="w-3 h-3" />
-                      Thêm bước
-                    </button>
-                  </div>
-                </div>
-
-                {/* List of Steps */}
-                <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
-                  {recipeSteps.length === 0 ? (
-                    <div className="py-8 text-center text-xs text-slate-400">
-                      Chưa có bước thực hiện nào được thiết lập.
-                    </div>
-                  ) : (
-                    recipeSteps.map((st, idx) => (
-                      <div key={idx} className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/70 space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
-                            <span className="w-5 h-5 rounded-full bg-orange-500 text-white flex items-center justify-center text-[10px] font-bold">
-                              {st.step_number || idx + 1}
-                            </span>
-                            {st.title}
-                          </span>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[11px] text-slate-500 font-medium">⏱ {st.duration_minutes || 5} phút</span>
-                            <button
-                              onClick={() => handleRemoveStep(idx)}
-                              className="text-slate-400 hover:text-red-500 cursor-pointer p-1"
-                              title="Xóa bước"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead className="bg-surface text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">Món ăn</th>
+                      <th className="px-4 py-3">Danh mục</th>
+                      <th className="px-4 py-3 text-center">Nguyên liệu</th>
+                      <th className="px-4 py-3">Trạng thái công thức</th>
+                      <th className="px-4 py-3">Hiển thị</th>
+                      <th className="px-4 py-3 text-right">Thao tác</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-line">
+                    {pageItems.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-12 text-center text-sm text-slate-400">
+                          {recipeDishOptions.length === 0 ? 'Đang tải danh sách món ăn...' : 'Không có món nào khớp bộ lọc.'}
+                        </td>
+                      </tr>
+                    ) : pageItems.map(d => (
+                      <tr key={d.id} className="hover:bg-surface/60 transition-colors">
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-3 min-w-[220px]">
+                            <div className="w-12 h-12 rounded-xl overflow-hidden bg-surface shrink-0">
+                              {d.image && <img src={d.image} alt={d.title} loading="lazy" decoding="async" className="w-full h-full object-cover" />}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-bold text-sm text-ink truncate">{d.title}</div>
+                              <div className="text-[11px] text-slate-500">
+                                {d.servings ? `${d.servings} người` : ''}{d.cookingTime ? ` • ${d.cookingTime} phút` : ''}
+                              </div>
+                            </div>
                           </div>
-                        </div>
-                        <p className="text-xs text-slate-600 leading-relaxed pl-6.5">
-                          {st.instruction}
-                        </p>
-                      </div>
-                    ))
-                  )}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-slate-600 whitespace-nowrap">{d.category || '—'}</td>
+                        <td className="px-4 py-3 text-center text-sm font-bold text-ink">{d.ingredient_count ?? '—'}</td>
+                        <td className="px-4 py-3">
+                          {d.has_recipe ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 text-[11px] font-bold text-emerald-700 whitespace-nowrap">
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Đã có công thức
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-50 text-[11px] font-bold text-rose-600 whitespace-nowrap">
+                              <AlertTriangle className="w-3.5 h-3.5" /> Chưa có công thức
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`text-[11px] font-bold whitespace-nowrap ${d.is_published ? 'text-emerald-600' : 'text-slate-400'}`}>
+                            {d.is_published ? 'Đang hiển thị' : 'Đang ẩn'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {d.has_recipe ? (
+                              <>
+                                <button
+                                  onClick={() => openRecipeForm(d)}
+                                  className="px-3 py-1.5 rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-600 text-xs font-bold cursor-pointer flex items-center gap-1 whitespace-nowrap"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" /> Sửa
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteRecipe(d.id)}
+                                  disabled={savingRecipe}
+                                  className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 disabled:opacity-50 text-xs font-bold cursor-pointer flex items-center gap-1 whitespace-nowrap"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" /> Xóa
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                onClick={() => openRecipeForm(d)}
+                                className="px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold cursor-pointer flex items-center gap-1 whitespace-nowrap"
+                              >
+                                <Plus className="w-3.5 h-3.5" /> Thêm công thức
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Phân trang */}
+              <div className="px-4 py-3 border-t border-line flex items-center justify-between gap-3 text-xs text-slate-500">
+                <span>
+                  Hiển thị {pageItems.length} / {filteredDishOptions.length} món
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setRecipePage(Math.max(1, page - 1))}
+                    disabled={page <= 1}
+                    className="p-1.5 rounded-lg bg-surface hover:bg-orange-50 disabled:opacity-40 cursor-pointer"
+                    aria-label="Trang trước"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className="font-bold text-ink">{page} / {totalPages}</span>
+                  <button
+                    onClick={() => setRecipePage(Math.min(totalPages, page + 1))}
+                    disabled={page >= totalPages}
+                    className="p-1.5 rounded-lg bg-surface hover:bg-orange-50 disabled:opacity-40 cursor-pointer"
+                    aria-label="Trang sau"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
             </div>
           </div>
-        )}
+          );
+        })()}
+
+        {/* Form thêm / sửa công thức */}
+        {recipeFormOpen && (() => {
+          const formDish = recipeFormDish;
+          const isEditing = Boolean(formDish?.has_recipe);
+          const closeForm = () => { if (!savingRecipe) setRecipeFormOpen(false); };
+          const submit = async (publish: boolean) => {
+            if (await handleSaveRecipe(publish)) setRecipeFormOpen(false);
+          };
+
+          return (
+            <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4" onClick={closeForm}>
+              <div
+                className="bg-white rounded-3xl w-full max-w-5xl max-h-[92vh] flex flex-col shadow-2xl animate-in fade-in zoom-in-95 duration-150"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Đầu form */}
+                <div className="p-5 sm:p-6 border-b border-line flex items-start justify-between gap-4">
+                  <div className="flex items-center gap-4 min-w-0">
+                    <div className="w-14 h-14 rounded-2xl overflow-hidden bg-surface shrink-0">
+                      {formDish?.image && <img src={formDish.image} alt={formDish.title} className="w-full h-full object-cover" />}
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-orange-600">
+                        {isEditing ? 'Sửa công thức' : 'Thêm công thức mới'}
+                      </span>
+                      <h3 className="text-xl font-bold text-ink truncate">{formDish?.title || 'Món ăn'}</h3>
+                    </div>
+                  </div>
+                  <button onClick={closeForm} className="p-2 rounded-xl text-slate-400 hover:bg-surface hover:text-slate-700 cursor-pointer" aria-label="Đóng">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Thân form */}
+                <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5">
+                  {recipeError && (
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs font-bold text-amber-800 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                      {recipeError}
+                    </div>
+                  )}
+
+                  {loadingRecipe ? (
+                    <div className="py-20 flex flex-col items-center gap-2 text-sm text-slate-400">
+                      <Loader2 className="w-6 h-6 animate-spin text-orange-500" />
+                      Đang tải công thức...
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-3">
+                        <label className="text-xs font-bold text-slate-700">Khẩu phần ăn:</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="20"
+                          value={recipeServings}
+                          onChange={(e) => setRecipeServings(parseInt(e.target.value, 10) || 1)}
+                          className="w-20 px-3 py-2 bg-surface rounded-xl text-sm font-bold text-ink text-center outline-none focus:ring-2 focus:ring-orange-500/30"
+                        />
+                        <span className="text-xs text-slate-500">người</span>
+                      </div>
+
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+                        {/* Nguyên liệu */}
+                        <div className="rounded-2xl bg-surface p-4 space-y-3">
+                          <h4 className="text-sm font-bold text-ink flex items-center gap-2">
+                            <UtensilsCrossed className="w-4 h-4 text-orange-500" />
+                            Nguyên liệu ({recipeIngredients.length})
+                          </h4>
+
+                          <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                            {recipeIngredients.length === 0 ? (
+                              <div className="py-6 text-center text-xs text-slate-400">Chưa có nguyên liệu nào.</div>
+                            ) : recipeIngredients.map((ing, idx) => (
+                              <div key={idx} className="flex items-center gap-2 bg-white rounded-xl p-2">
+                                <span className="w-6 h-6 rounded-full bg-orange-50 text-orange-600 text-[11px] font-bold flex items-center justify-center shrink-0">{idx + 1}</span>
+                                <span className="flex-1 min-w-0 text-sm font-semibold text-ink truncate">{ing.name}</span>
+                                <input
+                                  value={ing.quantity}
+                                  onChange={(e) => updateIngredient(idx, { quantity: e.target.value })}
+                                  className="w-16 px-2 py-1 bg-surface rounded-lg text-xs font-bold text-center outline-none focus:ring-2 focus:ring-orange-500/30"
+                                  aria-label="Số lượng"
+                                />
+                                <input
+                                  value={ing.unit}
+                                  onChange={(e) => updateIngredient(idx, { unit: e.target.value })}
+                                  className="w-14 px-2 py-1 bg-surface rounded-lg text-xs text-center outline-none focus:ring-2 focus:ring-orange-500/30"
+                                  aria-label="Đơn vị"
+                                />
+                                <button onClick={() => handleRemoveIngredient(idx)} className="p-1 text-slate-400 hover:text-red-500 cursor-pointer" title="Xóa nguyên liệu">
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="flex gap-2 pt-1">
+                            <input
+                              type="text"
+                              placeholder="Tên nguyên liệu"
+                              value={newIngName}
+                              onChange={(e) => setNewIngName(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddIngredient(); } }}
+                              className="flex-1 min-w-0 px-3 py-2 bg-white rounded-lg text-xs outline-none focus:ring-2 focus:ring-orange-500/30"
+                            />
+                            <input
+                              type="text"
+                              placeholder="SL"
+                              value={newIngQty}
+                              onChange={(e) => setNewIngQty(e.target.value)}
+                              className="w-14 px-2 py-2 bg-white rounded-lg text-xs text-center outline-none focus:ring-2 focus:ring-orange-500/30"
+                            />
+                            <input
+                              type="text"
+                              placeholder="Đơn vị"
+                              value={newIngUnit}
+                              onChange={(e) => setNewIngUnit(e.target.value)}
+                              className="w-16 px-2 py-2 bg-white rounded-lg text-xs text-center outline-none focus:ring-2 focus:ring-orange-500/30"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleAddIngredient}
+                              className="px-3 py-2 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold rounded-lg cursor-pointer flex items-center gap-1 shrink-0"
+                            >
+                              <Plus className="w-3.5 h-3.5" /> Thêm
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Các bước */}
+                        <div className="rounded-2xl bg-surface p-4 space-y-3">
+                          <h4 className="text-sm font-bold text-ink flex items-center gap-2">
+                            <BookOpen className="w-4 h-4 text-orange-500" />
+                            Các bước chế biến ({recipeSteps.length})
+                          </h4>
+
+                          <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                            {recipeSteps.length === 0 ? (
+                              <div className="py-6 text-center text-xs text-slate-400">Chưa có bước nào.</div>
+                            ) : recipeSteps.map((st, idx) => (
+                              <div key={idx} className="flex items-start gap-2 bg-white rounded-xl p-2">
+                                <span className="w-6 h-6 mt-1 rounded-full bg-orange-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0">{idx + 1}</span>
+                                <textarea
+                                  value={st.instruction}
+                                  onChange={(e) => updateStep(idx, e.target.value)}
+                                  rows={2}
+                                  className="flex-1 min-w-0 px-2 py-1 bg-surface rounded-lg text-xs leading-relaxed outline-none focus:ring-2 focus:ring-orange-500/30 resize-y"
+                                />
+                                <button onClick={() => handleRemoveStep(idx)} className="p-1 mt-1 text-slate-400 hover:text-red-500 cursor-pointer" title="Xóa bước">
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="space-y-2 pt-1">
+                            <textarea
+                              placeholder="Mô tả bước tiếp theo..."
+                              rows={2}
+                              value={newStepInstruction}
+                              onChange={(e) => setNewStepInstruction(e.target.value)}
+                              className="w-full px-3 py-2 bg-white rounded-lg text-xs outline-none focus:ring-2 focus:ring-orange-500/30"
+                            />
+                            <div className="flex justify-end">
+                              <button
+                                type="button"
+                                onClick={handleAddStep}
+                                className="px-3 py-2 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold rounded-lg cursor-pointer flex items-center gap-1"
+                              >
+                                <Plus className="w-3.5 h-3.5" /> Thêm bước
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Chân form */}
+                <div className="p-5 sm:p-6 border-t border-line flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-3">
+                  {isEditing ? (
+                    <button
+                      onClick={async () => { if (await handleDeleteRecipe()) setRecipeFormOpen(false); }}
+                      disabled={savingRecipe}
+                      className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 disabled:opacity-50 text-xs font-bold rounded-xl cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> Xóa công thức
+                    </button>
+                  ) : <span />}
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <button
+                      onClick={closeForm}
+                      disabled={savingRecipe}
+                      className="px-4 py-2.5 bg-surface hover:bg-surface-2 text-slate-700 text-xs font-bold rounded-xl cursor-pointer"
+                    >
+                      Hủy
+                    </button>
+                    <button
+                      onClick={() => submit(false)}
+                      disabled={savingRecipe || loadingRecipe}
+                      className="px-4 py-2.5 bg-white border border-line hover:bg-surface text-ink disabled:opacity-50 text-xs font-bold rounded-xl cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      {savingRecipe ? 'Đang lưu...' : 'Lưu công thức'}
+                    </button>
+                    <button
+                      onClick={() => submit(true)}
+                      disabled={savingRecipe || loadingRecipe}
+                      className="px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-white disabled:opacity-50 text-xs font-bold rounded-xl shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      {savingRecipe ? 'Đang lưu...' : 'Lưu & Công khai món'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ===================== TAB 3: USERS & PERMISSIONS ===================== */}
         {adminTab === 'users' && (

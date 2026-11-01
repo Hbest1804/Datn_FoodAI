@@ -390,7 +390,7 @@ export default function App() {
       />
 
       {/* Main Content View Container */}
-      <main className={`flex-1 w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 ${isAdminMode ? 'max-w-[1520px]' : 'max-w-7xl'}`}>
+      <main className="flex-1 w-full px-4 sm:px-6 lg:px-10 2xl:px-16 py-6 sm:py-8">
         <Suspense
           fallback={
             <div className="py-24 flex justify-center">
