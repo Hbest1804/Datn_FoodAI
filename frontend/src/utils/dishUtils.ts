@@ -1,7 +1,7 @@
 import { Recipe, Ingredient, CookingStep } from '../types';
 
 export function formatDifficulty(diff?: string | null): string {
-  if (!diff) return 'Dễ';
+  if (!diff) return '';
   const lower = diff.toLowerCase();
   if (lower === 'easy' || lower === 'dễ') return 'Dễ';
   if (lower === 'medium' || lower === 'vừa' || lower === 'trung bình') return 'Vừa';
@@ -10,8 +10,14 @@ export function formatDifficulty(diff?: string | null): string {
 }
 
 export function formatVND(amount?: number | null): string {
-  if (amount == null || isNaN(amount)) return '45.000 đ';
+  if (amount == null || isNaN(amount)) return '—';
   return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
+}
+
+/** Hiển thị chỉ số dinh dưỡng / thời gian; chưa có dữ liệu thì trả "—". */
+export function formatMetric(value?: number | null, unit = ''): string {
+  if (value == null || isNaN(value)) return '—';
+  return `${Math.round(value * 10) / 10}${unit}`;
 }
 
 export const DEFAULT_AVATAR = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='none'%3E%3Crect width='100' height='100' fill='%23cbd5e1'/%3E%3Ccircle cx='50' cy='38' r='18' fill='%23ffffff'/%3E%3Cpath d='M18 88C18 70.327 32.327 56 50 56C67.673 56 82 70.327 82 88H18Z' fill='%23ffffff'/%3E%3C/svg%3E";
@@ -26,7 +32,7 @@ export function normalizeDish(raw: any): Recipe {
   const name = raw.name || raw.title || 'Món ăn ngon';
   const slug = raw.slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
   const image = raw.image_url || raw.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80';
-  const cookTime = raw.cook_time_minutes ?? raw.cookingTime ?? 20;
+  const cookTime: number | null = raw.cook_time_minutes ?? raw.cookingTime ?? null;
 
   // Category handling
   let categoryName = 'Món chính';
@@ -39,26 +45,26 @@ export function normalizeDish(raw: any): Recipe {
     categorySlug = raw.category.slug || 'mon-chinh';
   }
 
-  // Nutrition / Macros handling
-  const calo = raw.calories != null ? Number(raw.calories) : (raw.nutrition?.calories ?? raw.macros?.calories ?? 450);
-  const protein = raw.protein_g != null ? Number(raw.protein_g) : (raw.nutrition?.protein_g ?? raw.macros?.protein ?? 30);
-  const carbs = raw.carbs_g != null ? Number(raw.carbs_g) : (raw.nutrition?.carbs_g ?? raw.macros?.carbs ?? 40);
-  const fat = raw.fat_g != null ? Number(raw.fat_g) : (raw.nutrition?.fat_g ?? raw.macros?.fat ?? 12);
+  // Nutrition / Macros handling: món chưa khai dinh dưỡng thì để null (giao diện hiển thị "—")
+  const num = (v: any): number | null => (v == null || v === '' || isNaN(Number(v)) ? null : Number(v));
+  const calo = num(raw.calories ?? raw.nutrition?.calories ?? raw.macros?.calories);
+  const protein = num(raw.protein_g ?? raw.nutrition?.protein_g ?? raw.macros?.protein);
+  const carbs = num(raw.carbs_g ?? raw.nutrition?.carbs_g ?? raw.macros?.carbs);
+  const fat = num(raw.fat_g ?? raw.nutrition?.fat_g ?? raw.macros?.fat);
 
   const macros = {
     calories: calo,
     protein: protein,
     carbs: carbs,
     fat: fat,
-    sodium: raw.macros?.sodium ?? 380,
   };
 
   // Ingredients handling
   const rawIngredients = Array.isArray(raw.ingredients) ? raw.ingredients : (raw.dish_ingredients || []);
   const ingredients: Ingredient[] = rawIngredients.map((item: any, idx: number) => {
     const ingName = item.name || item.ingredient?.name || `Nguyên liệu ${idx + 1}`;
-    const qty = Number(item.quantity ?? item.amount ?? 1);
-    const unit = item.unit || 'phần';
+    const qty = num(item.quantity ?? item.amount);
+    const unit = item.unit || '';
     const allergenName = item.allergen || item.allergen_group?.name || item.ingredient?.allergen_group?.name;
     return {
       id: item.id || item.ingredient_id || `ing-${idx}`,
@@ -71,6 +77,7 @@ export function normalizeDish(raw: any): Recipe {
       allergen: allergenName,
       allergen_group: item.allergen_group || item.ingredient?.allergen_group,
       isSafe: !item.is_user_allergen,
+      avoidedVia: item.avoided_via || null,
     };
   });
 
@@ -78,7 +85,7 @@ export function normalizeDish(raw: any): Recipe {
   const rawSteps = Array.isArray(raw.steps) ? raw.steps : [];
   const steps: CookingStep[] = rawSteps.map((s: any, idx: number) => {
     const text = s.content || s.instruction || s.title || `Bước ${idx + 1}`;
-    const duration = s.duration_minutes ?? s.durationMinutes ?? 5;
+    const duration = s.duration_minutes ?? s.durationMinutes ?? undefined;
     return {
       order: s.order ?? idx + 1,
       stepNumber: s.stepNumber ?? s.order ?? idx + 1,
@@ -99,12 +106,9 @@ export function normalizeDish(raw: any): Recipe {
   } else if (Array.isArray(raw.dish_tags)) {
     tags = raw.dish_tags.map((dt: any) => dt.tag?.name).filter(Boolean);
   }
-  if (tags.length === 0) {
-    tags = ['Món Việt', 'Dễ làm', 'Bổ dưỡng'];
-  }
 
-  const avgRating = raw.avg_rating ?? raw.rating ?? 4.8;
-  const ratingCount = raw.rating_count ?? raw.reviewCount ?? 12;
+  const avgRating = Number(raw.avg_rating ?? raw.rating ?? 0) || 0;
+  const ratingCount = Number(raw.rating_count ?? raw.reviewCount ?? 0) || 0;
   const favoriteCount = raw.favorite_count ?? 0;
   const isFavorite = Boolean(raw.is_favorite ?? raw.isBookmarked ?? false);
 
@@ -126,13 +130,13 @@ export function normalizeDish(raw: any): Recipe {
     cook_time_minutes: cookTime,
     difficulty: formatDifficulty(raw.difficulty) as any,
     servings: raw.servings || 2,
-    est_cost: raw.est_cost != null ? Number(raw.est_cost) : 65000,
+    est_cost: num(raw.est_cost),
     rating: avgRating,
     avg_rating: avgRating,
     reviewCount: ratingCount,
     rating_count: ratingCount,
     favorite_count: favoriteCount,
-    matchPercentage: raw.match ? Math.round(raw.match.ratio * 100) : (raw.matchPercentage || 95),
+    matchPercentage: raw.match ? Math.round(raw.match.ratio * 100) : raw.matchPercentage,
     match: raw.match,
     contains_user_allergens: Boolean(raw.contains_user_allergens),
     macros: macros,
@@ -143,11 +147,11 @@ export function normalizeDish(raw: any): Recipe {
       fat_g: fat,
     },
     calories: calo,
-    description: raw.description || `Món ${name} thơm ngon, chuẩn vị truyền thống và cân bằng dinh dưỡng.`,
+    description: raw.description || '',
     tags: tags,
     ingredients: ingredients,
     steps: steps,
-    utensils: raw.utensils || ['Chảo chống dính', 'Nồi', 'Dao thớt'],
+    utensils: raw.utensils,
     status: raw.is_published ? 'published' : (raw.status || 'published'),
     is_published: raw.is_published ?? true,
     ingredient_count: raw.ingredient_count,

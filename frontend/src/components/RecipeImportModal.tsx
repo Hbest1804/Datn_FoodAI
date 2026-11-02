@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AlertTriangle, CheckCircle2, Download, FileText, Loader2, Upload, X } from 'lucide-react';
-import { apiService } from '../services/api';
+import { apiService } from '../api';
 import { toast } from './NotificationModal';
 import type { RecipeImportResult } from '../api/admin.api';
 

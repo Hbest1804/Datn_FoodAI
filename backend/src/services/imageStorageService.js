@@ -7,7 +7,7 @@ import { env } from '../config/appConfig.js';
 import { inspectImage } from '../utils/image.js';
 
 const BUCKET = 'dishes';
-export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 15 * 1000;
 // Ảnh món hiển thị lớn nhất ở khung chi tiết món (~1000px); lớn hơn chỉ làm trang tải chậm
 const MAX_IMAGE_WIDTH = 1000;
@@ -17,7 +17,7 @@ const WEBP_QUALITY = 75;
  * Xoay theo EXIF, thu về tối đa MAX_IMAGE_WIDTH px và chuyển sang WEBP.
  * Ảnh hỏng hoặc bản nén không nhỏ hơn thì giữ nguyên bản gốc.
  */
-export async function optimizeDishImage(buffer, info) {
+async function optimizeDishImage(buffer, info) {
   try {
     const out = await sharp(buffer)
       .rotate()

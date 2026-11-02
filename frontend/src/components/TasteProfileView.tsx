@@ -23,7 +23,7 @@ import {
   ArrowDown
 } from 'lucide-react';
 import { UserProfile, BackendTasteProfile, MetaFilters } from '../types';
-import { apiService } from '../services/api';
+import { apiService } from '../api';
 import { formatVND } from '../utils/dishUtils';
 import { toast, showConfirm } from './NotificationModal';
 
@@ -201,9 +201,9 @@ export const TasteProfileView: React.FC<TasteProfileViewProps> = ({
       setProfile(prev => toForm(updated, prev));
       setSaveSuccessNotice(true);
       onUpdateUser({
-        tasteAccuracy: Math.max(90, updated.completeness || completenessScore),
-        dietPreference: updated.diet_types?.map((d: any) => d.name).join(', ') || 'Cân bằng',
-        targetCalories: updated.calorie_goal || 2000,
+        tasteAccuracy: updated.completeness || completenessScore,
+        dietPreference: updated.diet_types?.map((d: any) => d.name).join(', ') || '',
+        targetCalories: updated.calorie_goal || 0,
       });
       setTimeout(() => setSaveSuccessNotice(false), 4000);
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -318,7 +318,7 @@ export const TasteProfileView: React.FC<TasteProfileViewProps> = ({
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-300 max-w-5xl mx-auto pb-16">
+    <div className="space-y-8 animate-in fade-in duration-300 pb-16">
       {/* ── Top Hero Header Card ────────────────────────────────────────────── */}
       <div className="bg-gradient-to-r from-orange-500 via-amber-500 to-orange-600 rounded-3xl p-6 sm:p-8 text-white shadow-lg shadow-orange-500/15 relative overflow-hidden">
         <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-white/10 rounded-full blur-2xl pointer-events-none" />
@@ -334,7 +334,7 @@ export const TasteProfileView: React.FC<TasteProfileViewProps> = ({
             </h1>
             <p className="text-xs sm:text-sm text-orange-100 leading-relaxed">
               Thiết lập toàn diện sở thích vị giác, mức độ calo, ngân sách mỗi bữa và khóa an toàn dị ứng.
-              Tất cả cấu hình được đồng bộ trực tiếp vào thuật toán gợi ý món ăn của CulinaAI.
+              Tất cả cấu hình được đồng bộ trực tiếp vào thuật toán gợi ý món ăn của ChefAI.
             </p>
 
             <div className="flex flex-wrap items-center gap-2 pt-2">
@@ -732,7 +732,7 @@ export const TasteProfileView: React.FC<TasteProfileViewProps> = ({
                 </h2>
               </div>
               <p className="text-xs text-slate-500 mt-1">
-                Chọn chế độ ăn để CulinaAI ưu tiên các món phù hợp trong đề xuất và thực đơn tuần.
+                Chọn chế độ ăn để ChefAI ưu tiên các món phù hợp trong đề xuất và thực đơn tuần.
               </p>
             </div>
             <span className="p-2 bg-rose-50 text-rose-600 rounded-xl self-start sm:self-auto">
@@ -925,6 +925,9 @@ export const TasteProfileView: React.FC<TasteProfileViewProps> = ({
                 </span>
                 <span className="text-[10px] text-rose-700 font-semibold">Loại khỏi gợi ý</span>
               </div>
+              <p className="text-[10px] text-rose-700/80">
+                Kiêng một nguyên liệu gốc sẽ ẩn cả các nguyên liệu cùng nhóm, ví dụ kiêng "Tôm" thì ẩn cả tôm sú, mắm tôm, mắm ruốc.
+              </p>
 
               {profile.disliked_ingredients.length === 0 ? (
                 <p className="text-[11px] text-slate-400 italic py-2">

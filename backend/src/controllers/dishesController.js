@@ -17,7 +17,7 @@ import {
 import { toDishSummary } from '../services/recommendationService.js';
 import { getUserAvoidedIngredientIds } from '../services/chatContextService.js';
 import { recomputeUserVectorsInBackground } from '../services/embeddingService.js';
-import { cached, getPublishedDishes } from '../services/cacheService.js';
+import { cached, getIngredientIndex, getPublishedDishes } from '../services/cacheService.js';
 
 const SORTS = ['relevance', 'match', 'newest', 'updated', 'rating', 'popular', 'cook_time', 'calories'];
 
@@ -218,7 +218,7 @@ export async function getDishDetail(req, res) {
   if (!dish) return sendError(res, 404, 'DISH_NOT_FOUND', 'Món không tồn tại hoặc đã bị ẩn.');
 
   const userId = req.user?.id;
-  const [ratingsRes, relatedRes, favRes, avoidedIds] = await Promise.all([
+  const [ratingsRes, relatedRes, favRes, avoidedIds, ingredientIndex] = await Promise.all([
     supabaseAdmin.from('ratings').select('id, user_id, stars, comment').eq('dish_id', dish.id),
     supabaseAdmin.from('dishes').select('id, name, slug, image_url, dish_ingredients(ingredient_id)')
       .eq('is_published', true).eq('category', dish.category).neq('id', dish.id).limit(12),
@@ -226,8 +226,16 @@ export async function getDishDetail(req, res) {
       ? supabaseAdmin.from('favorites').select('dish_id').eq('user_id', userId).eq('dish_id', dish.id).maybeSingle()
       : Promise.resolve({ data: null }),
     getUserAvoidedIngredientIds(userId),
+    getIngredientIndex(),
   ]);
   if (ratingsRes.error) throw ratingsRes.error;
+
+  // Nguyên liệu bị đánh dấu vì thuộc nhóm của nguyên liệu người dùng kiêng (Mắm tôm ← Tôm): trả tên nhóm để giải thích
+  const ingredientName = new Map(ingredientIndex.map((i) => [Number(i.id), i.name]));
+  const avoidedVia = (id) => {
+    const origin = avoidedIds.get(id);
+    return origin != null && origin !== id ? { id: origin, name: ingredientName.get(origin) } : null;
+  };
 
   // Món vẫn xem được qua liên kết trực tiếp nhưng đánh dấu nguyên liệu người dùng kiêng; món liên quan thì loại hẳn
   const relatedDishes = (relatedRes.data || [])
@@ -260,6 +268,7 @@ export async function getDishDetail(req, res) {
       is_optional: di.is_optional,
       allergen_group: di.ingredient?.allergen_group || null,
       is_user_allergen: avoidedIds.has(Number(di.ingredient?.id)),
+      avoided_via: avoidedVia(Number(di.ingredient?.id)),
     })),
     contains_user_allergens: containsAny(dish, avoidedIds),
     steps: (dish.recipe_steps || [])

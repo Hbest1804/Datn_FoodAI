@@ -6,6 +6,7 @@ import { generatePersonalizedReply } from '../services/aiService.js';
 import { getSettings } from '../services/settingsService.js';
 import {
   checkTopic,
+  detectQuestionAllergens,
   getForbiddenIngredientIds,
   parsePantry,
   retrieveDishes,
@@ -215,7 +216,11 @@ export async function sendChatMessage(req, res) {
     if (topic.outOfScope) {
       result = { outcome: 'out_of_scope', content: topic.reply, dishes: [], tokens: 0 };
     } else {
+      // Dị ứng nêu ngay trong câu hỏi cũng được lọc như dị ứng trong hồ sơ
+      const asked = await detectQuestionAllergens(question);
+      ctx.userProfile.allergen_groups.push(...asked.allergens);
       const forbidden = await getForbiddenIngredientIds(ctx);
+      asked.ingredientIds.forEach((id) => forbidden.add(id));
       const dishesContext = await retrieveDishes({
         questionVector: topic.questionVector,
         content: question,

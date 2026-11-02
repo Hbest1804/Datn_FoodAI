@@ -7,7 +7,7 @@
 import { supabaseAdmin } from '../config/supabase.js';
 import { generateEmbedding } from './aiService.js';
 import { cosineSimilarity, getDishEmbeddings } from './embeddingService.js';
-import { getIngredientIndex, getPublishedDishes } from './cacheService.js';
+import { getIngredientChildren, getIngredientIndex, getPublishedDishes } from './cacheService.js';
 import { containsBannedWords } from '../utils/bannedWords.js';
 import { normalizeText } from '../utils/textUtils.js';
 import { ApiError } from '../utils/http.js';
@@ -24,6 +24,9 @@ const CULINARY_KEYWORDS = [
   'an kieng', 'giam can', 'eat clean', 'keto', 'do an', 'mon ngon', 'bep', 'nem', 'goi', 'salad', 'soup',
 ];
 const CULINARY_RE = new RegExp(`(^|\\s)(${CULINARY_KEYWORDS.join('|')})(\\s|$)`);
+
+// Tên thực phẩm trùng mặt chữ với từ trong danh sách cấm (dùng chung cho kiểm duyệt bình luận)
+const FOOD_TERMS_LIKE_BANNED_RE = /óc chó/giu;
 
 // Câu mô tả chủ đề ẩm thực – véc-tơ của nó là tâm chủ đề cho lớp 2
 const TOPIC_ANCHOR_TEXT = 'Câu hỏi về ẩm thực, món ăn Việt Nam, công thức nấu ăn, nguyên liệu, gia vị, cách chế biến, thực đơn bữa ăn, dinh dưỡng, calo và chế độ ăn uống.';
@@ -68,7 +71,8 @@ export async function parsePantry(body) {
  */
 export async function checkTopic(content, settings) {
   // Lớp 1: nội dung chứa từ ngữ bị cấm → từ chối ngay, không gọi AI
-  if (await containsBannedWords(content)) {
+  // (bỏ qua tên thực phẩm trùng mặt chữ với từ cấm, vd "hạt óc chó")
+  if (await containsBannedWords(String(content).normalize('NFC').replace(FOOD_TERMS_LIKE_BANNED_RE, ' '))) {
     return { outOfScope: true, reply: OUT_OF_SCOPE_REPLY, questionVector: null };
   }
 
@@ -96,7 +100,26 @@ export async function checkTopic(content, settings) {
   return { outOfScope: false, questionVector };
 }
 
-/** Id nguyên liệu bị cấm với người dùng: thuộc nhóm dị ứng hoặc nằm trong danh sách không thích mà người dùng đã khai. */
+/**
+ * Mở rộng tập nguyên liệu sang mọi nguyên liệu con, cháu (bảng ingredient_parents):
+ * kiêng "Tôm" thì loại cả "Tôm sú tươi", "Mắm tôm", "Mắm tôm ngon"…
+ * Trả về Map id nguyên liệu → id nguyên liệu kiêng gốc dẫn tới nó (chính nó nếu kiêng trực tiếp).
+ */
+async function withDescendants(ids) {
+  const result = new Map([...ids].map((id) => [id, id]));
+  if (ids.size === 0) return result;
+  const children = await getIngredientChildren();
+  const queue = [...ids];
+  while (queue.length) {
+    const id = queue.pop();
+    for (const child of children.get(id) || []) {
+      if (!result.has(child)) { result.set(child, result.get(id)); queue.push(child); }
+    }
+  }
+  return result;
+}
+
+/** Id nguyên liệu bị cấm với người dùng: thuộc nhóm dị ứng hoặc danh sách không thích đã khai, kèm mọi nguyên liệu con của chúng. */
 export async function getForbiddenIngredientIds({ allergenGroupIds = [], dislikedIngredientIds = [] }) {
   const forbidden = new Set(dislikedIngredientIds.map(Number));
   if (allergenGroupIds.length > 0) {
@@ -105,15 +128,88 @@ export async function getForbiddenIngredientIds({ allergenGroupIds = [], dislike
       if (groups.has(Number(ing.allergen_group_id))) forbidden.add(Number(ing.id));
     }
   }
-  return forbidden;
+  return new Set((await withDescendants(forbidden)).keys());
 }
 
-/** Id nguyên liệu kiêng mà người dùng đã khai trong hồ sơ khẩu vị; khách trả tập rỗng. */
+// ── Dị ứng người dùng nêu ngay trong câu hỏi ("tôi dị ứng hải sản, …") ──────
+// Bảng nguyên liệu gần như chưa gắn nhóm dị ứng nên nhận diện theo tên (có dấu, khớp trọn từ),
+// gồm cả gia vị ẩn chứa chất gây dị ứng như nước mắm, mắm tôm, nước tương, dầu hào.
+const CRUSTACEAN = ['tôm', 'tép', 'cua', 'ghẹ', 'ruốc', 'riêu', 'giáp xác'];
+const FISH = ['cá', 'nước mắm', 'mắm cá', 'chả cá', 'khô cá'];
+const QUESTION_ALLERGENS = [
+  { code: 'crustacean', name: 'Tôm, cua và hải sản có vỏ (giáp xác)', detect: CRUSTACEAN, ingredients: CRUSTACEAN },
+  {
+    code: 'seafood', name: 'Hải sản (tôm, cua, cá, mực, nhuyễn thể)', detect: ['hải sản'],
+    ingredients: [...CRUSTACEAN, ...FISH, 'mực', 'bạch tuộc', 'ngao', 'nghêu', 'sò', 'hến', 'hàu', 'ốc', 'mắm', 'dầu hào'],
+    except: ['dầu hào chay'],
+  },
+  { code: 'fish', name: 'Cá (kể cả nước mắm)', detect: ['cá'], ingredients: FISH },
+  { code: 'peanut', name: 'Đậu phộng (lạc)', detect: ['đậu phộng', 'lạc'], ingredients: ['đậu phộng', 'lạc'] },
+  {
+    code: 'dairy', name: 'Sữa bò và chế phẩm từ sữa', detect: ['sữa', 'lactose'],
+    ingredients: ['sữa', 'bơ lạt', 'bơ', 'phô mai', 'kem', 'whey'],
+    except: ['sữa đậu nành', 'sữa hạt', 'sữa dừa', 'hàu sữa'],
+  },
+  { code: 'egg', name: 'Trứng', detect: ['trứng'], ingredients: ['trứng', 'mayonnaise'] },
+  {
+    code: 'gluten', name: 'Gluten (lúa mì)', detect: ['gluten', 'lúa mì', 'bột mì'],
+    ingredients: ['bột mì', 'bánh mì', 'mì tôm', 'mì gói', 'bánh bao', 'bột chiên giòn', 'bột chiên xù', 'nước tương', 'xì dầu', 'bia'],
+  },
+  {
+    code: 'soy', name: 'Đậu nành', detect: ['đậu nành', 'đậu tương'],
+    ingredients: ['đậu nành', 'đậu tương', 'đậu phụ', 'đậu hũ', 'tàu hũ', 'tào phớ', 'váng đậu', 'nước tương', 'xì dầu', 'tương đen', 'tương bần', 'miso', 'dầu hào'],
+  },
+  { code: 'sesame', name: 'Vừng (mè)', detect: ['mè', 'vừng'], ingredients: ['mè', 'vừng', 'tahini'] },
+  {
+    code: 'tree_nut', name: 'Các loại hạt cây (điều, óc chó, hạnh nhân…)',
+    detect: ['hạt điều', 'óc chó', 'hạnh nhân', 'macca', 'mắc ca', 'hồ đào', 'hạt dẻ', 'hạt cây'],
+    ingredients: ['hạt điều', 'óc chó', 'hạnh nhân', 'macca', 'mắc ca', 'hồ đào', 'hạt dẻ'],
+  },
+];
+// Cụm báo hiệu dị ứng; phần nêu chất gây dị ứng kéo dài tới dấu câu hoặc liên từ kế tiếp
+const ALLERGY_TRIGGER_RE = /(dị ứng|không ăn được|kiêng)\s+([^,.;:!?\n]*?)(?=[,.;:!?\n]|\s(?:thì|nên|nhưng|mà|muốn|có|ăn|làm|gợi|cho)\s|$)/gu;
+
+/** Regex khớp trọn từ tiếng Việt có dấu (\b của JS không hiểu chữ có dấu). */
+function wordsRe(words) {
+  const alt = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).sort((a, b) => b.length - a.length).join('|');
+  return new RegExp(`(?:^|[^\\p{L}])(?:${alt})(?=$|[^\\p{L}])`, 'u');
+}
+for (const a of QUESTION_ALLERGENS) {
+  a.detectRe = wordsRe(a.detect);
+  a.ingredientRe = wordsRe(a.ingredients);
+  a.exceptRe = a.except ? wordsRe(a.except) : null;
+}
+
+/**
+ * Nhận diện chất gây dị ứng người dùng nêu trong câu hỏi.
+ * Trả về các nhóm dị ứng { id, name } (để đưa vào câu lệnh gửi mô hình) và id nguyên liệu phải loại, kèm nguyên liệu con.
+ */
+export async function detectQuestionAllergens(content) {
+  const text = (content || '').normalize('NFC').toLowerCase();
+  const mentioned = [...text.matchAll(ALLERGY_TRIGGER_RE)].map((m) => m[2]).join(' | ');
+  const allergens = mentioned ? QUESTION_ALLERGENS.filter((a) => a.detectRe.test(mentioned)) : [];
+  if (allergens.length === 0) return { allergens: [], ingredientIds: new Set() };
+
+  const ids = new Set();
+  for (const ing of await getIngredientIndex()) {
+    const name = (ing.name || '').normalize('NFC').toLowerCase();
+    if (allergens.some((a) => a.ingredientRe.test(name.replace(a.exceptRe || /$^/, '')))) ids.add(Number(ing.id));
+  }
+  return {
+    allergens: allergens.map((a) => ({ id: `q:${a.code}`, name: a.name })),
+    ingredientIds: new Set((await withDescendants(ids)).keys()),
+  };
+}
+
+/**
+ * Nguyên liệu kiêng mà người dùng đã khai trong hồ sơ khẩu vị, kèm nguyên liệu cùng nhóm;
+ * Map id → id nguyên liệu đã khai dẫn tới nó. Khách trả Map rỗng.
+ */
 export async function getUserAvoidedIngredientIds(userId) {
-  if (!userId) return new Set();
+  if (!userId) return new Map();
   const { data, error } = await supabaseAdmin.from('user_disliked_ingredients').select('ingredient_id').eq('user_id', userId);
   if (error) throw error;
-  return new Set((data || []).map((r) => Number(r.ingredient_id)));
+  return withDescendants(new Set((data || []).map((r) => Number(r.ingredient_id))));
 }
 
 /**

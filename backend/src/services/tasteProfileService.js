@@ -9,7 +9,7 @@ const LEVEL_KEYS = ['spicy_level', 'salty_level', 'sweet_level', 'sour_level'];
  * Độ hoàn thiện hồ sơ 0–100: mức vị 20, nguyên liệu thích 20, chế độ ăn 20,
  * mục tiêu calo 20, ngân sách 20. household_size luôn có giá trị mặc định nên không tính.
  */
-export function calculateCompleteness(p) {
+function calculateCompleteness(p) {
   let score = 0;
   const prefs = p.taste_prefs || {};
   score += LEVEL_KEYS.filter((k) => Number.isInteger(prefs[k])).length * 5;

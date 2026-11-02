@@ -4,14 +4,13 @@ import {
   Sparkles, 
   X, 
   Send, 
-  Camera, 
   Trash2,
   Maximize2,
   ChevronDown
 } from 'lucide-react';
 import { UserProfile, Recipe } from '../types';
 import { ChefLogo3D } from './ChefLogo3D';
-import { apiService } from '../services/api';
+import { apiService } from '../api';
 import { toast, showConfirm } from './NotificationModal';
 
 interface FloatingChefWidgetProps {
@@ -47,7 +46,7 @@ export const FloatingChefWidget: React.FC<FloatingChefWidgetProps> = ({
     {
       id: 'm-1',
       sender: 'chef',
-      text: `Chào ${currentUser.name || 'bạn'}! Bếp Trưởng Culina AI đang trực tuyến. Bạn cần gợi ý món từ tủ lạnh hay tính calo bữa ăn nào hôm nay?`,
+      text: `Chào ${currentUser.name || 'bạn'}! Bếp Trưởng ChefAI đang trực tuyến. Bạn cần gợi ý món từ nguyên liệu có sẵn hay tính calo bữa ăn nào hôm nay?`,
       timestamp: 'Vừa xong',
     }
   ]);
@@ -95,7 +94,7 @@ export const FloatingChefWidget: React.FC<FloatingChefWidgetProps> = ({
       {
         id: `m-reset-${Date.now()}`,
         sender: 'chef',
-        text: `Chào ${currentUser.name || 'bạn'}! Bếp Trưởng Culina AI đang trực tuyến. Bạn cần gợi ý món từ tủ lạnh hay tính calo bữa ăn nào hôm nay?`,
+        text: `Chào ${currentUser.name || 'bạn'}! Bếp Trưởng ChefAI đang trực tuyến. Bạn cần gợi ý món từ nguyên liệu có sẵn hay tính calo bữa ăn nào hôm nay?`,
         timestamp: 'Vừa xong',
       }
     ]);
@@ -188,7 +187,7 @@ export const FloatingChefWidget: React.FC<FloatingChefWidgetProps> = ({
               <ChefLogo3D size="sm" showSparkle={false} />
               <div>
                 <div className="flex items-center gap-1.5">
-                  <h4 className="text-xs font-black tracking-tight">Bếp Trưởng Culina AI</h4>
+                  <h4 className="text-xs font-black tracking-tight">Bếp Trưởng ChefAI</h4>
                   <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-400 text-slate-900">
                     Trực tuyến
                   </span>
@@ -230,10 +229,10 @@ export const FloatingChefWidget: React.FC<FloatingChefWidgetProps> = ({
           {/* Quick Dietary Profile Status Pill */}
           <div className="px-3.5 py-1.5 bg-orange-50/80 border-b border-orange-100 flex items-center justify-between text-[11px] text-orange-900">
             <span className="font-semibold truncate">
-              🎯 {currentUser.name || 'Khách'}: {currentUser.dietPreference}
+              🎯 {currentUser.name || 'Khách'}: {currentUser.dietPreference || 'Chưa thiết lập'}
             </span>
             <span className="font-bold text-orange-600 shrink-0">
-              {currentUser.targetCalories} kcal
+              {currentUser.targetCalories > 0 ? currentUser.targetCalories : '—'} kcal
             </span>
           </div>
 
@@ -283,7 +282,7 @@ export const FloatingChefWidget: React.FC<FloatingChefWidgetProps> = ({
               🥗 Bữa trưa &lt;400 kcal
             </button>
             <button
-              onClick={() => handleSend('Tủ lạnh còn ức gà, nấm và bông cải, nấu món gì?')}
+              onClick={() => handleSend('Mình có ức gà, nấm và bông cải, nấu món gì?')}
               className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-orange-50 text-slate-700 hover:text-orange-600 shrink-0 transition-colors cursor-pointer font-medium"
             >
               🍗 Ức gà & bông cải
@@ -305,14 +304,6 @@ export const FloatingChefWidget: React.FC<FloatingChefWidgetProps> = ({
               }}
               className="flex items-center gap-1.5"
             >
-              <button
-                type="button"
-                onClick={() => handleSend('Quét tủ lạnh: Có trứng gà, cà chua và rau bina')}
-                className="p-2 text-slate-400 hover:text-orange-600 rounded-xl hover:bg-slate-100 cursor-pointer"
-                title="Quét tủ lạnh"
-              >
-                <Camera className="w-4 h-4" />
-              </button>
               <input
                 type="text"
                 value={input}

@@ -1,18 +1,14 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   CalendarDays, 
   Sparkles, 
   Flame, 
-  Trash2, 
-  Plus, 
-  Check, 
-  Clock, 
   ChefHat, 
   AlertCircle
 } from 'lucide-react';
-import { Recipe, UserProfile, FridgeItem } from '../types';
-import { apiService } from '../services/api';
-import { toast, showPrompt } from './NotificationModal';
+import { Recipe, UserProfile } from '../types';
+import { apiService } from '../api';
+import { formatMetric } from '../utils/dishUtils';
 
 interface MealPlannerViewProps {
   currentUser: UserProfile;
@@ -28,22 +24,6 @@ export const MealPlannerView: React.FC<MealPlannerViewProps> = ({
   onOpenChatWithPrompt,
 }) => {
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
-
-  // Load fridge items from local storage (user real items)
-  const [fridgeItems, setFridgeItems] = useState<FridgeItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('culina_fridge');
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return [];
-  });
-
-  // Persist fridge items
-  useEffect(() => {
-    try {
-      localStorage.setItem('culina_fridge', JSON.stringify(fridgeItems));
-    } catch {}
-  }, [fridgeItems]);
 
   // Compute 7 days of the current week dynamically
   const daysOfWeek = useMemo(() => {
@@ -83,61 +63,20 @@ export const MealPlannerView: React.FC<MealPlannerViewProps> = ({
 
   // Dynamically calculate total calories and macros for the selected day
   const totalCaloSelectedDay = useMemo(() => {
-    return dailySchedule.reduce((sum, item) => sum + (item.recipe?.macros?.calories || 400), 0);
+    return dailySchedule.reduce((sum, item) => sum + (item.recipe?.macros?.calories ?? 0), 0);
   }, [dailySchedule]);
 
   const totalProteinSelectedDay = useMemo(() => {
-    return dailySchedule.reduce((sum, item) => sum + (item.recipe?.macros?.protein || 22), 0);
+    return dailySchedule.reduce((sum, item) => sum + (item.recipe?.macros?.protein ?? 0), 0);
   }, [dailySchedule]);
 
   const totalCarbsSelectedDay = useMemo(() => {
-    return dailySchedule.reduce((sum, item) => sum + (item.recipe?.macros?.carbs || 45), 0);
+    return dailySchedule.reduce((sum, item) => sum + (item.recipe?.macros?.carbs ?? 0), 0);
   }, [dailySchedule]);
 
   const totalFatSelectedDay = useMemo(() => {
-    return dailySchedule.reduce((sum, item) => sum + (item.recipe?.macros?.fat || 15), 0);
+    return dailySchedule.reduce((sum, item) => sum + (item.recipe?.macros?.fat ?? 0), 0);
   }, [dailySchedule]);
-
-  const handleAddFridgeItem = async () => {
-    const name = await showPrompt({
-      title: 'Thêm nguyên liệu tủ lạnh',
-      message: 'Nhập tên nguyên liệu bạn đang có sẵn:',
-      placeholder: 'VD: Thịt ba chỉ, Trứng gà, Cà chua...',
-      confirmText: 'Tiếp tục',
-      required: true,
-    });
-    if (!name || !name.trim()) return;
-
-    const amount = await showPrompt({
-      title: 'Số lượng / Khối lượng',
-      message: `Nhập định lượng cho "${name.trim()}":`,
-      placeholder: 'VD: 300g, 2 quả, 1 bó...',
-      defaultValue: 'Vừa đủ',
-      confirmText: 'Lưu vào tủ lạnh',
-    });
-    if (amount === null) return;
-
-    setFridgeItems([
-      ...fridgeItems,
-      {
-        id: `fr-${Date.now()}`,
-        name: name.trim(),
-        amount: amount.trim() || 'Vừa đủ',
-        daysRemaining: 4,
-        category: 'Rau củ',
-      }
-    ]);
-    toast.success(`Đã thêm "${name.trim()}" vào tủ lạnh!`, 'Tủ lạnh thông minh');
-  };
-
-  const handleCleanFridgeWithAi = () => {
-    if (fridgeItems.length === 0) {
-      toast.warning('Tủ lạnh đang trống. Vui lòng thêm nguyên liệu vào tủ lạnh trước!', 'Tủ lạnh');
-      return;
-    }
-    const listStr = fridgeItems.map(f => `${f.name} (${f.amount})`).join(', ');
-    onOpenChatWithPrompt(`Tủ lạnh nhà tôi hiện có các nguyên liệu: ${listStr}. Hãy ưu tiên các món sắp hết hạn và lên công thức bữa ăn dinh dưỡng giúp tôi!`);
-  };
 
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
@@ -149,21 +88,11 @@ export const MealPlannerView: React.FC<MealPlannerViewProps> = ({
             KẾ HOẠCH DINH DƯỠNG CÁ NHÂN HÓA
           </span>
           <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight mt-0.5">
-            Thực Đơn Tuần & Tủ Lạnh Thông Minh
+            Thực Đơn Tuần
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Cân bằng dinh dưỡng 7 ngày với thực đơn món ăn phong phú, quản lý nguyên liệu tủ lạnh và chống lãng phí thực phẩm.
+            Cân bằng dinh dưỡng 7 ngày với thực đơn món ăn phong phú.
           </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleCleanFridgeWithAi}
-            className="px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-bold shadow-md shadow-orange-500/20 transition-all flex items-center gap-2 cursor-pointer"
-          >
-            <ChefHat className="w-4 h-4" />
-            Dọn Tủ Lạnh Cùng AI
-          </button>
         </div>
       </div>
 
@@ -192,7 +121,7 @@ export const MealPlannerView: React.FC<MealPlannerViewProps> = ({
         ))}
       </div>
 
-      {/* Main Grid: Left 2 Cols (Daily Meals Schedule), Right 1 Col (Smart Fridge & Nutrition Analysis) */}
+      {/* Main Grid: Left 2 Cols (Daily Meals Schedule), Right 1 Col (Nutrition Analysis) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Left 2 Cols: Meals of Selected Day */}
         <div className="lg:col-span-2 space-y-6">
@@ -240,11 +169,11 @@ export const MealPlannerView: React.FC<MealPlannerViewProps> = ({
                         {slot.recipe.title}
                       </h4>
                       <div className="flex items-center gap-3 text-xs text-slate-500">
-                        <span className="font-semibold text-slate-700">{slot.recipe.macros?.calories || 400} kcal</span>
+                        <span className="font-semibold text-slate-700">{formatMetric(slot.recipe.macros.calories, ' kcal')}</span>
                         <span>•</span>
-                        <span className="text-orange-600 font-bold">{slot.recipe.macros?.protein || 20}g Đạm</span>
+                        <span className="text-orange-600 font-bold">{formatMetric(slot.recipe.macros.protein, 'g')} Đạm</span>
                         <span>•</span>
-                        <span>⏱ {slot.recipe.cookingTime || 20} phút</span>
+                        <span>⏱ {formatMetric(slot.recipe.cookingTime)} phút</span>
                       </div>
                     </div>
                   </div>
@@ -266,78 +195,8 @@ export const MealPlannerView: React.FC<MealPlannerViewProps> = ({
           </div>
         </div>
 
-        {/* Right 1 Col: Smart Fridge & Grocery List */}
+        {/* Right 1 Col: Nutrition Analysis */}
         <div className="space-y-6">
-          {/* Smart Fridge Box */}
-          <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <ChefHat className="w-5 h-5 text-orange-500" />
-                <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                  Tủ Lạnh Thông Minh ({fridgeItems.length})
-                </h4>
-              </div>
-              <button
-                onClick={handleAddFridgeItem}
-                className="text-xs font-bold text-orange-600 hover:text-orange-700 cursor-pointer flex items-center gap-1"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Thêm đồ
-              </button>
-            </div>
-
-            <p className="text-[11px] text-slate-500">
-              Nguyên liệu thực tế bạn đang có trong tủ lạnh:
-            </p>
-
-            <div className="space-y-2 max-h-60 overflow-y-auto">
-              {fridgeItems.length === 0 ? (
-                <div className="py-6 text-center text-xs text-slate-400">
-                  Tủ lạnh đang trống. Nhấn "+ Thêm đồ" để lưu nguyên liệu.
-                </div>
-              ) : (
-                fridgeItems.map(item => (
-                  <div
-                    key={item.id}
-                    className={`p-2.5 rounded-2xl border text-xs flex items-center justify-between ${
-                      item.isExpiringSoon
-                        ? 'bg-red-50/80 border-red-200 text-red-900'
-                        : 'bg-slate-50 border-slate-100 text-slate-800'
-                    }`}
-                  >
-                    <div className="space-y-0.5">
-                      <div className="font-bold flex items-center gap-1.5">
-                        {item.name}
-                        {item.isExpiringSoon && (
-                          <span className="text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-red-200 text-red-800">
-                            CẦN NẤU SỚM
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-[10px] text-slate-400">
-                        Số lượng: {item.amount}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => setFridgeItems(fridgeItems.filter(f => f.id !== item.id))}
-                      className="text-slate-400 hover:text-red-500 p-1 cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <button
-              onClick={handleCleanFridgeWithAi}
-              className="w-full py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white rounded-xl text-xs font-bold shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              Gợi ý món vét sạch tủ lạnh
-            </button>
-          </div>
-
           {/* Daily Nutrition Balance & Medical Guidance Box */}
           <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
@@ -363,15 +222,15 @@ export const MealPlannerView: React.FC<MealPlannerViewProps> = ({
             <div className="grid grid-cols-3 gap-2">
               <div className="bg-orange-50/60 border border-orange-100 p-2.5 rounded-2xl text-center">
                 <span className="text-[10px] font-bold text-orange-700 block uppercase">Đạm (Protein)</span>
-                <span className="text-base font-extrabold text-orange-900">{totalProteinSelectedDay}g</span>
+                <span className="text-base font-extrabold text-orange-900">{Math.round(totalProteinSelectedDay)}g</span>
               </div>
               <div className="bg-amber-50/60 border border-amber-100 p-2.5 rounded-2xl text-center">
                 <span className="text-[10px] font-bold text-amber-700 block uppercase">Tinh bột (Carb)</span>
-                <span className="text-base font-extrabold text-amber-900">{totalCarbsSelectedDay}g</span>
+                <span className="text-base font-extrabold text-amber-900">{Math.round(totalCarbsSelectedDay)}g</span>
               </div>
               <div className="bg-emerald-50/60 border border-emerald-100 p-2.5 rounded-2xl text-center">
                 <span className="text-[10px] font-bold text-emerald-700 block uppercase">Chất béo (Fat)</span>
-                <span className="text-base font-extrabold text-emerald-900">{totalFatSelectedDay}g</span>
+                <span className="text-base font-extrabold text-emerald-900">{Math.round(totalFatSelectedDay)}g</span>
               </div>
             </div>
 
@@ -382,12 +241,12 @@ export const MealPlannerView: React.FC<MealPlannerViewProps> = ({
                 Đánh Giá Khẩu Phần Cân Bằng:
               </div>
               <p className="text-[11px] text-slate-600 leading-relaxed">
-                Thực đơn ngày này cung cấp tỉ lệ dưỡng chất tối ưu cho thể trạng trung bình. Nên uống đủ 2L nước và bổ sung thêm rau xanh cho bữa tối.
+                Thực đơn ngày này cung cấp tỉ lệ dưỡng chất tối ưu cho thể trạng trung bình. Nên bổ sung thêm rau xanh cho bữa tối.
               </p>
             </div>
 
             <button
-              onClick={() => onOpenChatWithPrompt(`Đánh giá cân bằng dinh dưỡng cho thực đơn ngày ${daysOfWeek[selectedDayIndex]?.day || 'hôm nay'} (${totalCaloSelectedDay} kcal, ${totalProteinSelectedDay}g đạm) và tư vấn thêm theo thể trạng`)}
+              onClick={() => onOpenChatWithPrompt(`Đánh giá cân bằng dinh dưỡng cho thực đơn ngày ${daysOfWeek[selectedDayIndex]?.day || 'hôm nay'} (${totalCaloSelectedDay} kcal, ${Math.round(totalProteinSelectedDay)}g đạm) và tư vấn thêm theo thể trạng`)}
               className="w-full py-2.5 bg-slate-100 hover:bg-orange-50 text-slate-700 hover:text-orange-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200/60"
             >
               <ChefHat className="w-3.5 h-3.5 text-orange-500" />

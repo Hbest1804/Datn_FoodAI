@@ -38,3 +38,9 @@ logs/
 *.log
 .DS_Store
 
+
+# Python
+__pycache__/
+
+# Tai lieu, khong day len GitHub
+web-html/

@@ -5,7 +5,7 @@
 import crypto from 'crypto';
 import { generateCulinaryReply } from '../services/aiService.js';
 import { getSettings } from '../services/settingsService.js';
-import { checkTopic, parsePantry, retrieveDishes, toDishCard } from '../services/chatContextService.js';
+import { checkTopic, detectQuestionAllergens, parsePantry, retrieveDishes, toDishCard } from '../services/chatContextService.js';
 import { sendError, sendOk } from '../utils/http.js';
 
 const MAX_CONTENT_LENGTH = 1000;
@@ -17,7 +17,7 @@ const ipQuotaMap = new Map();
 // Số tin nhắn của khách theo ngày, dùng cho GET /admin/chatbot/overview: ngày (YYYY-MM-DD) → số tin nhắn
 const guestDailyCounts = new Map();
 
-export function getClientIp(req) {
+function getClientIp(req) {
   const forwarded = req.headers['x-forwarded-for'];
   if (typeof forwarded === 'string' && forwarded) return forwarded.split(',')[0].trim();
   return req.socket?.remoteAddress || req.ip || '127.0.0.1';
@@ -131,15 +131,19 @@ export async function sendGuestMessage(req, res) {
   if (topic.outOfScope) {
     reply = { type: 'out_of_scope', content: topic.reply, dishes: [] };
   } else {
+    // Khách không có hồ sơ: chỉ lọc theo dị ứng nêu ngay trong câu hỏi
+    const asked = await detectQuestionAllergens(question);
     const dishesContext = await retrieveDishes({
       questionVector: topic.questionVector,
       content: question,
       pantry,
+      forbiddenIngredientIds: asked.ingredientIds,
       limit: Number(settings.max_context_dishes) || 8,
     });
     const aiResult = await generateCulinaryReply({
       content: question,
       fridge: pantry,
+      allergens: asked.allergens,
       dishesContext,
       systemPrompt: settings.system_prompt,
     });

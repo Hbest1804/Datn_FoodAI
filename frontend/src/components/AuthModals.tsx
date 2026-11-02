@@ -1,15 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  X, 
-  UtensilsCrossed, 
-  Check, 
-  ShieldCheck, 
-  Eye, 
-  EyeOff, 
-  Mail, 
-  Lock, 
-  Sparkles, 
-  User, 
+import {
+  X,
+  UtensilsCrossed,
+  Check,
+  ShieldCheck,
+  Eye,
+  EyeOff,
+  Mail,
+  Lock,
+  Sparkles,
+  User,
   ArrowRight,
   Clock,
   Flame,
@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { ChefLogo3D } from './ChefLogo3D';
-import { apiService } from '../services/api';
+import { apiService } from '../api';
 
 interface AuthModalsProps {
   isOpen: boolean;
@@ -51,6 +51,16 @@ function saveRememberedEmail(value: string | null): void {
     // Trình duyệt chặn lưu trữ thì bỏ qua
   }
 }
+
+// Biểu tượng chữ G nhiều màu của Google (lucide-react không có biểu tượng thương hiệu)
+const GoogleIcon: React.FC = () => (
+  <svg className="w-4 h-4" viewBox="0 0 48 48" aria-hidden="true">
+    <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z" />
+    <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z" />
+    <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z" />
+    <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z" />
+  </svg>
+);
 
 export const AuthModals: React.FC<AuthModalsProps> = ({
   isOpen,
@@ -109,6 +119,12 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
   }, [initialResetToken]);
 
   if (!isOpen) return null;
+
+  const handleGoogleLogin = () => {
+    setErrorMessage('');
+    setLoading(true);
+    apiService.auth.startGoogleLogin();
+  };
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -293,9 +309,6 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                   <div>
                     <div className="flex items-center gap-1.5">
                       <span className="font-bold text-slate-900 text-lg">Chef AI</span>
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-orange-200 text-orange-800 uppercase">
-                        PRO AI
-                      </span>
                     </div>
                     <p className="text-xs text-slate-500">Bếp trưởng AI thông minh</p>
                   </div>
@@ -310,7 +323,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                     Khám phá ẩm thực thông minh, cá nhân hóa <span className="text-orange-500">từng bữa ăn</span>
                   </h3>
                   <p className="text-xs text-slate-600 leading-relaxed pt-1">
-                    Tối ưu dinh dưỡng và khơi gợi cảm hứng nấu nướng với trợ lý AI phân tích khẩu vị, dị ứng và nguyên liệu sẵn có trong tủ lạnh của bạn.
+                    Tối ưu dinh dưỡng và khơi gợi cảm hứng nấu nướng với trợ lý AI phân tích khẩu vị, dị ứng và nguyên liệu sẵn có của bạn.
                   </p>
                 </div>
 
@@ -321,7 +334,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                       <span className="w-2 h-2 rounded-full bg-emerald-500" />
                       Gợi ý bữa trưa
                     </span>
-                    <span className="text-orange-600 font-bold">98% Tương thích</span>
+                    <span className="text-orange-600 font-bold">Hợp khẩu vị</span>
                   </div>
                   <div className="flex gap-3 items-center">
                     <img
@@ -367,30 +380,6 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                     Đăng ký
                   </button>
                 </div>
-              </div>
-
-              {/* Social Login Button */}
-              <button
-                type="button"
-                onClick={handleLoginSubmit}
-                className="w-full py-2.5 px-4 border border-slate-200 hover:bg-slate-50 rounded-xl text-xs font-bold text-slate-700 flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-2xs"
-              >
-                <svg className="w-4 h-4" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
-                  <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.36 24 12 24z"/>
-                  <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
-                  <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.36 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
-                </svg>
-                Tiếp tục với Google
-              </button>
-
-              <div className="relative my-5 text-center">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-slate-200" />
-                </div>
-                <span className="relative bg-white px-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                  HOẶC TIẾP TỤC VỚI EMAIL
-                </span>
               </div>
 
               {errorMessage && (
@@ -489,6 +478,21 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                 </button>
               </form>
 
+              <div className="flex items-center gap-3 my-4 text-[11px] text-slate-400">
+                <div className="flex-1 h-px bg-slate-200" />
+                hoặc
+                <div className="flex-1 h-px bg-slate-200" />
+              </div>
+              <button
+                type="button"
+                onClick={handleGoogleLogin}
+                disabled={loading}
+                className="w-full py-2.5 bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-60 text-slate-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <GoogleIcon />
+                Đăng nhập bằng Google
+              </button>
+
               <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-xs">
                 <span className="text-slate-500">Chưa có tài khoản?</span>
                 <button
@@ -513,9 +517,6 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                   <div>
                     <div className="flex items-center gap-1.5">
                       <span className="font-bold text-slate-900 text-lg">Chef AI</span>
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-orange-200 text-orange-800 uppercase">
-                        PRO AI
-                      </span>
                     </div>
                     <p className="text-xs text-slate-500">Trợ lý dinh dưỡng & Bếp trưởng số</p>
                   </div>
@@ -530,10 +531,10 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                   <div className="p-3 bg-white/80 rounded-xl border border-orange-200/50 space-y-1">
                     <h5 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-orange-500" />
-                      Hỏi đáp AI không giới hạn & Quét tủ lạnh
+                      Hỏi đáp AI không giới hạn
                     </h5>
                     <p className="text-[11px] text-slate-500">
-                      Tải ảnh tủ lạnh, ChefAI tức thì lên thực đơn vừa khít đồ sẵn có trong 15 giây.
+                      Kể nguyên liệu đang có, ChefAI tức thì gợi ý món ăn phù hợp.
                     </p>
                   </div>
 
@@ -684,11 +685,10 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                           key={diet}
                           type="button"
                           onClick={() => setSelectedDiet(diet)}
-                          className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition-all cursor-pointer ${
-                            selectedDiet === diet
+                          className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition-all cursor-pointer ${selectedDiet === diet
                               ? 'bg-orange-500 text-white border-orange-500 shadow-xs'
                               : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                          }`}
+                            }`}
                         >
                           {diet}
                         </button>
@@ -733,9 +733,6 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                   <div>
                     <div className="flex items-center gap-1.5">
                       <span className="font-bold text-slate-900 text-lg">Chef AI</span>
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-orange-200 text-orange-800 uppercase">
-                        PRO AI
-                      </span>
                     </div>
                     <p className="text-xs text-slate-500">Trợ lý công thức & Dinh dưỡng thông minh</p>
                   </div>
@@ -747,7 +744,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                     BẢO MẬT HỒ SƠ ẨM THỰC
                   </div>
                   <p className="text-[11px] text-emerald-700">
-                    Bảo vệ trọn vẹn <span className="font-bold">hồ sơ khẩu vị</span> & thực đơn độc bản. Định mức dinh dưỡng vi lượng và tủ nguyên liệu ảo của bạn đều được mã hóa an toàn.
+                    Bảo vệ trọn vẹn <span className="font-bold">hồ sơ khẩu vị</span> & thực đơn độc bản. Dữ liệu cá nhân của bạn đều được bảo vệ an toàn.
                   </p>
                 </div>
 
@@ -763,7 +760,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                   <div className="flex items-start gap-2.5">
                     <span className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold text-[11px] shrink-0">AI</span>
                     <div>
-                      <h5 className="font-bold text-slate-800">Bảo toàn dữ liệu tủ lạnh & AI Memory</h5>
+                      <h5 className="font-bold text-slate-800">Bảo toàn dữ liệu & AI Memory</h5>
                       <p className="text-[11px] text-slate-500">Giữ nguyên lịch sử học hỏi vị giác, danh sách dị ứng và công thức đã ghim.</p>
                     </div>
                   </div>

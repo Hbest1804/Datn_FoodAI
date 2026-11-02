@@ -123,8 +123,3 @@ export function uuidParam(code, message) {
     next();
   };
 }
-
-/** Bọc hàm xử lý bất đồng bộ để lỗi ném ra được chuyển tới bộ xử lý lỗi chung. */
-export function asyncHandler(fn) {
-  return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
-}

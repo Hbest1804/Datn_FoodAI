@@ -50,7 +50,7 @@ function setToCache(key, data) {
 const PRESEEDED_QUICK_REPLIES = {
   'gợi ý món canh cho bữa trưa nhanh gọn': {
     type: 'recipe',
-    content: `Chào bạn! Cho bữa trưa nhanh gọn mà vẫn thanh mát, ngon miệng, **CulinaAI** gợi ý bạn 3 món canh chuẩn vị chỉ tốn 10 - 15 phút:
+    content: `Chào bạn! Cho bữa trưa nhanh gọn mà vẫn thanh mát, ngon miệng, **ChefAI** gợi ý bạn 3 món canh chuẩn vị chỉ tốn 10 - 15 phút:
 
 1. **Canh trứng cà chua hành hoa (10 phút):**
    - *Nguyên liệu:* 2 quả trứng gà, 2 quả cà chua, hành tím, hành lá, ngò rí.
@@ -148,7 +148,7 @@ Bảo quản trong hũ thủy tinh kín ở ngăn mát tủ lạnh được từ
   },
   'gợi ý 3 món ăn chuẩn vị cho cả gia đình': {
     type: 'recipe',
-    content: `CulinaAI xin gợi ý mâm cơm gia đình 3 món cân bằng dinh dưỡng, thanh đạm và cực kỳ đưa cơm:
+    content: `ChefAI xin gợi ý mâm cơm gia đình 3 món cân bằng dinh dưỡng, thanh đạm và cực kỳ đưa cơm:
 
 1. **Món mặn: Thịt ba chỉ kho tộ đậm đà (40 phút):**
    - Thịt ba chỉ thái vuông con chì, ướp nước mắm cốt, tiêu, hành tím băm và chút đường thốt nốt. Kho liu riu đến khi nước sốt keo màu cánh gián thơm phức.
@@ -161,7 +161,7 @@ Mâm cơm này cung cấp đầy đủ đạm, chất xơ, vitamin và khoáng c
   },
   'tôi muốn 1 bữa cơm 5 người thì nên nấu những món gì': {
     type: 'recipe',
-    content: `Chào bạn! Cho mâm cơm **5 người ăn** ngon miệng, đủ chất và hài hòa khẩu vị, **CulinaAI** gợi ý thực đơn 4 món chuẩn vị cơm gia đình Việt:
+    content: `Chào bạn! Cho mâm cơm **5 người ăn** ngon miệng, đủ chất và hài hòa khẩu vị, **ChefAI** gợi ý thực đơn 4 món chuẩn vị cơm gia đình Việt:
 
 1. **Món mặn chính: Thịt ba chỉ kho trứng cút (40 phút):**
    - *Định lượng:* 600g thịt ba chỉ + 15 quả trứng cút.
@@ -186,7 +186,7 @@ Mâm cơm này cung cấp đầy đủ đạm, chất xơ, vitamin và khoáng c
 function getCandidateModels() {
   // Mô hình theo tài liệu API (mục 4.4.1, 4.6.4): gemini-3.5-flash-lite; các mô hình sau chỉ dùng khi mô hình chính lỗi
   const configured = env.gemini.model;
-  const fallbackList = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
+  const fallbackList = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
 
   if (configured) {
     return [configured, ...fallbackList.filter((m) => m !== configured)];
@@ -274,11 +274,11 @@ async function callGeminiWithFailover({ prompt, maxOutputTokens = 900, temperatu
  * Sinh câu trả lời cho chatbot ở chế độ khách (mục 4.4).
  * Nhận nội dung câu hỏi, nguyên liệu có sẵn và các món liên quan đã truy hồi; trả về loại câu trả lời, nội dung và thẻ món.
  */
-export async function generateCulinaryReply({ content, fridge = {}, dishesContext = [], systemPrompt }) {
+export async function generateCulinaryReply({ content, fridge = {}, allergens = [], dishesContext = [], systemPrompt }) {
   const normKey = (content || '').toLowerCase().trim().replace(/[?!.,]/g, '').trim();
 
-  // 1. Câu hỏi gợi ý nhanh có câu trả lời soạn sẵn
-  if (!fridge?.ingredient_names?.length && !fridge?.custom_ingredients?.length) {
+  // 1. Câu hỏi gợi ý nhanh có câu trả lời soạn sẵn (nội dung soạn sẵn không lọc theo dị ứng)
+  if (!allergens.length && !fridge?.ingredient_names?.length && !fridge?.custom_ingredients?.length) {
     if (PRESEEDED_QUICK_REPLIES[normKey]) {
       const pre = PRESEEDED_QUICK_REPLIES[normKey];
       const matched = matchDishesFromContext(normKey, dishesContext);
@@ -292,7 +292,7 @@ export async function generateCulinaryReply({ content, fridge = {}, dishesContex
   }
 
   // 2. Câu hỏi đã trả lời gần đây (lấy từ bộ nhớ đệm)
-  const cacheKey = getCacheKey('guest', content, fridge, `${systemPrompt}|${dishesContext.map((d) => d.id).join(',')}`);
+  const cacheKey = getCacheKey('guest', content, fridge, `${systemPrompt}|${allergens.map((a) => a.id).join(',')}|${dishesContext.map((d) => d.id).join(',')}`);
   const cached = getFromCache(cacheKey);
   if (cached) {
     return cached;
@@ -306,7 +306,7 @@ export async function generateCulinaryReply({ content, fridge = {}, dishesContex
   }
 
   // 4. Tạo câu lệnh gửi mô hình (rút gọn dữ liệu để phản hồi nhanh)
-  const prompt = buildGeminiPrompt({ content, fridge, dishesContext, systemPrompt });
+  const prompt = buildGeminiPrompt({ content, fridge, allergens, dishesContext, systemPrompt });
 
   // Dịch vụ AI lỗi hoặc quá thời gian chờ thì ném lỗi để API trả 502 AI_SERVICE_ERROR / 504 AI_TIMEOUT (luồng 3a)
   const { rawText, tokenCount } = await callGeminiWithFailover({
@@ -323,7 +323,20 @@ export async function generateCulinaryReply({ content, fridge = {}, dishesContex
 /**
  * Tạo câu lệnh gửi Gemini ở chế độ khách (chỉ gửi dữ liệu cần thiết để phản hồi nhanh)
  */
-function buildGeminiPrompt({ content, fridge, dishesContext, systemPrompt }) {
+/** Quy tắc an toàn gửi kèm câu lệnh khi người dùng có dị ứng (trong hồ sơ hoặc nêu trong câu hỏi). */
+function allergyRules(allergens = []) {
+  if (!allergens.length) return '';
+  return `⚠️ NGƯỜI DÙNG DỊ ỨNG: ${allergens.map((a) => a.name).join('; ')}.
+QUY TẮC AN TOÀN DỊ ỨNG (ưu tiên cao nhất):
+- Không gợi ý món, nguyên liệu hay gia vị chứa chất gây dị ứng, kể cả dạng chế biến/lên men (mắm tôm, ruốc, nước mắm, dầu hào, nước tương, bơ, sữa đặc…). Không bao giờ khuyên "ăn thử một ít".
+- Khi được hỏi có ăn được thực phẩm chế biến từ chất gây dị ứng không: trả lời rõ là KHÔNG NÊN và giải thích.
+- Nêu rõ gia vị ẩn cần tránh và cách thay thế (vd dị ứng cá: thay nước mắm bằng muối/nước tương; dị ứng đậu nành: thay nước tương bằng muối/hạt nêm nấm).
+- Nhắc kiểm tra nhãn thành phần của sản phẩm đóng gói. Với dị ứng hạt cây hoặc giáp xác, lưu ý nguy cơ dị ứng chéo.
+- Món phổ biến thường chứa chất gây dị ứng thì ghi rõ cần bỏ/thay nguyên liệu nào.
+`;
+}
+
+function buildGeminiPrompt({ content, fridge, allergens = [], dishesContext, systemPrompt }) {
   // Chỉ gửi id, tên, thời gian nấu và độ khó; bỏ ảnh và mô tả dài
   const dishesSummary = dishesContext.map((d) => ({
     id: d.id,
@@ -343,8 +356,8 @@ function buildGeminiPrompt({ content, fridge, dishesContext, systemPrompt }) {
   return `${systemPrompt || 'Bạn là "Trợ lý ẩm thực" của website gợi ý món ăn Việt Nam.'}
 Hãy trả lời câu hỏi nhanh gọn, rõ ràng, gạch đầu dòng súc tích, định dạng Markdown đẹp mắt.
 Nếu câu hỏi hoàn toàn KHÔNG liên quan ẩm thực, dinh dưỡng, nấu nướng: từ chối lịch sự và đặt "type":"out_of_scope".
-
-DANH SÁCH MÓN ĂN HỆ THỐNG PHÙ HỢP (chỉ được giới thiệu thẻ món trong danh sách này):
+${allergyRules(allergens)}
+DANH SÁCH MÓN ĂN HỆ THỐNG PHÙ HỢP (đã loại món chứa nguyên liệu dị ứng; chỉ được giới thiệu thẻ món trong danh sách này):
 ${JSON.stringify(dishesSummary)}
 
 NGUYÊN LIỆU TRONG TỦ LẠNH:
@@ -401,6 +414,22 @@ function sanitizeDishIdsFromContent(rawContent) {
 /**
  * Đọc kết quả JSON Gemini trả về và gắn thẻ món ăn
  */
+/**
+ * Mô hình đôi khi để dấu " chưa thoát trong "content" (vd: "chữa cháy") làm JSON hỏng.
+ * Tách lại từng trường bằng biểu thức chính quy; không tách được thì trả null.
+ */
+function salvageJsonReply(text) {
+  const m = text.match(/"content"\s*:\s*"([\s\S]*?)"\s*(?:,\s*"(?:matched_dish_ids|outcome|type)"|\}\s*$)/);
+  if (!m) return null;
+  const idsBlock = text.match(/"matched_dish_ids"\s*:\s*\[([\s\S]*?)\]/)?.[1] || '';
+  return {
+    outcome: text.match(/"outcome"\s*:\s*"(\w+)"/)?.[1],
+    type: text.match(/"type"\s*:\s*"(\w+)"/)?.[1],
+    content: m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\'),
+    matched_dish_ids: [...idsBlock.matchAll(/"([^"]+)"/g)].map((x) => x[1]),
+  };
+}
+
 function parseGeminiResponse(rawText, dishesContext) {
   let cleaned = (rawText || '').trim();
   if (cleaned.startsWith('```json')) {
@@ -413,6 +442,9 @@ function parseGeminiResponse(rawText, dishesContext) {
   try {
     parsed = JSON.parse(cleaned);
   } catch {
+    parsed = salvageJsonReply(cleaned);
+  }
+  if (!parsed) {
     const isOut = /(không|chưa) liên quan.*ẩm thực|chỉ hỗ trợ.*nấu ăn/i.test(cleaned);
     const { cleanedContent } = sanitizeDishIdsFromContent(cleaned);
     return {
@@ -461,9 +493,12 @@ export async function generatePersonalizedReply({
 }) {
   const normKey = (content || '').toLowerCase().trim().replace(/[?!.,]/g, '').trim();
 
-  // 1. Câu hỏi gợi ý nhanh có câu trả lời soạn sẵn (chỉ dùng khi người dùng không có dị ứng)
-  const hasAllergens = userProfile?.allergen_groups?.length > 0;
-  if (!hasAllergens && !fridge?.ingredient_names?.length && PRESEEDED_QUICK_REPLIES[normKey]) {
+  // 1. Câu hỏi gợi ý nhanh có câu trả lời soạn sẵn (chỉ dùng khi hồ sơ không có ràng buộc nào,
+  //    vì nội dung soạn sẵn không lọc theo dị ứng, nguyên liệu không thích hay chế độ ăn)
+  const hasConstraints = userProfile?.allergen_groups?.length > 0
+    || userProfile?.disliked_ingredients?.length > 0
+    || userProfile?.diet_types?.length > 0;
+  if (!hasConstraints && !fridge?.ingredient_names?.length && PRESEEDED_QUICK_REPLIES[normKey]) {
     const pre = PRESEEDED_QUICK_REPLIES[normKey];
     const matched = matchDishesFromContext(normKey, dishesContext);
     return {
@@ -573,7 +608,7 @@ HỒ SƠ KHẨU VỊ:
 ${profileParts.length ? profileParts.join('\n') : '(Chưa thiết lập)'}
 ${favList ? `Món yêu thích: ${favList}` : ''}
 ${fridgeParts.length ? fridgeParts.join('\n') : ''}
-
+${allergyRules(userProfile.allergen_groups)}
 MÓN ĂN AN TOÀN TRONG HỆ THỐNG (đã loại món chứa nguyên liệu dị ứng/không thích; chỉ được giới thiệu thẻ món trong danh sách này):
 ${JSON.stringify(dishesSummary)}
 
@@ -613,6 +648,9 @@ function parsePersonalizedResponse(rawText, dishesContext, tokenCount = 150) {
   try {
     parsed = JSON.parse(cleaned);
   } catch {
+    parsed = salvageJsonReply(cleaned);
+  }
+  if (!parsed) {
     const isOut = /(không|chưa) liên quan.*ẩm thực|chỉ hỗ trợ.*nấu ăn/i.test(cleaned);
     const isNoMatch = /(không tìm thấy|không có món nào phù hợp|nới lỏng điều kiện)/i.test(cleaned);
     const outcome = isOut ? 'out_of_scope' : isNoMatch ? 'no_match' : 'answered';
@@ -629,7 +667,7 @@ function parsePersonalizedResponse(rawText, dishesContext, tokenCount = 150) {
     ? parsed.outcome
     : (parsed.type === 'out_of_scope' ? 'out_of_scope' : 'answered');
 
-  const rawContent = parsed.content || 'Dạ, CulinaAI rất hân hạnh đồng hành cùng bữa ăn của bạn!';
+  const rawContent = parsed.content || 'Dạ, ChefAI rất hân hạnh đồng hành cùng bữa ăn của bạn!';
   const { cleanedContent, extractedIds } = sanitizeDishIdsFromContent(rawContent);
 
   const rawMatched = Array.isArray(parsed.matched_dish_ids) ? parsed.matched_dish_ids : [];
@@ -654,6 +692,16 @@ function parsePersonalizedResponse(rawText, dishesContext, tokenCount = 150) {
 /**
  * Khớp món ăn dựa trên từ khóa trong câu hỏi hoặc xuất hiện trong nội dung câu trả lời
  */
+/** Tìm các món đã truy hồi có tên chứa từ khóa trong câu hỏi (dùng cho câu trả lời soạn sẵn / dự phòng). */
+function matchDishesFromContext(content, dishesContext = []) {
+  const c = (content || '').toLowerCase();
+  const words = c.split(/\s+/).filter((w) => w.length >= 3);
+  return dishesContext.filter((d) => {
+    const name = (d.name || '').toLowerCase();
+    return words.some((w) => name.includes(w));
+  });
+}
+
 function matchDishesByNameOrContext(content, dishesContext = []) {
   if (!dishesContext.length) return [];
   const normText = (content || '').toLowerCase();
@@ -677,14 +725,14 @@ function matchDishesByNameOrContext(content, dishesContext = []) {
 /**
  * Câu trả lời dự phòng cho chế độ khách khi chưa cấu hình khóa API (môi trường thử nghiệm)
  */
-export function fallbackResponse(content, dishesContext = [], fridge = {}) {
+function fallbackResponse(content, dishesContext = [], fridge = {}) {
   const c = (content || '').toLowerCase();
   const isCooking = /(nấu|món|canh|kho|xào|nướng|thịt|cá|rau|trứng|ăn gì|bữa|calo|công thức|tủ lạnh|thực đơn|chay|diet|dinh dưỡng|mẹo|khử|sốt|hải sản|gà|bò)/i.test(c);
 
   if (!isCooking && c.length > 5) {
     return {
       type: 'out_of_scope',
-      content: 'Dạ, CulinaAI là trợ lý chuyên sâu về ẩm thực, dinh dưỡng và nấu nướng. Em chỉ có thể hỗ trợ bạn các công thức món ăn ngon, mẹo làm bếp hoặc lên thực đơn hàng ngày thôi ạ! Hôm nay bạn có muốn em gợi ý món ngon nào không?',
+      content: 'Dạ, ChefAI là trợ lý chuyên sâu về ẩm thực, dinh dưỡng và nấu nướng. Em chỉ có thể hỗ trợ bạn các công thức món ăn ngon, mẹo làm bếp hoặc lên thực đơn hàng ngày thôi ạ! Hôm nay bạn có muốn em gợi ý món ngon nào không?',
       dishes: [],
     };
   }
@@ -693,7 +741,7 @@ export function fallbackResponse(content, dishesContext = [], fridge = {}) {
   const sampleDishes = matched.length > 0 ? matched.slice(0, 3) : dishesContext.slice(0, 2);
   const dishNames = sampleDishes.map((d) => `**${d.name}**`).join(', ');
 
-  let replyText = `Dạ chào bạn! Để giải đáp nhanh cho câu hỏi về **"${content.trim()}"**, CulinaAI xin gợi ý cho bạn như sau:\n\n`;
+  let replyText = `Dạ chào bạn! Để giải đáp nhanh cho câu hỏi về **"${content.trim()}"**, ChefAI xin gợi ý cho bạn như sau:\n\n`;
 
   if (sampleDishes.length > 0) {
     replyText += `🍲 **Món ăn phù hợp hàng đầu:** Bạn có thể tham khảo ${dishNames}.\n`;
@@ -720,7 +768,7 @@ export function fallbackResponse(content, dishesContext = [], fridge = {}) {
 /**
  * Câu trả lời dự phòng cho chế độ cá nhân hóa khi chưa cấu hình khóa API (môi trường thử nghiệm)
  */
-export function fallbackPersonalizedResponse({
+function fallbackPersonalizedResponse({
   content,
   userProfile = {},
   favoriteDishes = [],
@@ -733,7 +781,7 @@ export function fallbackPersonalizedResponse({
   if (!isCooking && c.length > 5) {
     return {
       outcome: 'out_of_scope',
-      content: 'Dạ em là trợ lý ẩm thực CulinaAI, em chỉ có thể hỗ trợ các câu hỏi liên quan đến ẩm thực, món ăn, dinh dưỡng và gợi ý thực đơn cá nhân hóa thôi ạ. Bạn có muốn tìm gợi ý món ngon cho hôm nay không?',
+      content: 'Dạ em là trợ lý ẩm thực ChefAI, em chỉ có thể hỗ trợ các câu hỏi liên quan đến ẩm thực, món ăn, dinh dưỡng và gợi ý thực đơn cá nhân hóa thôi ạ. Bạn có muốn tìm gợi ý món ngon cho hôm nay không?',
       dishes: [],
       tokens: 65,
     };
@@ -760,7 +808,7 @@ export function fallbackPersonalizedResponse({
     ? ` (phù hợp mục tiêu ~${userProfile.calorie_goal} kcal)`
     : '';
 
-  let replyText = `Dạ chào bạn! Để chuẩn bị bữa ăn ${dietNote}thanh lành và thơm ngon${caloNote}, CulinaAI xin gợi ý bạn có thể thưởng thức ${dishNames || 'các món ăn giàu dinh dưỡng trong thư viện'}.\n\n`;
+  let replyText = `Dạ chào bạn! Để chuẩn bị bữa ăn ${dietNote}thanh lành và thơm ngon${caloNote}, ChefAI xin gợi ý bạn có thể thưởng thức ${dishNames || 'các món ăn giàu dinh dưỡng trong thư viện'}.\n\n`;
 
   if (userProfile.allergen_groups?.length) {
     replyText += `🛡️ *Tất cả gợi ý trên đã được hệ thống tự động lọc bỏ hoàn toàn các thành phần liên quan đến: ${userProfile.allergen_groups.map((a) => a.name).join(', ')}.*\n\n`;

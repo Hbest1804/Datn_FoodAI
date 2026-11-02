@@ -1,0 +1,28 @@
+name: chefai
+
+services:
+  backend:
+    build: ./backend
+    image: chefai-backend
+    restart: unless-stopped
+    env_file: ./backend/.env
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      # Ghi đè giá trị trong backend/.env (dành cho npm run dev ở cổng 3000) để link trong email trỏ đúng cổng Docker
+      CORS_ORIGIN: http://localhost:${FRONTEND_PORT:-8080}
+    expose:
+      - "5000"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-}
+    image: chefai-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy

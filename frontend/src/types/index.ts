@@ -1,10 +1,11 @@
-export type UserRole = 'guest' | 'user' | 'moderator' | 'admin';
+export type UserRole = 'guest' | 'user' | 'admin';
 
+// null: món chưa khai báo chỉ số này
 export interface MacroInfo {
-  calories: number;
-  protein: number;
-  carbs: number;
-  fat: number;
+  calories: number | null;
+  protein: number | null;
+  carbs: number | null;
+  fat: number | null;
   sodium?: number;
   fiber?: number;
 }
@@ -13,14 +14,16 @@ export interface Ingredient {
   id?: string | number;
   ingredient_id?: number | string;
   name: string;
-  amount?: number;
-  quantity?: number;
+  amount?: number | null;
+  quantity?: number | null;
   unit: string;
   note?: string;
   is_optional?: boolean;
   allergen?: string;
   allergen_group?: { id: number; name: string; code?: string } | null;
   isSafe?: boolean;
+  /** Bị đánh dấu kiêng vì thuộc nhóm của nguyên liệu này (Mắm tôm ← Tôm); null nếu kiêng trực tiếp */
+  avoidedVia?: { id: number; name: string } | null;
   substitute?: string;
 }
 
@@ -36,16 +39,6 @@ export interface CookingStep {
   voicePrompt?: string;
   temperature?: string;
   image?: string;
-}
-
-export interface RecipeVariant {
-  id: string;
-  title: string;
-  badge: string;
-  matchScore: number;
-  description: string;
-  selectionRate: string;
-  promptSnippet: string;
 }
 
 export interface DishMatch {
@@ -69,9 +62,9 @@ export interface Recipe {
   region_id?: number;
   region?: string | { id: number; name: string; code?: string } | null;
   category_id?: number;
-  cook_time_minutes?: number;
-  cookingTime: number; // in minutes
-  difficulty: 'easy' | 'medium' | 'hard' | 'Dễ' | 'Vừa' | 'Nâng cao';
+  cook_time_minutes?: number | null;
+  cookingTime: number | null; // in minutes, null khi chưa khai báo
+  difficulty: 'easy' | 'medium' | 'hard' | 'Dễ' | 'Vừa' | 'Nâng cao' | '';
   servings: number;
   est_cost?: number | null;
   rating: number;
@@ -95,8 +88,6 @@ export interface Recipe {
   ingredients: Ingredient[];
   steps: CookingStep[];
   utensils?: string[];
-  videoUrl?: string;
-  variants?: RecipeVariant[];
   status?: 'published' | 'draft' | 'needs_review' | 'macro_alert';
   is_published?: boolean;
   /** Chỉ có trong danh sách món của trang quản trị */
@@ -190,10 +181,6 @@ export interface UserProfile {
   targetProtein: number;
   targetCarbs: number;
   targetFat: number;
-  todayConsumedCalories: number;
-  todayConsumedProtein: number;
-  todayConsumedWaterLiters: number;
-  todayTargetWaterLiters: number;
   allergiesHardLock: string[];
   intolerances: {
     lactose: boolean;
@@ -270,16 +257,6 @@ export interface GuestQuota {
   resets_in_seconds?: number;
 }
 
-export interface FridgeItem {
-  id: string;
-  ingredient_id?: number;
-  name: string;
-  amount: string;
-  daysRemaining: number;
-  category: 'Rau củ' | 'Thịt & Hải sản' | 'Trứng & Sữa' | 'Gia vị' | 'Khác';
-  isExpiringSoon?: boolean;
-}
-
 export interface ReviewItem {
   id: string | number;
   author: string;
@@ -304,7 +281,12 @@ export interface AdminStats {
   visits: number;
   dishesCount: number;
   hiddenDishesCount: number;
-  aiSuccessRate: number;
+  /** null khi chatbot chưa trả lời câu nào trong kỳ */
+  aiSuccessRate: number | null;
   avgResponseMs: number;
   flaggedMessagesCount: number;
+  /** Số câu hỏi gửi chatbot theo giờ trong ngày (0–23, giờ Việt Nam) */
+  chatHourly: Array<{ hour: number; count: number }>;
+  /** Số người dùng theo chế độ ăn trong hồ sơ khẩu vị */
+  dietDistribution: Array<{ id: number; name: string; users: number }>;
 }

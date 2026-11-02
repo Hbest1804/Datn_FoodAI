@@ -8,10 +8,10 @@ import { buildCsvTemplate, buildXlsx, fileExtension, parseFlag, parseTable, read
 import { normalizeText } from '../utils/textUtils.js';
 import { parseBool, sendError, sendOk } from '../utils/http.js';
 
-const IMPORT_COLUMNS = ['name', 'default_unit', 'allergen_group_code', 'aliases', 'is_common'];
+const IMPORT_COLUMNS = ['name', 'default_unit', 'allergen_group_code', 'aliases', 'is_common', 'parent_names'];
 const REQUIRED_COLUMNS = ['name', 'default_unit'];
 const MAX_IMPORT_ROWS = 2000;
-const EXAMPLE_ROW = ['Đậu phộng', 'g', 'peanut', 'lạc; đậu phọng', 'true'];
+const EXAMPLE_ROW = ['Tôm sú', 'g', 'shellfish', 'tôm hùm sú', 'false', 'Tôm'];
 const COMMON_UNITS = ['g', 'kg', 'ml', 'l', 'quả', 'củ', 'tép', 'lát', 'bó', 'muỗng canh', 'muỗng cà phê', 'chén'];
 
 const cleanName = (s) => String(s ?? '').trim().replace(/\s+/g, ' ');
@@ -37,6 +37,7 @@ export async function adminGetIngredientImportTemplate(req, res) {
     ['allergen_group_code', 'Không', 'Mã nhóm dị ứng (bảng bên dưới); để trống nếu không thuộc nhóm nào.'],
     ['aliases', 'Không', 'Tên gọi khác, phân tách bằng dấu ";".'],
     ['is_common', 'Không', 'Nguyên liệu phổ biến: true/false hoặc có/không (mặc định false).'],
+    ['parent_names', 'Không', 'Nhóm nguyên liệu (nguyên liệu gốc), phân tách bằng ";": người dùng kiêng nguyên liệu gốc thì món chứa nguyên liệu này cũng bị ẩn. Ví dụ Tôm sú → "Tôm"; Gan heo, đậu phộng → "Thịt heo; Đậu phộng". Nguyên liệu gốc phải đã có hoặc nằm trong cùng file. Để trống khi cập nhật thì giữ nhóm cũ.'],
     [],
     ['Mã nhóm dị ứng', 'Tên nhóm'],
     ...(groups || []).map((g) => [g.code, g.name]),
@@ -48,7 +49,7 @@ export async function adminGetIngredientImportTemplate(req, res) {
   res.setHeader('Content-Type', XLSX_MIME);
   res.setHeader('Content-Disposition', 'attachment; filename="mau-nhap-nguyen-lieu.xlsx"');
   return res.send(buildXlsx([
-    { name: 'nguyen_lieu', rows: [IMPORT_COLUMNS, EXAMPLE_ROW], cols: [20, 14, 22, 30, 12] },
+    { name: 'nguyen_lieu', rows: [IMPORT_COLUMNS, EXAMPLE_ROW], cols: [20, 14, 22, 30, 12, 24] },
     { name: 'Huong_dan', rows: guide, cols: [22, 12, 70] },
   ]));
 }
@@ -82,12 +83,14 @@ export async function adminImportIngredients(req, res) {
     return sendError(res, 422, 'TOO_MANY_ROWS', `File có ${dataRows.length} dòng, tối đa ${MAX_IMPORT_ROWS} dòng dữ liệu.`);
   }
 
-  const [ingRes, groupRes] = await Promise.all([
+  const [ingRes, groupRes, linkRes] = await Promise.all([
     supabaseAdmin.from('ingredients').select('id, name, normalized_name, aliases, default_unit, allergen_group_id, is_common'),
     supabaseAdmin.from('allergen_groups').select('id, code'),
+    supabaseAdmin.from('ingredient_parents').select('ingredient_id, parent_id'),
   ]);
   if (ingRes.error) throw ingRes.error;
   if (groupRes.error) throw groupRes.error;
+  if (linkRes.error) throw linkRes.error;
   // Nguyên liệu đã có theo tên chuẩn và tên gọi khác (đã chuẩn hóa)
   const existingByKey = new Map();
   for (const ing of ingRes.data || []) {
@@ -97,11 +100,12 @@ export async function adminImportIngredients(req, res) {
   const groupByCode = new Map((groupRes.data || []).map((g) => [g.code.toLowerCase(), g.id]));
 
   const errors = [];
-  const toCreate = [];
-  const toUpdate = [];
+  let toCreate = [];
+  let toUpdate = [];
   const skipped = [];
   const rowByKey = new Map();      // tên/tên gọi khác trong file → dòng đầu tiên dùng nó
   const rowByExisting = new Map(); // id nguyên liệu đã có → dòng đầu tiên trùng với nó
+  const rowNode = new Map();       // dòng hợp lệ → nút trong đồ thị nhóm: id nguyên liệu đã có, hoặc "new:<dòng>"
 
   for (const { row, obj } of dataRows) {
     const rowErrors = [];
@@ -132,6 +136,15 @@ export async function adminImportIngredients(req, res) {
       aliasKeys.push(key);
     }
 
+    // Nhóm nguyên liệu (nguyên liệu gốc), không được là chính nó
+    const parents = [];
+    for (const p of String(obj.parent_names ?? '').split(';').map(cleanName).filter(Boolean)) {
+      if (!parents.some((x) => x.key === normalizeText(p))) parents.push({ name: p, key: normalizeText(p) });
+    }
+    if (parents.some((p) => p.key === nameKey || aliasKeys.includes(p.key))) {
+      err('parent_names', 'SELF_PARENT', 'Nguyên liệu không thể thuộc nhóm của chính nó.');
+    }
+
     // Trùng giữa các dòng trong file (theo tên chuẩn và tên gọi khác)
     if (name) {
       const keys = [nameKey, ...aliasKeys];
@@ -158,10 +171,18 @@ export async function adminImportIngredients(req, res) {
     }
 
     if (!existing) {
-      toCreate.push({ name, default_unit: defaultUnit, allergen_group_id: allergenGroupId, aliases, is_common: isCommon ?? false });
+      rowNode.set(row, `new:${row}`);
+      toCreate.push({
+        row,
+        node: `new:${row}`,
+        parents,
+        values: { name, default_unit: defaultUnit, allergen_group_id: allergenGroupId, aliases, is_common: isCommon ?? false },
+      });
     } else if (onDuplicate === 'skip') {
+      rowNode.set(row, String(existing.id));
       skipped.push({ row, name, existing_id: Number(existing.id) });
     } else {
+      rowNode.set(row, String(existing.id));
       // Gộp tên gọi khác, không xóa tên gọi cũ; tên trong file khác tên chuẩn thì thêm làm tên gọi khác
       const merged = [...(existing.aliases || [])];
       const mergedKeys = new Set([existing.normalized_name, ...merged.map(normalizeText)]);
@@ -170,6 +191,9 @@ export async function adminImportIngredients(req, res) {
         if (!mergedKeys.has(key)) { merged.push(a); mergedKeys.add(key); }
       }
       toUpdate.push({
+        row,
+        node: String(existing.id),
+        parents,
         existing,
         values: {
           id: existing.id,
@@ -184,12 +208,61 @@ export async function adminImportIngredients(req, res) {
     }
   }
 
+  // Nhóm nguyên liệu: nguyên liệu gốc phải đã có hoặc nằm trong cùng file, và không tạo vòng (A thuộc B, B thuộc A).
+  // Dòng có nhóm lỗi bị loại; lặp lại vì dòng khác có thể đang dùng dòng vừa bị loại làm nguyên liệu gốc.
+  const nodeOfKey = (k) => {
+    const ing = existingByKey.get(k);
+    if (ing) return String(ing.id);
+    return rowByKey.has(k) ? rowNode.get(rowByKey.get(k)) ?? null : null;
+  };
+  const baseParents = new Map();
+  for (const l of linkRes.data || []) {
+    const id = String(l.ingredient_id);
+    if (!baseParents.has(id)) baseParents.set(id, []);
+    baseParents.get(id).push(String(l.parent_id));
+  }
+  for (let changed = true; changed;) {
+    changed = false;
+    const entries = [...toCreate, ...toUpdate];
+    const graph = new Map(baseParents);
+    const failed = new Map();
+    for (const e of entries.filter((x) => x.parents.length)) {
+      e.parentNodes = [];
+      for (const p of e.parents) {
+        const node = nodeOfKey(p.key);
+        if (node) { if (!e.parentNodes.includes(node)) e.parentNodes.push(node); } else failed.set(e, { code: 'PARENT_NOT_FOUND', message: `Không tìm thấy nguyên liệu gốc "${p.name}".` });
+      }
+      graph.set(e.node, e.parentNodes);
+    }
+    for (const e of entries.filter((x) => x.parents.length && !failed.has(x))) {
+      const seen = new Set();
+      const stack = [...e.parentNodes];
+      while (stack.length) {
+        const n = stack.pop();
+        if (n === e.node) {
+          failed.set(e, { code: 'PARENT_CYCLE', message: 'Nhóm nguyên liệu tạo vòng lặp (nguyên liệu gốc lại thuộc nhóm của nguyên liệu này).' });
+          break;
+        }
+        if (!seen.has(n)) { seen.add(n); stack.push(...(graph.get(n) || [])); }
+      }
+    }
+    for (const [e, { code, message }] of failed) {
+      errors.push({ row: e.row, field: 'parent_names', code, message });
+      rowNode.delete(e.row);
+      changed = true;
+    }
+    toCreate = toCreate.filter((e) => !failed.has(e));
+    toUpdate = toUpdate.filter((e) => !failed.has(e));
+  }
+  const groupedCount = [...toCreate, ...toUpdate].filter((e) => e.parents.length).length;
+
   const result = {
     dry_run: dryRun,
     file_name: req.file.originalname,
     total_rows: dataRows.length,
     created_count: toCreate.length,
     updated_count: toUpdate.length,
+    grouped_count: groupedCount,
     skipped,
     errors,
     warnings,
@@ -205,7 +278,7 @@ export async function adminImportIngredients(req, res) {
   if (toCreate.length > 0) {
     const { data, error } = await supabaseAdmin
       .from('ingredients')
-      .insert(toCreate.map((v) => ({ ...v, needs_review: false, created_by: req.user.id })))
+      .insert(toCreate.map((e) => ({ ...e.values, needs_review: false, created_by: req.user.id })))
       .select('id, name');
     if (error) {
       console.error('[Import] Lỗi thêm nguyên liệu:', error);
@@ -222,8 +295,30 @@ export async function adminImportIngredients(req, res) {
     }
   }
 
-  // Nhóm dị ứng thay đổi thì các gợi ý đã lưu đệm không còn đúng (luồng 2c)
-  if (toUpdate.some((u) => (u.existing.allergen_group_id ?? null) !== (u.values.allergen_group_id ?? null))) {
+  // Nhóm nguyên liệu: dòng cập nhật có parent_names thì thay toàn bộ nhóm cũ; để trống thì giữ nguyên
+  const grouped = [...toCreate, ...toUpdate].filter((e) => e.parents.length);
+  if (grouped.length > 0) {
+    const createdIdByName = new Map(created.map((c) => [normalizeText(c.name), Number(c.id)]));
+    const idOfNode = new Map(toCreate.map((e) => [e.node, createdIdByName.get(normalizeText(e.values.name))]));
+    const resolve = (node) => (node.startsWith('new:') ? idOfNode.get(node) : Number(node));
+    const replacedIds = toUpdate.filter((e) => e.parents.length).map((e) => Number(e.existing.id));
+    let linkError = null;
+    if (replacedIds.length > 0) {
+      ({ error: linkError } = await supabaseAdmin.from('ingredient_parents').delete().in('ingredient_id', replacedIds));
+    }
+    if (!linkError) {
+      const links = grouped.flatMap((e) => e.parentNodes.map((p) => ({ ingredient_id: resolve(e.node), parent_id: resolve(p) })));
+      ({ error: linkError } = await supabaseAdmin.from('ingredient_parents').insert(links));
+    }
+    if (linkError) {
+      if (created.length > 0) await supabaseAdmin.from('ingredients').delete().in('id', created.map((c) => c.id));
+      console.error('[Import] Lỗi ghi nhóm nguyên liệu:', linkError);
+      return sendError(res, 500, 'IMPORT_FAILED', 'Lỗi khi ghi nhóm nguyên liệu; đã hoàn tác nguyên liệu mới. Nguyên liệu cập nhật có thể đã mất nhóm cũ, hãy nhập lại file.');
+    }
+  }
+
+  // Nhóm dị ứng hoặc nhóm nguyên liệu thay đổi thì các gợi ý đã lưu đệm không còn đúng (luồng 2c)
+  if (grouped.length > 0 || toUpdate.some((u) => (u.existing.allergen_group_id ?? null) !== (u.values.allergen_group_id ?? null))) {
     clearRecommendationCache();
   }
 
@@ -233,6 +328,7 @@ export async function adminImportIngredients(req, res) {
     total_rows: dataRows.length,
     created_ids: created.map((c) => Number(c.id)),
     updated_ids: toUpdate.map((u) => Number(u.existing.id)),
+    grouped_count: grouped.length,
     skipped_count: skipped.length,
   });
 

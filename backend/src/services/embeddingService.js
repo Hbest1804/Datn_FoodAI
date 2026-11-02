@@ -22,7 +22,7 @@ export function parseVector(value) {
   }
 }
 
-export function toPgVector(vec) {
+function toPgVector(vec) {
   return `[${vec.join(',')}]`;
 }
 

@@ -1,13 +1,13 @@
 {
-  "name": "culina-ai-backend",
+  "name": "chefai-backend",
   "version": "1.0.0",
-  "description": "Backend Node.js (Express + Supabase + Gemini) cho CulinaAI",
+  "description": "Backend Node.js (Express + Supabase + Gemini) cho ChefAI",
   "type": "module",
   "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "test": "node --test"
+    "test": "node --test \"test/**/*.test.js\""
   },
   "engines": {
     "node": ">=18"

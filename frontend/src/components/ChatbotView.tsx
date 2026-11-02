@@ -4,8 +4,6 @@ import {
   Sparkles, 
   Flame, 
   Clock, 
-  Camera, 
-  Mic, 
   RotateCcw, 
   Sliders, 
   ChefHat, 
@@ -21,7 +19,7 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { UserProfile, ChatMessage, Recipe, ChatSession, GuestQuota } from '../types';
-import { apiService } from '../services/api';
+import { apiService } from '../api';
 import { normalizeDish, formatDifficulty } from '../utils/dishUtils';
 import { toast, showConfirm } from './NotificationModal';
 
@@ -86,12 +84,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
   const isGuest = currentUser.role === 'guest';
 
   // Guest Quota State
-  const [guestQuota, setGuestQuota] = useState<GuestQuota>({
-    limit: 5,
-    used: 0,
-    remaining: 5,
-    resets_at: new Date(Date.now() + 86400000).toISOString(),
-  });
+  const [guestQuota, setGuestQuota] = useState<GuestQuota | null>(null);
 
   // User Sessions State
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -105,18 +98,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
   const [feedbackSuccessId, setFeedbackSuccessId] = useState<string | null>(null);
 
   // Fridge ingredient attachments
-  const [attachedFridge, setAttachedFridge] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('culina_fridge');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          return parsed.map((item: any) => item.name || String(item)).filter(Boolean);
-        }
-      }
-    } catch {}
-    return [];
-  });
+  const [attachedFridge, setAttachedFridge] = useState<string[]>([]);
   const [showAttachFridge, setShowAttachFridge] = useState(false);
   const [newFridgeItem, setNewFridgeItem] = useState('');
 
@@ -159,39 +141,6 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
 
           if (systemMatch) {
             list.push(systemMatch);
-          } else {
-            // Trích xuất thời gian nấu nếu có trong đoạn văn (ví dụ: "15 phút", "20 phút")
-            const afterText = text.slice(match.index, match.index + 200);
-            const timeMatch = afterText.match(/(\d+)\s*phút/i);
-            const cookingTime = timeMatch ? parseInt(timeMatch[1], 10) : 15;
-
-            list.push({
-              id: `ai-dish-${candidate.replace(/\s+/g, '-').toLowerCase()}`,
-              title: candidate,
-              name: candidate,
-              slug: candidate.replace(/\s+/g, '-').toLowerCase(),
-              image: getAppetizingImageForDishName(candidate),
-              image_url: getAppetizingImageForDishName(candidate),
-              cookingTime,
-              cook_time_minutes: cookingTime,
-              difficulty: 'Dễ',
-              category: 'Món gợi ý AI',
-              description: `Món ăn dinh dưỡng chuẩn vị được Bếp Trưởng ChefAI tư vấn riêng cho bữa ăn của bạn.`,
-              ingredients: [
-                { name: 'Nguyên liệu tươi sạch', unit: 'theo khẩu phần gia đình' },
-                { name: 'Gia vị cơ bản', unit: 'vừa đủ' }
-              ],
-              steps: [
-                { order: 1, instruction: 'Sơ chế sạch nguyên liệu và để ráo nước.' },
-                { order: 2, instruction: `Chế biến món ${candidate} trong khoảng ${cookingTime} phút theo hướng dẫn.` },
-                { order: 3, instruction: 'Trình bày ra đĩa, nêm nếm vừa miệng và thưởng thức khi còn nóng.' }
-              ],
-              macros: { calories: 380, protein: 22, carbs: 35, fat: 12 },
-              servings: 2,
-              rating: 0,
-              reviewCount: 0,
-              tags: [],
-            });
           }
         }
       }
@@ -250,11 +199,11 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
             role: 'assistant',
             sender: 'assistant',
             timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
-            content: `Xin chào ${currentUser.name}! Tôi là Bếp trưởng AI của ChefAI. Dựa trên hồ sơ khẩu vị của bạn (${currentUser.dietPreference}), tôi sẵn sàng đề xuất món ăn tối ưu dinh dưỡng, loại bỏ hoàn toàn dị ứng và cân đối calo hôm nay.`,
+            content: `Xin chào ${currentUser.name}! Tôi là Bếp trưởng AI của ChefAI. Dựa trên hồ sơ khẩu vị của bạn (${currentUser.dietPreference || 'chưa thiết lập'}), tôi sẵn sàng đề xuất món ăn tối ưu dinh dưỡng, loại bỏ hoàn toàn dị ứng và cân đối calo hôm nay.`,
             quickReplies: [
               'Gợi ý bữa trưa dưới 400 Kcal',
               'Thực đơn Eat Clean phục hồi sau tập',
-              'Món gì từ nguyên liệu tủ lạnh hôm nay?',
+              'Món gì từ nguyên liệu có sẵn hôm nay?',
               'Bí quyết xào ức gà mềm mọng không bị khô'
             ]
           }
@@ -297,7 +246,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
           role: 'assistant',
           sender: 'assistant',
           timestamp: 'Vừa xong',
-          content: 'Xin chào bạn! Tôi là Bếp trưởng AI ChefAI. Bạn có thể hỏi công thức nấu ăn, gợi ý món từ tủ lạnh hoặc tính toán calo dinh dưỡng tức thì.\n\nBạn đang có những nguyên liệu gì hoặc cần tư vấn món ăn nào hôm nay?',
+          content: 'Xin chào bạn! Tôi là Bếp trưởng AI ChefAI. Bạn có thể hỏi công thức nấu ăn, gợi ý món từ nguyên liệu có sẵn hoặc tính toán calo dinh dưỡng tức thì.\n\nBạn đang có những nguyên liệu gì hoặc cần tư vấn món ăn nào hôm nay?',
           quickReplies: [
             'Tôi có ức gà và bông cải xanh, nấu món gì?',
             'Gợi ý bữa tối Eat Clean dưới 450 kcal',
@@ -407,7 +356,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
           role: 'assistant',
           sender: 'assistant',
           timestamp: 'Vừa xong',
-          content: 'Xin chào bạn! Tôi là Bếp trưởng AI ChefAI. Bạn có thể hỏi công thức nấu ăn, gợi ý món từ tủ lạnh hoặc tính toán calo dinh dưỡng tức thì.\n\nBạn đang có những nguyên liệu gì hoặc cần tư vấn món ăn nào hôm nay?',
+          content: 'Xin chào bạn! Tôi là Bếp trưởng AI ChefAI. Bạn có thể hỏi công thức nấu ăn, gợi ý món từ nguyên liệu có sẵn hoặc tính toán calo dinh dưỡng tức thì.\n\nBạn đang có những nguyên liệu gì hoặc cần tư vấn món ăn nào hôm nay?',
           quickReplies: [
             'Tôi có ức gà và bông cải xanh, nấu món gì?',
             'Bữa tối lành mạnh cho 2 người',
@@ -424,7 +373,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
     const text = textToSend || inputMessage;
     if (!text.trim() || isLoading) return;
 
-    if (isGuest && guestQuota.remaining <= 0) {
+    if (isGuest && guestQuota && guestQuota.remaining <= 0) {
       onOpenRegisterModal();
       return;
     }
@@ -513,7 +462,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
     } catch (err: any) {
       console.error('Chat error:', err);
       if (err.code === 'GUEST_LIMIT_EXCEEDED') {
-        setGuestQuota(prev => ({ ...prev, used: prev.limit, remaining: 0, resets_at: err.details?.resets_at || prev.resets_at }));
+        setGuestQuota(prev => (prev ? { ...prev, used: prev.limit, remaining: 0, resets_at: err.details?.resets_at || prev.resets_at } : prev));
         const errorMsg: ChatMessage = {
           id: `limit-${Date.now()}`,
           role: 'assistant',
@@ -566,9 +515,11 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
             <div>
               <div className="font-extrabold text-sm sm:text-base flex items-center gap-2">
                 <span>CHẾ ĐỘ KHÁCH</span>
-                <span className="bg-white/20 px-2 py-0.5 rounded-full text-xs">
-                  Còn {guestQuota.remaining}/{guestQuota.limit} lượt hỏi hôm nay
-                </span>
+                {guestQuota && (
+                  <span className="bg-white/20 px-2 py-0.5 rounded-full text-xs">
+                    Còn {guestQuota.remaining}/{guestQuota.limit} lượt hỏi hôm nay
+                  </span>
+                )}
               </div>
               <p className="text-xs text-orange-100">
                 Đăng ký tài khoản miễn phí để lưu lịch sử hội thoại, đồng bộ hồ sơ khẩu vị và hỏi đáp không giới hạn!
@@ -595,9 +546,10 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
                   Trợ Lý Thông Minh
                 </span>
                 <span className="text-emerald-600 font-semibold text-[11px]">• Trực tuyến</span>
+
               </div>
               <p className="text-slate-500 text-[11px]">
-                Đã đồng bộ khẩu vị của <strong>{currentUser.name}</strong> • Chế độ: {currentUser.dietPreference} • Calo: {currentUser.targetCalories} kcal
+                Đã đồng bộ khẩu vị của <strong>{currentUser.name}</strong> • Chế độ: {currentUser.dietPreference || 'Chưa thiết lập'} • Calo: {currentUser.targetCalories > 0 ? currentUser.targetCalories : '—'} kcal
               </p>
             </div>
           </div>
@@ -672,7 +624,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
                 className="w-full py-2 px-3 rounded-xl border border-dashed border-orange-300 bg-orange-50/50 hover:bg-orange-50 text-orange-800 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <UtensilsCrossed className="w-3.5 h-3.5" />
-                {showAttachFridge ? 'Đóng nguyên liệu đính kèm' : 'Gắn nguyên liệu tủ lạnh'}
+                {showAttachFridge ? 'Đóng nguyên liệu đính kèm' : 'Gắn nguyên liệu có sẵn'}
               </button>
             </div>
           </div>
@@ -683,12 +635,14 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
                 <ChefHat className="w-4 h-4 text-orange-500" />
                 Trợ lý Khách
               </span>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">
-                Lượt hỏi: {guestQuota.remaining}
-              </span>
+              {guestQuota && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">
+                  Lượt hỏi: {guestQuota.remaining}
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-600 leading-relaxed">
-              Bạn có thể gửi câu hỏi bất kỳ về cách chế biến món ăn, điều chỉnh độ mặn ngọt, hoặc đính kèm nguyên liệu trong tủ lạnh để Bếp trưởng gợi ý món nấu ngay.
+              Bạn có thể gửi câu hỏi bất kỳ về cách chế biến món ăn, điều chỉnh độ mặn ngọt, hoặc đính kèm nguyên liệu có sẵn để Bếp trưởng gợi ý món nấu ngay.
             </p>
             <div className="p-3 bg-slate-50 rounded-2xl text-[11px] text-slate-500 space-y-1 border border-slate-100">
               <div className="font-bold text-slate-700">Gợi ý mẫu câu hỏi nhanh:</div>
@@ -923,24 +877,13 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
               }}
               className="flex items-center gap-2"
             >
-              <button
-                type="button"
-                onClick={() => {
-                  sendMessage('Tôi có thịt bò và nấm, hãy gợi ý món ăn tối ít calo!');
-                }}
-                className="p-2.5 rounded-2xl bg-white border border-slate-200 text-slate-500 hover:text-orange-600 hover:border-orange-300 transition-all cursor-pointer shadow-2xs"
-                title="Hỏi nhanh nguyên liệu tủ lạnh"
-              >
-                <Camera className="w-4 h-4" />
-              </button>
-
               <input
                 type="text"
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
                 placeholder={
                   isGuest 
-                    ? `Nhập câu hỏi ẩm thực (Còn ${guestQuota.remaining} lượt hôm nay)...`
+                    ? `Nhập câu hỏi ẩm thực (Còn ${guestQuota ? guestQuota.remaining : '—'} lượt hôm nay)...`
                     : "Nhập câu hỏi ẩm thực, nguyên liệu có sẵn, calo mong muốn..."
                 }
                 className="flex-1 px-4 py-3 bg-white border border-slate-200 focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 rounded-2xl text-sm sm:text-base font-medium outline-none shadow-2xs transition-all"

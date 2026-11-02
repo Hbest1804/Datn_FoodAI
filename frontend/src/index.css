@@ -1,5 +1,33 @@
 @import "tailwindcss";
 
+/* ── Token giao diện ChefAI (bố cục & nền theo bản Figma, màu chủ đạo giữ cam) ── */
+@theme {
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+
+  --color-ink: #131b2e;            /* Chữ tiêu đề */
+  --color-canvas: #faf8ff;         /* Nền trang */
+  --color-surface: #f2f3ff;        /* Sidebar, footer, ô nhập liệu */
+  --color-surface-2: #eaedff;      /* Chip, nút phụ */
+  --color-line: #e2e7ff;           /* Đường kẻ, viền */
+  --color-mint: #6ffbbe;           /* Chip chế độ ăn */
+  --color-mint-ink: #002113;
+  --color-leaf: #006c49;
+  --color-danger: #ba1a1a;
+  --color-danger-soft: #ffdad6;
+
+  /* Nền & viền trung tính ngả tím nhạt như bản thiết kế (chữ vẫn giữ xám slate) */
+  --color-slate-50: #faf8ff;
+  --color-slate-100: #f2f3ff;
+  --color-slate-200: #e2e7ff;
+}
+
+/* Tiêu đề dùng phông Plus Jakarta Sans như bản thiết kế */
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
 /* ── 1. Giao diện Người dùng (User-facing): Giảm 1px, tỷ lệ chuẩn 16px vừa vặn mắt nhìn ── */
 html {
   font-size: 15.5px;
@@ -14,7 +42,7 @@ html {
 }
 
 body {
-  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  font-family: var(--font-sans);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

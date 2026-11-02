@@ -1,4 +1,4 @@
- import React from 'react';
+import React from 'react';
 import { UtensilsCrossed, Sparkles, HeartHandshake } from 'lucide-react';
 import { ChefLogo3D } from './ChefLogo3D';
 
@@ -9,16 +9,16 @@ interface FooterProps {
 
 export const Footer: React.FC<FooterProps> = ({ onSelectTab, onOpenLoginModal }) => {
   return (
-    <footer className="bg-white border-t border-slate-200 mt-20 pt-16 pb-12 text-slate-600">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-10 pb-12 border-b border-slate-100">
+    <footer className="bg-surface mt-16 pt-12 pb-10 text-slate-600">
+      <div className="w-full px-4 sm:px-6 lg:px-10 2xl:px-16">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-8 pb-12">
           {/* Col 1: Brand */}
           <div className="md:col-span-2 space-y-4 pr-6">
             <div className="flex items-center gap-3">
               <ChefLogo3D size="md" />
-              <span className="text-2xl font-black text-slate-900 tracking-tight">ChefAI</span>
+              <span className="font-display text-xl font-bold text-ink tracking-tight">ChefAI</span>
             </div>
-            <p className="text-sm text-slate-500 leading-relaxed max-w-md">
+            <p className="font-display text-sm text-slate-600 leading-[22.75px] max-w-md">
               Hệ thống trợ lý ẩm thực thông minh tích hợp trí tuệ nhân tạo, tư vấn công thức nấu nướng, 
               đề xuất thực đơn cá nhân hóa theo khẩu vị, quản lý dinh dưỡng và kiểm soát an toàn dị ứng thực phẩm.
             </p>
@@ -30,10 +30,10 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab, onOpenLoginModal })
 
           {/* Col 2: Features */}
           <div>
-            <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-4">
+            <h4 className="font-sans text-sm font-bold text-ink uppercase tracking-wide mb-4">
               TÍNH NĂNG NỔI BẬT
             </h4>
-            <ul className="space-y-2.5 text-sm">
+            <ul className="space-y-2 text-xs">
               <li>
                 <button
                   onClick={() => onSelectTab('search')}
@@ -55,7 +55,7 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab, onOpenLoginModal })
                   onClick={() => onSelectTab('chat')}
                   className="hover:text-orange-600 transition-colors text-left cursor-pointer"
                 >
-                  Tìm món từ tủ lạnh (Chống lãng phí)
+                  Tìm món từ nguyên liệu có sẵn
                 </button>
               </li>
               <li>
@@ -79,7 +79,7 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab, onOpenLoginModal })
                   onClick={() => onSelectTab('planner')}
                   className="hover:text-orange-600 transition-colors text-left cursor-pointer"
                 >
-                  Lên thực đơn tuần & Quản lý tủ lạnh
+                  Lên thực đơn tuần
                 </button>
               </li>
             </ul>
@@ -87,7 +87,7 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab, onOpenLoginModal })
 
           {/* Col 3: Social Media & Channels */}
           <div>
-            <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-4">
+            <h4 className="font-sans text-sm font-bold text-ink uppercase tracking-wide mb-4">
               KẾT NỐI VỚI CHÚNG TÔI
             </h4>
             <p className="text-xs text-slate-500 mb-3">
@@ -171,11 +171,12 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab, onOpenLoginModal })
         </div>
 
         {/* Bottom bar */}
-        <div className="pt-8 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 gap-4">
-          <div>
-            © 2026 ChefAI. Bảo lưu mọi quyền. • Trợ lý ẩm thực & dinh dưỡng thông minh
+        <div className="pt-6 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 gap-4">
+          <div className="flex flex-wrap items-center gap-1">
+            © 2026 ChefAI. Bảo lưu mọi quyền. ·
+            <span className="text-[11px] font-bold text-orange-600">Trợ lý ẩm thực & dinh dưỡng thông minh</span>
           </div>
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-6 text-[11px] font-bold text-slate-600">
             <span className="hover:text-slate-600 cursor-pointer">An toàn thực phẩm</span>
             <span className="hover:text-slate-600 cursor-pointer">Bảo vệ dữ liệu</span>
             <span className="hover:text-slate-600 cursor-pointer">Điều khoản dịch vụ</span>
