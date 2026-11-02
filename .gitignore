@@ -44,3 +44,5 @@ __pycache__/
 
 # Tai lieu, khong day len GitHub
 web-html/
+*.drawio
+*.drawio.bkp
