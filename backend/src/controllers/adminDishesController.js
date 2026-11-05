@@ -3,6 +3,8 @@
 
 import { supabaseAdmin } from '../config/supabase.js';
 import { recordAuditLog } from '../services/auditService.js';
+import { invalidateCatalog } from '../services/cacheService.js';
+import { getDietTypes } from '../services/dietService.js';
 import { reindexDish, reindexDishInBackground } from '../services/embeddingService.js';
 import { inspectImage } from '../utils/image.js';
 import { importRemoteDishImage, isOwnDishImageUrl, removeDishImages, uploadDishImage } from '../services/imageStorageService.js';
@@ -397,7 +399,12 @@ export async function adminGetImportTemplate(req, res) {
     return res.send(buildCsvTemplate(DISH_IMPORT_COLUMNS, EXAMPLE_DISH));
   }
 
-  const { data: tags } = await supabaseAdmin.from('tags').select('name').order('name');
+  const [{ data: tags }, dietTypes] = await Promise.all([
+    supabaseAdmin.from('tags').select('id, name').order('name'),
+    getDietTypes(),
+  ]);
+  // Thẻ gắn với chế độ ăn (diet_types.tag_id): chế độ bắt buộc dùng để lọc cứng khi gợi ý
+  const dietOfTag = new Map(dietTypes.filter((d) => d.tag_id != null).map((d) => [Number(d.tag_id), d]));
   const guide = [
     ['Cột', 'Bắt buộc', 'Mô tả'],
     ['slug', 'Không', 'Mã món: không dấu, viết thường, nối bằng "-"; để trống thì tự sinh từ tên món. Dùng để nhập công thức từ file ở Quản lý công thức.'],
@@ -412,21 +419,27 @@ export async function adminGetImportTemplate(req, res) {
     ['protein_g', 'Không', 'Đạm mỗi khẩu phần (g).'],
     ['carbs_g', 'Không', 'Tinh bột mỗi khẩu phần (g).'],
     ['fat_g', 'Không', 'Chất béo mỗi khẩu phần (g).'],
-    ['tags', 'Không', 'Tên thẻ, phân tách bằng dấu ";" (phải có trong danh sách bên dưới).'],
+    ['tags', 'Không', 'Tên thẻ, phân tách bằng dấu ";" (phải có trong danh sách bên dưới). Thẻ chế độ ăn: xem cột "Chế độ ăn" bên dưới.'],
     ['image_url', 'Không', 'Link ảnh http(s) (JPG, PNG hoặc WEBP, tối đa 5 MB). Khi lưu, ảnh được tải về kho ảnh của hệ thống.'],
     ['source_url', 'Không', 'Nguồn tham khảo công thức (URL http(s)).'],
     [],
     ['Món mới luôn ở trạng thái ẩn; bổ sung công thức ở Quản lý công thức rồi mới công khai.'],
+    ['CHẾ ĐỘ ĂN: người dùng chọn chế độ "bắt buộc" (vd Ăn chay) chỉ được gợi ý món mang thẻ của chế độ đó. Món chay phải gắn thẻ tương ứng;'],
+    ['món thuần chay gắn thẻ Thuần chay (tự được tính là món chay). Món gắn thẻ chay không được có thịt, cá, hải sản, nước mắm, dầu hào, hạt nêm'],
+    ['(dùng nước tương, dầu hào chay, hạt nêm nấm) – khi nhập công thức hệ thống sẽ báo lỗi nếu vi phạm.'],
     [],
-    ['Thẻ hiện có'],
-    ...(tags || []).map((t) => [t.name]),
+    ['Thẻ hiện có', 'Chế độ ăn', 'Loại ràng buộc'],
+    ...(tags || []).map((t) => {
+      const d = dietOfTag.get(Number(t.id));
+      return d ? [t.name, d.name, d.is_strict ? 'Bắt buộc (lọc cứng)' : 'Ưu tiên (mềm)'] : [t.name];
+    }),
   ];
 
   res.setHeader('Content-Type', XLSX_MIME);
   res.setHeader('Content-Disposition', 'attachment; filename="mau-nhap-mon-an.xlsx"');
   return res.send(buildXlsx([
     { name: SHEET_DISHES, rows: [DISH_IMPORT_COLUMNS, EXAMPLE_DISH], cols: DISH_IMPORT_COLUMNS.map((c) => Math.max(14, c.length + 2)) },
-    { name: 'Huong_dan', rows: guide, cols: [20, 10, 90] },
+    { name: 'Huong_dan', rows: guide, cols: [20, 22, 90] },
   ]));
 }
 
@@ -650,6 +663,7 @@ async function readRecipe(dishId) {
   ]);
   if (stepsRes.error) throw stepsRes.error;
   if (ingsRes.error) throw ingsRes.error;
+  const groupsOf = await readIngredientGroups((ingsRes.data || []).map((di) => Number(di.ingredient.id)));
   return {
     steps: (stepsRes.data || []).map((s) => ({ order: s.step_order, content: s.content })),
     ingredients: (ingsRes.data || []).map((di) => ({
@@ -659,8 +673,30 @@ async function readRecipe(dishId) {
       unit: di.unit,
       is_optional: di.is_optional,
       needs_review: di.ingredient.needs_review,
+      groups: groupsOf.get(Number(di.ingredient.id)) || [],
     })),
   };
+}
+
+/** Nhóm trực tiếp (tên nguyên liệu gốc) của các nguyên liệu: id → danh sách tên. */
+async function readIngredientGroups(ingredientIds) {
+  const result = new Map();
+  if (ingredientIds.length === 0) return result;
+  const { data: links, error } = await supabaseAdmin
+    .from('ingredient_parents').select('ingredient_id, parent_id').in('ingredient_id', ingredientIds);
+  if (error) throw error;
+  if (!links?.length) return result;
+  const { data: parents, error: pErr } = await supabaseAdmin
+    .from('ingredients').select('id, name').in('id', [...new Set(links.map((l) => l.parent_id))]);
+  if (pErr) throw pErr;
+  const nameOf = new Map((parents || []).map((p) => [Number(p.id), p.name]));
+  for (const l of links) {
+    const id = Number(l.ingredient_id);
+    if (!result.has(id)) result.set(id, []);
+    result.get(id).push(nameOf.get(Number(l.parent_id)));
+  }
+  for (const names of result.values()) names.sort((a, b) => a.localeCompare(b, 'vi'));
+  return result;
 }
 
 /**
@@ -703,7 +739,11 @@ async function prepareRecipe(body) {
     byName.set(i.normalized_name, i);
     (i.aliases || []).forEach((a) => { if (!byName.has(normalizeText(a))) byName.set(normalizeText(a), i); });
   }
-  const { data: groups } = await supabaseAdmin.from('allergen_groups').select('id');
+  const [{ data: groups }, linkRes] = await Promise.all([
+    supabaseAdmin.from('allergen_groups').select('id'),
+    supabaseAdmin.from('ingredient_parents').select('ingredient_id, parent_id'),
+  ]);
+  if (linkRes.error) throw linkRes.error;
   const groupIds = new Set((groups || []).map((g) => g.id));
 
   const lines = [];
@@ -742,6 +782,27 @@ async function prepareRecipe(body) {
     if (seen.has(key)) { add(f, 'DUPLICATE_INGREDIENT', 'Nguyên liệu bị trùng trong công thức.'); return; }
     seen.add(key);
 
+    // Nhóm (tên nguyên liệu gốc): gửi lên thì thay toàn bộ nhóm của nguyên liệu; không gửi thì giữ nguyên
+    let lineGroups = null;
+    if (ing?.groups !== undefined && ing.groups !== null) {
+      const rawGroups = Array.isArray(ing.groups) ? ing.groups : String(ing.groups).split(';');
+      lineGroups = [];
+      for (const raw of rawGroups) {
+        const g = typeof raw === 'string' ? raw.trim().replace(/\s+/g, ' ') : '';
+        if (!g) continue;
+        if (g.length > 100) { add(`${f}.groups`, 'INVALID_VALUE', 'Tên nhóm tối đa 100 ký tự.'); continue; }
+        const parent = byName.get(normalizeText(g)) || null;
+        const groupKey = parent ? `id:${parent.id}` : `new:${normalizeText(g)}`;
+        if (groupKey === key) { add(`${f}.groups`, 'SELF_GROUP', 'Nguyên liệu không thể thuộc nhóm của chính nó.'); continue; }
+        if (lineGroups.some((x) => x.key === groupKey)) continue;
+        lineGroups.push({ key: groupKey, name: parent ? parent.name : g });
+        // Nguyên liệu gốc chưa có thì tạo mới cùng lúc với nguyên liệu của công thức
+        if (!parent && !pendingNew.has(groupKey)) {
+          pendingNew.set(groupKey, { name: g, default_unit: 'g', allergen_group_id: null, needs_review: false });
+        }
+      }
+    }
+
     lines.push({
       key,
       existing,
@@ -752,7 +813,39 @@ async function prepareRecipe(body) {
       review: existing?.needs_review && (allergenGroupId !== null || noAllergen)
         ? { allergen_group_id: allergenGroupId, needs_review: false }
         : null,
+      groups: lineGroups,
+      idx,
+      label: existing ? existing.name : pendingNew.get(key)?.name,
     });
+  });
+
+  // Nhóm không được tạo vòng lặp: nhóm cũ của nguyên liệu được sửa nhóm bị thay, nên bỏ khỏi đồ thị trước khi kiểm tra
+  const replacing = new Set(lines.filter((l) => l.groups).map((l) => l.key));
+  const parentsOf = new Map();
+  const addEdge = (child, parent) => {
+    if (!parentsOf.has(child)) parentsOf.set(child, new Set());
+    parentsOf.get(child).add(parent);
+  };
+  for (const l of linkRes.data || []) {
+    if (!replacing.has(`id:${l.ingredient_id}`)) addEdge(`id:${l.ingredient_id}`, `id:${l.parent_id}`);
+  }
+  for (const l of lines) for (const g of l.groups || []) addEdge(l.key, g.key);
+  const reaches = (from, target) => {
+    const seenNodes = new Set();
+    const stack = [...(parentsOf.get(from) || [])];
+    while (stack.length) {
+      const node = stack.pop();
+      if (node === target) return true;
+      if (seenNodes.has(node)) continue;
+      seenNodes.add(node);
+      stack.push(...(parentsOf.get(node) || []));
+    }
+    return false;
+  };
+  lines.forEach((l) => {
+    if (l.groups?.length && reaches(l.key, l.key)) {
+      add(`ingredients[${l.idx}].groups`, 'GROUP_CYCLE', `Nhóm của "${l.label}" tạo vòng lặp (nguyên liệu gốc lại thuộc nhóm của nguyên liệu này).`);
+    }
   });
 
   return { details, steps: orderedSteps, lines, pendingNew };
@@ -810,6 +903,25 @@ async function writeRecipe(dishId, prepared, userId, publish) {
       .eq('dish_id', dishId)
       .gt('step_order', stepRows.length);
     if (pruneStepErr) throw pruneStepErr;
+
+    // Nhóm: ghi liên kết mới trước rồi xóa liên kết thừa, lỗi giữa chừng thì nhóm cũ vẫn còn
+    const groupLines = prepared.lines.filter((l) => l.groups);
+    if (groupLines.length > 0) {
+      const idOf = (k) => (k.startsWith('id:') ? Number(k.slice(3)) : newIdByKey.get(k));
+      const linkRows = groupLines.flatMap((l) => l.groups.map((g) => ({ ingredient_id: idOf(l.key), parent_id: idOf(g.key) })));
+      if (linkRows.length > 0) {
+        const { error } = await supabaseAdmin.from('ingredient_parents')
+          .upsert(linkRows, { onConflict: 'ingredient_id,parent_id', ignoreDuplicates: true });
+        if (error) throw error;
+      }
+      for (const l of groupLines) {
+        let prune = supabaseAdmin.from('ingredient_parents').delete().eq('ingredient_id', idOf(l.key));
+        if (l.groups.length > 0) prune = prune.not('parent_id', 'in', `(${l.groups.map((g) => idOf(g.key)).join(',')})`);
+        const { error } = await prune;
+        if (error) throw error;
+      }
+      invalidateCatalog();
+    }
 
     if (publish) {
       const { error } = await supabaseAdmin.from('dishes').update({ is_published: true }).eq('id', dishId);

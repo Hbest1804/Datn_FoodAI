@@ -20,6 +20,7 @@ import {
 import { UserProfile } from '../types';
 import { ChefLogo3D } from './ChefLogo3D';
 import { apiService } from '../api';
+import type { ResetCredentials } from '../api/auth.api';
 
 interface AuthModalsProps {
   isOpen: boolean;
@@ -62,6 +63,39 @@ const GoogleIcon: React.FC = () => (
   </svg>
 );
 
+type FieldErrors = Partial<Record<'display_name' | 'email' | 'password' | 'confirm_password', string>>;
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const WEAK_PASSWORD_MSG = 'Mật khẩu tối thiểu 8 ký tự, gồm chữ hoa, chữ thường và chữ số.';
+const isStrongPassword = (p: string) => p.length >= 8 && /[a-z]/.test(p) && /[A-Z]/.test(p) && /\d/.test(p);
+
+/** Lấy lỗi theo trường từ ApiError (422 VALIDATION_ERROR có details, 409 EMAIL_ALREADY_EXISTS). */
+function fieldErrorsFromApi(err: any): FieldErrors {
+  const out: FieldErrors = {};
+  if (Array.isArray(err?.details)) {
+    for (const d of err.details) {
+      if (d?.field && d?.message && !(d.field in out)) (out as any)[d.field] = d.message;
+    }
+  }
+  if (err?.code === 'EMAIL_ALREADY_EXISTS' && !out.email) out.email = err.message;
+  return out;
+}
+
+const inputClass = (hasError: boolean, padding: string) =>
+  `w-full ${padding} py-2.5 border rounded-xl text-xs font-medium outline-none transition-all ${
+    hasError
+      ? 'bg-red-50/60 border-red-400 focus:bg-white focus:border-red-500'
+      : 'bg-slate-50 border-slate-200 focus:bg-white focus:border-orange-500'
+  }`;
+
+const FieldError: React.FC<{ id: string; message?: string }> = ({ id, message }) =>
+  message ? (
+    <p id={id} role="alert" className="mt-1 text-[11px] font-medium text-red-600 flex items-start gap-1">
+      <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-px" />
+      {message}
+    </p>
+  ) : null;
+
 export const AuthModals: React.FC<AuthModalsProps> = ({
   isOpen,
   type,
@@ -82,6 +116,14 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  // Lỗi theo từng trường của form đăng nhập / đăng ký (khóa trùng tên field backend trả về trong error.details)
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const clearFieldError = (field: keyof FieldErrors) =>
+    setFieldErrors(prev => (prev[field] ? { ...prev, [field]: undefined } : prev));
+
+  useEffect(() => {
+    setFieldErrors({});
+  }, [type]);
 
   // Register taste questionnaire states
   const [selectedDiet, setSelectedDiet] = useState('Eat Clean');
@@ -90,32 +132,43 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
   const [forgotStep, setForgotStep] = useState<1 | 2 | 3 | 4>(1);
   const [forgotEmail, setForgotEmail] = useState('');
   const [otpCode, setOtpCode] = useState('');
+  // Token dài lấy từ liên kết trong email; khi có thì dùng thay cho email + mã
+  const [linkToken, setLinkToken] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
 
-  const verifyCode = async (code: string) => {
+  const resetCredentials = (): ResetCredentials =>
+    linkToken ? { token: linkToken } : { email: forgotEmail.trim(), code: otpCode };
+
+  const verifyCode = async (credentials: ResetCredentials) => {
     setErrorMessage('');
     setSuccessMessage('');
     setLoading(true);
     try {
-      await apiService.auth.verifyResetToken(code);
+      await apiService.auth.verifyResetToken(credentials);
       setForgotStep(3);
     } catch (err: any) {
       setErrorMessage(err.message || 'Mã xác thực không hợp lệ hoặc đã hết hạn.');
-      setForgotStep(2);
+      // Liên kết hỏng thì quay về bước nhập email để yêu cầu mã mới
+      if ('token' in credentials) {
+        setLinkToken('');
+        setForgotStep(1);
+      } else {
+        setForgotStep(2);
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  // Mở từ liên kết trong email: điền sẵn mã và kiểm tra luôn
+  // Mở từ liên kết trong email: kiểm tra token trong liên kết luôn
   useEffect(() => {
     if (!initialResetToken) return;
-    const code = initialResetToken.trim();
-    setOtpCode(code);
+    const token = initialResetToken.trim();
+    setLinkToken(token);
     setForgotStep(2);
-    verifyCode(code);
+    verifyCode({ token });
   }, [initialResetToken]);
 
   if (!isOpen) return null;
@@ -129,6 +182,12 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
+    const errs: FieldErrors = {};
+    if (!email.trim()) errs.email = 'Vui lòng nhập email.';
+    else if (!EMAIL_RE.test(email.trim())) errs.email = 'Email không đúng định dạng.';
+    if (!password) errs.password = 'Vui lòng nhập mật khẩu.';
+    setFieldErrors(errs);
+    if (Object.keys(errs).length > 0) return;
     setLoading(true);
 
     try {
@@ -141,13 +200,15 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
         email: user.email,
         ...(user.avatar_url ? { avatar: user.avatar_url, avatar_url: user.avatar_url } : {}),
         role: user.role,
-        roleLabel: user.role === 'admin' ? 'Super Admin' : 'Đầu bếp tại gia',
+        roleLabel: user.role === 'admin' ? 'Quản trị viên' : 'Đầu bếp tại gia',
         isPro: true,
       });
       onClose();
     } catch (err: any) {
       console.error('Login error:', err);
-      setErrorMessage(err.message || 'Đăng nhập không thành công. Vui lòng kiểm tra lại email và mật khẩu.');
+      const apiFieldErrors = fieldErrorsFromApi(err);
+      if (Object.keys(apiFieldErrors).length > 0) setFieldErrors(apiFieldErrors);
+      else setErrorMessage(err.message || 'Đăng nhập không thành công. Vui lòng kiểm tra lại email và mật khẩu.');
     } finally {
       setLoading(false);
     }
@@ -155,11 +216,18 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
 
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (password !== regConfirm) {
-      setErrorMessage('Mật khẩu xác nhận không khớp.');
-      return;
-    }
     setErrorMessage('');
+    // Cùng quy tắc với backend (authController: validateRegister)
+    const errs: FieldErrors = {};
+    if (!name.trim()) errs.display_name = 'Vui lòng nhập tên hiển thị.';
+    else if (name.trim().length > 100) errs.display_name = 'Tên hiển thị tối đa 100 ký tự.';
+    if (!email.trim()) errs.email = 'Vui lòng nhập email.';
+    else if (!EMAIL_RE.test(email.trim())) errs.email = 'Email không đúng định dạng.';
+    if (!isStrongPassword(password)) errs.password = WEAK_PASSWORD_MSG;
+    if (!regConfirm) errs.confirm_password = 'Vui lòng nhập lại mật khẩu.';
+    else if (password !== regConfirm) errs.confirm_password = 'Mật khẩu xác nhận không khớp.';
+    setFieldErrors(errs);
+    if (Object.keys(errs).length > 0) return;
     setLoading(true);
 
     try {
@@ -183,7 +251,9 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
       onClose();
     } catch (err: any) {
       console.error('Register error:', err);
-      setErrorMessage(err.message || 'Đăng ký tài khoản không thành công. Vui lòng thử lại.');
+      const apiFieldErrors = fieldErrorsFromApi(err);
+      if (Object.keys(apiFieldErrors).length > 0) setFieldErrors(apiFieldErrors);
+      else setErrorMessage(err.message || 'Đăng ký tài khoản không thành công. Vui lòng thử lại.');
     } finally {
       setLoading(false);
     }
@@ -215,7 +285,8 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
       setErrorMessage(`Vui lòng nhập đủ ${OTP_LENGTH} số của mã xác thực.`);
       return;
     }
-    verifyCode(otpCode);
+    setLinkToken('');
+    verifyCode({ email: forgotEmail.trim(), code: otpCode });
   };
 
   const handleOtpChange = (index: number, value: string) => {
@@ -269,18 +340,22 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
     setLoading(true);
     try {
       const res = await apiService.auth.resetPassword({
-        token: otpCode,
+        ...resetCredentials(),
         new_password: newPassword,
         confirm_password: confirmPassword,
       });
       setSuccessMessage(res.message);
       setOtpCode('');
+      setLinkToken('');
       setNewPassword('');
       setConfirmPassword('');
       setForgotStep(4);
     } catch (err: any) {
-      // Mã hết hạn trong lúc nhập mật khẩu → quay lại bước nhập mã
-      if (err.code === 'INVALID_OR_EXPIRED_TOKEN') setForgotStep(2);
+      // Mã hết hạn trong lúc nhập mật khẩu → quay lại bước nhập mã (hoặc yêu cầu mã mới nếu đi từ liên kết)
+      if (err.code === 'INVALID_OR_EXPIRED_TOKEN') {
+        setForgotStep(linkToken ? 1 : 2);
+        setLinkToken('');
+      }
       setErrorMessage(err.message || 'Không thể đặt lại mật khẩu. Vui lòng thử lại.');
     } finally {
       setLoading(false);
@@ -389,7 +464,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                 </div>
               )}
 
-              <form onSubmit={handleLoginSubmit} className="space-y-4">
+              <form onSubmit={handleLoginSubmit} noValidate className="space-y-4">
                 <div>
                   <div className="flex justify-between items-center mb-1">
                     <label className="text-xs font-bold text-slate-700">EMAIL TÀI KHOẢN</label>
@@ -402,12 +477,15 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                       id="login-email"
                       autoComplete="username"
                       value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      onChange={(e) => { setEmail(e.target.value); clearFieldError('email'); }}
                       required
                       placeholder="ten@vidu.com"
-                      className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 focus:bg-white focus:border-orange-500 rounded-xl text-xs font-medium outline-none transition-all"
+                      aria-invalid={!!fieldErrors.email}
+                      aria-describedby={fieldErrors.email ? 'login-email-error' : undefined}
+                      className={inputClass(!!fieldErrors.email, 'pl-10 pr-4')}
                     />
                   </div>
+                  <FieldError id="login-email-error" message={fieldErrors.email} />
                 </div>
 
                 <div>
@@ -429,10 +507,12 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                       id="login-password"
                       autoComplete="current-password"
                       value={password}
-                      onChange={(e) => setPassword(e.target.value)}
+                      onChange={(e) => { setPassword(e.target.value); clearFieldError('password'); }}
                       required
                       placeholder="Nhập mật khẩu"
-                      className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-200 focus:bg-white focus:border-orange-500 rounded-xl text-xs font-medium outline-none transition-all"
+                      aria-invalid={!!fieldErrors.password}
+                      aria-describedby={fieldErrors.password ? 'login-password-error' : undefined}
+                      className={inputClass(!!fieldErrors.password, 'pl-10 pr-10')}
                     />
                     <button
                       type="button"
@@ -442,6 +522,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
+                  <FieldError id="login-password-error" message={fieldErrors.password} />
                 </div>
 
                 <div className="flex items-center gap-2 pt-1">
@@ -589,7 +670,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                 </div>
               )}
 
-              <form onSubmit={handleRegisterSubmit} className="space-y-4">
+              <form onSubmit={handleRegisterSubmit} noValidate className="space-y-4">
                 <div>
                   <label className="text-xs font-bold text-slate-700 block mb-1">HỌ VÀ TÊN</label>
                   <div className="relative">
@@ -597,12 +678,15 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                     <input
                       type="text"
                       value={name}
-                      onChange={(e) => setName(e.target.value)}
+                      onChange={(e) => { setName(e.target.value); clearFieldError('display_name'); }}
                       required
                       placeholder="Nguyễn Văn A"
-                      className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 focus:bg-white focus:border-orange-500 rounded-xl text-xs font-medium outline-none transition-all"
+                      aria-invalid={!!fieldErrors.display_name}
+                      aria-describedby={fieldErrors.display_name ? 'reg-name-error' : undefined}
+                      className={inputClass(!!fieldErrors.display_name, 'pl-10 pr-4')}
                     />
                   </div>
+                  <FieldError id="reg-name-error" message={fieldErrors.display_name} />
                 </div>
 
                 <div>
@@ -612,12 +696,15 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                     <input
                       type="email"
                       value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      onChange={(e) => { setEmail(e.target.value); clearFieldError('email'); }}
                       required
                       placeholder="ban@gmail.com"
-                      className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 focus:bg-white focus:border-orange-500 rounded-xl text-xs font-medium outline-none transition-all"
+                      aria-invalid={!!fieldErrors.email}
+                      aria-describedby={fieldErrors.email ? 'reg-email-error' : undefined}
+                      className={inputClass(!!fieldErrors.email, 'pl-10 pr-4')}
                     />
                   </div>
+                  <FieldError id="reg-email-error" message={fieldErrors.email} />
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -628,10 +715,12 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                         type={showRegPassword ? 'text' : 'password'}
                         autoComplete="new-password"
                         value={password}
-                        onChange={(e) => setPassword(e.target.value)}
+                        onChange={(e) => { setPassword(e.target.value); clearFieldError('password'); }}
                         required
                         placeholder="Tối thiểu 8 ký tự"
-                        className="w-full pl-3 pr-10 py-2.5 bg-slate-50 border border-slate-200 focus:bg-white focus:border-orange-500 rounded-xl text-xs font-medium outline-none transition-all"
+                        aria-invalid={!!fieldErrors.password}
+                        aria-describedby={fieldErrors.password ? 'reg-password-error' : undefined}
+                        className={inputClass(!!fieldErrors.password, 'pl-3 pr-10')}
                       />
                       <button
                         type="button"
@@ -642,6 +731,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                         {showRegPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
+                    <FieldError id="reg-password-error" message={fieldErrors.password} />
                   </div>
                   <div>
                     <label className="text-xs font-bold text-slate-700 block mb-1">XÁC NHẬN MẬT KHẨU</label>
@@ -650,10 +740,12 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                         type={showRegConfirm ? 'text' : 'password'}
                         autoComplete="new-password"
                         value={regConfirm}
-                        onChange={(e) => setRegConfirm(e.target.value)}
+                        onChange={(e) => { setRegConfirm(e.target.value); clearFieldError('confirm_password'); }}
                         required
                         placeholder="Nhập lại mật khẩu"
-                        className="w-full pl-3 pr-10 py-2.5 bg-slate-50 border border-slate-200 focus:bg-white focus:border-orange-500 rounded-xl text-xs font-medium outline-none transition-all"
+                        aria-invalid={!!fieldErrors.confirm_password}
+                        aria-describedby={fieldErrors.confirm_password ? 'reg-confirm-error' : undefined}
+                        className={inputClass(!!fieldErrors.confirm_password, 'pl-3 pr-10')}
                       />
                       <button
                         type="button"
@@ -664,6 +756,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                         {showRegConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
+                    <FieldError id="reg-confirm-error" message={fieldErrors.confirm_password} />
                   </div>
                 </div>
 
@@ -752,15 +845,15 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                   <div className="flex items-start gap-2.5">
                     <span className="w-6 h-6 rounded-lg bg-orange-100 text-orange-600 flex items-center justify-center font-bold text-[11px] shrink-0">123</span>
                     <div>
-                      <h5 className="font-bold text-slate-800">Mã xác thực 2 lớp linh hoạt</h5>
-                      <p className="text-[11px] text-slate-500">Xác minh tức thì qua Email hoặc SMS chỉ trong 30 giây.</p>
+                      <h5 className="font-bold text-slate-800">Mã xác thực một lần qua email</h5>
+                      <p className="text-[11px] text-slate-500">Mã 6 số gửi qua email, hiệu lực 15 phút và chỉ dùng một lần.</p>
                     </div>
                   </div>
 
                   <div className="flex items-start gap-2.5">
                     <span className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold text-[11px] shrink-0">AI</span>
                     <div>
-                      <h5 className="font-bold text-slate-800">Bảo toàn dữ liệu & AI Memory</h5>
+                      <h5 className="font-bold text-slate-800">Bảo toàn dữ liệu cá nhân</h5>
                       <p className="text-[11px] text-slate-500">Giữ nguyên lịch sử học hỏi vị giác, danh sách dị ứng và công thức đã ghim.</p>
                     </div>
                   </div>

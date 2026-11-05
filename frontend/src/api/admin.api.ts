@@ -13,6 +13,8 @@ export interface RecipePayload {
     unit?: string;
     allergen_group_id?: number | null;
     no_allergen?: boolean;
+    // Nhóm (tên nguyên liệu gốc), thay toàn bộ nhóm của nguyên liệu; bỏ trường này thì giữ nguyên
+    groups?: string[];
   }>;
   steps: Array<{ order: number; content: string }>;
   publish?: boolean;
@@ -42,6 +44,8 @@ export interface RecipeImportResult {
   replaced_count: number;
   published_count: number;
   new_ingredients: string[];
+  // Liên kết nhóm sẽ thêm / đã thêm: nguyên liệu → nhóm (nguyên liệu gốc)
+  new_groups: Array<{ ingredient: string; group: string }>;
   skipped: Array<{ slug: string; dish_id: string; name: string }>;
   errors: Array<{ sheet: string; row: number; slug: string | null; field: string; code: string; message: string }>;
   warnings: string[];

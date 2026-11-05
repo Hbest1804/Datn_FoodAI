@@ -34,9 +34,9 @@ export async function sendPasswordResetEmail(to, code, link) {
     from: env.smtp.from,
     to,
     subject: 'Mã đặt lại mật khẩu – Trợ lý ẩm thực',
-    text: `Mã đặt lại mật khẩu của bạn là: ${code}\nHoặc mở liên kết: ${link}\nMã có hiệu lực trong 15 phút và chỉ dùng được một lần.\nNếu bạn không yêu cầu, hãy bỏ qua email này.`,
+    text: `Mã đặt lại mật khẩu của bạn là: ${code}\nHoặc mở liên kết: ${link}\nMã có hiệu lực trong 15 phút, chỉ dùng được một lần và bị hủy nếu nhập sai 5 lần.\nNếu bạn không yêu cầu, hãy bỏ qua email này.`,
     html: `<p>Mã đặt lại mật khẩu của bạn là:</p><p style="font-size:24px;font-weight:bold;letter-spacing:4px">${code}</p>`
       + `<p>Hoặc <a href="${link}">bấm vào đây</a> để đặt mật khẩu mới.</p>`
-      + '<p>Mã có hiệu lực trong 15 phút và chỉ dùng được một lần. Nếu bạn không yêu cầu, hãy bỏ qua email này.</p>',
+      + '<p>Mã có hiệu lực trong 15 phút, chỉ dùng được một lần và bị hủy nếu nhập sai 5 lần. Nếu bạn không yêu cầu, hãy bỏ qua email này.</p>',
   });
 }

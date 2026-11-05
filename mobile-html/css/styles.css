@@ -1,0 +1,288 @@
+/* ChefAI – Mobile (xuất từ Figma "📱 Mobile – Người dùng") */
+:root {
+  --white: #ffffff;
+  --page-bg: #f8fafc;
+  --slate-50: #f8fafc;
+  --slate-100: #f1f5f9;
+  --slate-200: #e2e8f0;
+  --slate-400: #94a3b8;
+  --slate-500: #64748b;
+  --slate-600: #475569;
+  --slate-700: #334155;
+  --slate-800: #1e293b;
+  --slate-900: #0f172a;
+  --orange-50: #fff7ed;
+  --orange-100: #ffedd5;
+  --orange-200: #fed7aa;
+  --orange-500: #f97316;
+  --orange-600: #ea580c;
+  --orange-700: #c2410c;
+  --orange-800: #9a3412;
+  --emerald-50: #ecfdf5;
+  --emerald-100: #d1fae5;
+  --emerald-600: #059669;
+  --emerald-700: #047857;
+  --emerald-800: #065f46;
+  --amber-50: #fffbeb;
+  --amber-200: #fde68a;
+  --amber-500: #f59e0b;
+  --amber-600: #d97706;
+  --blue-600: #2563eb;
+
+  --r-xl: 12px;
+  --r-2xl: 16px;
+  --r-3xl: 24px;
+  --r-full: 9999px;
+
+  --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, .05);
+  --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, .1), 0 1px 2px -1px rgba(0, 0, 0, .1);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, .1), 0 2px 4px -2px rgba(0, 0, 0, .1);
+  --shadow-orange-md: 0 4px 6px -1px rgba(249, 115, 22, .2), 0 2px 4px -2px rgba(249, 115, 22, .2);
+  --shadow-orange-lg: 0 10px 15px -3px rgba(249, 115, 22, .25), 0 4px 6px -4px rgba(249, 115, 22, .25);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { background: #e2e8f0; }
+
+body {
+  font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+  color: var(--slate-900);
+  background: #e2e8f0;
+  -webkit-font-smoothing: antialiased;
+}
+
+button { font: inherit; border: 0; background: none; cursor: pointer; color: inherit; }
+input { font: inherit; border: 0; background: transparent; outline: none; color: var(--slate-800); }
+a { color: inherit; text-decoration: none; }
+img { display: block; }
+
+/* ---------- Khung điện thoại ---------- */
+.screen {
+  width: 100%;
+  max-width: 390px;
+  min-height: 100vh;
+  margin: 0 auto;
+  background: var(--page-bg);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* ---------- Typography ---------- */
+.t-cap10   { font-size: 11.6px; line-height: 14px; font-weight: 400; }
+.t-cap10-s { font-size: 11.6px; line-height: 14px; font-weight: 600; }
+.t-cap10-b { font-size: 11.6px; line-height: 14px; font-weight: 700; letter-spacing: .58px; }
+.t-cap11   { font-size: 12.4px; line-height: 15.5px; font-weight: 400; }
+.t-cap11-s { font-size: 12.4px; line-height: 15.5px; font-weight: 600; }
+.t-cap11-b { font-size: 12.4px; line-height: 15.5px; font-weight: 700; }
+.t-xs      { font-size: 12.5px; line-height: 20px; font-weight: 400; }
+.t-xs-s    { font-size: 12.5px; line-height: 20px; font-weight: 600; }
+.t-xs-b    { font-size: 12.5px; line-height: 20px; font-weight: 700; }
+.t-sm      { font-size: 14px; line-height: 20px; font-weight: 400; }
+.t-sm-b    { font-size: 14px; line-height: 20px; font-weight: 700; }
+.t-base-xb { font-size: 16px; line-height: 24px; font-weight: 800; }
+.t-lg-b    { font-size: 18px; line-height: 28px; font-weight: 700; }
+.t-lg-xb   { font-size: 18px; line-height: 28px; font-weight: 800; }
+.t-xl-xb   { font-size: 20px; line-height: 28px; font-weight: 800; }
+.t-2xl-xb  { font-size: 24px; line-height: 32px; font-weight: 800; letter-spacing: -.6px; }
+.t-3xl-xb  { font-size: 30px; line-height: 36px; font-weight: 800; letter-spacing: -.75px; }
+.t-4xl-xb  { font-size: 36px; line-height: 45px; font-weight: 800; letter-spacing: -.9px; }
+
+.c-white { color: var(--white); }
+.c-s400 { color: var(--slate-400); }
+.c-s500 { color: var(--slate-500); }
+.c-s600 { color: var(--slate-600); }
+.c-s700 { color: var(--slate-700); }
+.c-s800 { color: var(--slate-800); }
+.c-s900 { color: var(--slate-900); }
+.c-o600 { color: var(--orange-600); }
+.c-o700 { color: var(--orange-700); }
+.c-o800 { color: var(--orange-800); }
+.c-e600 { color: var(--emerald-600); }
+.c-e700 { color: var(--emerald-700); }
+.c-e800 { color: var(--emerald-800); }
+.c-a600 { color: var(--amber-600); }
+.c-b600 { color: var(--blue-600); }
+.nowrap { white-space: nowrap; }
+
+/* ---------- Status bar ---------- */
+.status-bar {
+  height: 48px;
+  padding: 0 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.status-bar .ind { display: flex; gap: 6px; align-items: center; }
+
+/* ---------- App bar ---------- */
+.app-bar {
+  height: 60px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--white);
+  border-bottom: 1px solid var(--slate-200);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.app-bar .title { flex: 1; min-width: 0; }
+
+.icon-btn {
+  width: 40px; height: 40px;
+  border-radius: var(--r-full);
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.icon-btn.gray { background: var(--slate-100); }
+.icon-btn.outline { background: var(--white); border: 1px solid var(--slate-200); }
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 14px 20px;
+  border-radius: var(--r-xl);
+  font-size: 14px; line-height: 20px; font-weight: 700;
+  width: 100%;
+  white-space: nowrap;
+  transition: filter .15s, transform .1s;
+}
+.btn:active { transform: scale(.98); }
+.btn-primary { background: var(--orange-600); color: var(--white); box-shadow: var(--shadow-orange-md); }
+.btn-primary:hover { filter: brightness(1.05); }
+.btn-secondary { background: var(--orange-50); color: var(--orange-700); }
+.btn-outline { background: var(--white); color: var(--slate-800); border: 1px solid var(--slate-200); }
+
+/* ---------- Pills / badges / chips ---------- */
+.pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px;
+  border-radius: var(--r-full);
+  font-size: 11.6px; line-height: 14px; font-weight: 700; letter-spacing: .58px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.pill.orange { background: var(--orange-50); color: var(--orange-700); }
+.pill.orange-solid { background: var(--orange-600); color: var(--white); }
+.pill.emerald { background: var(--emerald-50); color: var(--emerald-700); }
+.pill.gray { background: var(--slate-100); color: var(--slate-700); }
+.pill.white { background: var(--white); color: var(--slate-700); }
+.pill.white-orange { background: var(--white); color: var(--orange-700); }
+button.pill:hover { filter: brightness(.97); }
+
+.chip {
+  display: inline-flex; align-items: center;
+  padding: 8px 14px;
+  border-radius: var(--r-full);
+  font-size: 12.4px; line-height: 15.5px; font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  background: var(--white); color: var(--slate-700);
+  border: 1px solid var(--slate-200);
+}
+.chip.on { background: var(--orange-600); color: var(--white); border-color: var(--orange-600); }
+
+.wrap-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+.h-scroll {
+  display: flex; gap: 12px;
+  overflow-x: auto;
+  margin: 0 -16px; padding: 0 16px 4px;
+  scrollbar-width: none;
+  scroll-snap-type: x proximity;
+}
+.h-scroll::-webkit-scrollbar { display: none; }
+.h-scroll > * { scroll-snap-align: start; }
+
+/* ---------- Section header ---------- */
+.section-header { display: flex; align-items: center; justify-content: space-between; white-space: nowrap; }
+.section-header .action { font-size: 12.4px; line-height: 15.5px; font-weight: 700; color: var(--orange-600); }
+
+.section { display: flex; flex-direction: column; gap: 12px; }
+
+/* ---------- Card ---------- */
+.card {
+  background: var(--white);
+  border: 1px solid var(--slate-100);
+  border-radius: var(--r-2xl);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---------- Progress ---------- */
+.progress { height: 6px; border-radius: var(--r-full); overflow: hidden; background: var(--slate-200); }
+.progress > span { display: block; height: 100%; border-radius: var(--r-full); }
+
+/* ---------- Recipe card ---------- */
+.recipe-card {
+  width: 240px; flex-shrink: 0;
+  background: var(--white);
+  border: 1px solid var(--slate-100);
+  border-radius: var(--r-2xl);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.recipe-card .img {
+  height: 150px; position: relative;
+  padding: 10px;
+  display: flex; align-items: flex-start; justify-content: space-between;
+}
+.recipe-card .img > img.cover { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.recipe-card .img > * { position: relative; }
+.recipe-card .save {
+  width: 32px; height: 32px; border-radius: var(--r-full);
+  background: var(--white);
+  display: flex; align-items: center; justify-content: center;
+}
+.recipe-card .save.active { background: var(--orange-100); }
+.recipe-card .body { padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.meta-row { display: flex; gap: 12px; align-items: center; }
+.meta-item { display: flex; gap: 4px; align-items: center; }
+
+/* ---------- Chat bubbles ---------- */
+.chat-row { display: flex; gap: 8px; align-items: flex-start; width: 100%; }
+.chat-row.user { justify-content: flex-end; }
+.chat-avatar {
+  width: 32px; height: 32px; flex-shrink: 0;
+  border-radius: var(--r-full);
+  background: var(--orange-100);
+  display: flex; align-items: center; justify-content: center;
+}
+.bubble {
+  max-width: 272px;
+  padding: 12px;
+  border-radius: var(--r-2xl);
+  font-size: 12.5px; line-height: 20px;
+  white-space: pre-line;
+}
+.bubble.ai { background: var(--white); border: 1px solid var(--slate-200); color: var(--slate-800); }
+.bubble.user { background: var(--orange-600); color: var(--white); }
+
+/* ---------- Bottom nav ---------- */
+.bottom-nav {
+  position: sticky; bottom: 0; z-index: 20;
+  display: flex; align-items: flex-end;
+  padding: 8px 8px 24px;
+  background: var(--white);
+  border-top: 1px solid var(--slate-200);
+  margin-top: auto;
+}
+.bottom-nav a {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  font-size: 11.6px; line-height: 14px; font-weight: 600;
+  color: var(--slate-500);
+}
+.bottom-nav .pill-ic { padding: 4px 16px; border-radius: var(--r-full); display: flex; }
+.bottom-nav a.active { color: var(--orange-600); }
+.bottom-nav a.active .pill-ic { background: var(--orange-50); }
+.bottom-nav .fab {
+  width: 52px; height: 52px; border-radius: var(--r-full);
+  background: var(--orange-600);
+  box-shadow: var(--shadow-orange-lg);
+  display: flex; align-items: center; justify-content: center;
+}

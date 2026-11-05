@@ -732,7 +732,7 @@ export const TasteProfileView: React.FC<TasteProfileViewProps> = ({
                 </h2>
               </div>
               <p className="text-xs text-slate-500 mt-1">
-                Chọn chế độ ăn để ChefAI ưu tiên các món phù hợp trong đề xuất và thực đơn tuần.
+                Chọn chế độ ăn để ChefAI ưu tiên các món phù hợp trong gợi ý và câu trả lời của chatbot.
               </p>
             </div>
             <span className="p-2 bg-rose-50 text-rose-600 rounded-xl self-start sm:self-auto">

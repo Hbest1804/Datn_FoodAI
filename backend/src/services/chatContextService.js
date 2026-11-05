@@ -9,7 +9,8 @@ import { generateEmbedding } from './aiService.js';
 import { cosineSimilarity, getDishEmbeddings } from './embeddingService.js';
 import { getIngredientChildren, getIngredientIndex, getPublishedDishes } from './cacheService.js';
 import { containsBannedWords } from '../utils/bannedWords.js';
-import { normalizeText } from '../utils/textUtils.js';
+import { normalizeText, wordsRe } from '../utils/textUtils.js';
+import { buildDietFilter, detectQuestionDietCodes } from './dietService.js';
 import { ApiError } from '../utils/http.js';
 
 const MAX_PANTRY_ITEMS = 20;
@@ -169,11 +170,6 @@ const QUESTION_ALLERGENS = [
 // Cụm báo hiệu dị ứng; phần nêu chất gây dị ứng kéo dài tới dấu câu hoặc liên từ kế tiếp
 const ALLERGY_TRIGGER_RE = /(dị ứng|không ăn được|kiêng)\s+([^,.;:!?\n]*?)(?=[,.;:!?\n]|\s(?:thì|nên|nhưng|mà|muốn|có|ăn|làm|gợi|cho)\s|$)/gu;
 
-/** Regex khớp trọn từ tiếng Việt có dấu (\b của JS không hiểu chữ có dấu). */
-function wordsRe(words) {
-  const alt = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).sort((a, b) => b.length - a.length).join('|');
-  return new RegExp(`(?:^|[^\\p{L}])(?:${alt})(?=$|[^\\p{L}])`, 'u');
-}
 for (const a of QUESTION_ALLERGENS) {
   a.detectRe = wordsRe(a.detect);
   a.ingredientRe = wordsRe(a.ingredients);
@@ -202,6 +198,15 @@ export async function detectQuestionAllergens(content) {
 }
 
 /**
+ * Ràng buộc cứng của chế độ ăn bắt buộc (Ăn chay, Thuần chay) trong hồ sơ và trong câu hỏi.
+ * Trả về { strict, forbiddenIngredientIds (đã mở rộng nguyên liệu con), dishFilter } – xem dietService.buildDietFilter.
+ */
+export async function getDietConstraints({ dietTypeIds = [], content = '' } = {}) {
+  const diet = await buildDietFilter({ dietTypeIds, dietCodes: detectQuestionDietCodes(content) });
+  return { ...diet, forbiddenIngredientIds: new Set((await withDescendants(diet.forbiddenIngredientIds)).keys()) };
+}
+
+/**
  * Nguyên liệu kiêng mà người dùng đã khai trong hồ sơ khẩu vị, kèm nguyên liệu cùng nhóm;
  * Map id → id nguyên liệu đã khai dẫn tới nó. Khách trả Map rỗng.
  */
@@ -216,10 +221,11 @@ export async function getUserAvoidedIngredientIds(userId) {
  * Truy hồi tối đa `limit` món đang hiển thị, đã loại món chứa nguyên liệu bị cấm.
  * Xếp theo độ tương đồng véc-tơ với câu hỏi, cộng điểm khi dùng được nguyên liệu có sẵn.
  */
-export async function retrieveDishes({ questionVector, content, pantry, forbiddenIngredientIds = new Set(), limit = 8 }) {
+export async function retrieveDishes({ questionVector, content, pantry, forbiddenIngredientIds = new Set(), dishFilter = null, limit = 8 }) {
   const dishes = await getPublishedDishes();
   const safe = dishes.filter((d) =>
-    !(d.dish_ingredients || []).some((di) => forbiddenIngredientIds.has(Number(di.ingredient_id))));
+    (!dishFilter || dishFilter(d))
+    && !(d.dish_ingredients || []).some((di) => forbiddenIngredientIds.has(Number(di.ingredient_id))));
 
   let embeddings = new Map();
   if (questionVector) {

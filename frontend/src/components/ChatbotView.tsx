@@ -16,11 +16,13 @@ import {
   ExternalLink,
   ChevronRight,
   UtensilsCrossed,
-  CheckCircle2
+  CheckCircle2,
+  Info
 } from 'lucide-react';
 import { UserProfile, ChatMessage, Recipe, ChatSession, GuestQuota } from '../types';
 import { apiService } from '../api';
 import { normalizeDish, formatDifficulty } from '../utils/dishUtils';
+import { publishGuestQuota } from '../utils/guestQuota';
 import { toast, showConfirm } from './NotificationModal';
 
 interface ChatbotViewProps {
@@ -32,7 +34,6 @@ interface ChatbotViewProps {
   onOpenRecipe: (recipe: Recipe) => void;
   onOpenRegisterModal: () => void;
   onGoToProfile: () => void;
-  onAddToPlanner: (recipe: Recipe) => void;
 }
 
 function getAppetizingImageForDishName(name: string): string {
@@ -79,7 +80,6 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
   onOpenRecipe,
   onOpenRegisterModal,
   onGoToProfile,
-  onAddToPlanner,
 }) => {
   const isGuest = currentUser.role === 'guest';
 
@@ -149,6 +149,16 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
     return list.slice(0, 6);
   }, [recipes]);
 
+  // Câu trả lời có dạng công thức (nguyên liệu / các bước) nhưng không kèm thẻ món nào trong CSDL
+  // => công thức do AI tự đề xuất, phải gắn nhãn "Gợi ý tham khảo"
+  const isReferenceRecipe = useCallback((msg: ChatMessage): boolean => {
+    if (msg.role !== 'assistant' && msg.sender !== 'assistant') return false;
+    if (msg.outcome === 'out_of_scope' || msg.outcome === 'error') return false;
+    if (getDishesForMessage(msg).length > 0) return false;
+    const text = msg.content || msg.text || '';
+    return /nguyên liệu|cách làm|các bước|bước\s*\d|^\s*\d+[.)]\s/im.test(text);
+  }, [getDishesForMessage]);
+
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
@@ -167,6 +177,11 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
     }, 50);
     return () => clearTimeout(timer);
   }, [messages.length, isLoading]);
+
+  // Báo hạn mức mới cho thanh thông báo ở Header
+  useEffect(() => {
+    if (isGuest) publishGuestQuota(guestQuota);
+  }, [guestQuota, isGuest]);
 
   // 1. Initialize Guest Quota or User Sessions
   const loadGuestQuota = useCallback(async () => {
@@ -199,7 +214,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
             role: 'assistant',
             sender: 'assistant',
             timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
-            content: `Xin chào ${currentUser.name}! Tôi là Bếp trưởng AI của ChefAI. Dựa trên hồ sơ khẩu vị của bạn (${currentUser.dietPreference || 'chưa thiết lập'}), tôi sẵn sàng đề xuất món ăn tối ưu dinh dưỡng, loại bỏ hoàn toàn dị ứng và cân đối calo hôm nay.`,
+            content: `Xin chào ${currentUser.name}! Tôi là Bếp trưởng AI của ChefAI. Dựa trên hồ sơ khẩu vị của bạn (${currentUser.dietPreference || 'chưa thiết lập'}), tôi sẵn sàng đề xuất món ăn tối ưu dinh dưỡng, loại bỏ hoàn toàn dị ứng và phù hợp mục tiêu calo của bạn.`,
             quickReplies: [
               'Gợi ý bữa trưa dưới 400 Kcal',
               'Thực đơn Eat Clean phục hồi sau tập',
@@ -411,6 +426,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
           timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
           content: reply.content,
           text: reply.content,
+          outcome: reply.type,
           referenced_dishes: reply.dishes,
           recipeRecommendation: normalizedDishes.length > 0 ? normalizedDishes[0] : undefined,
           quickReplies: [
@@ -451,9 +467,8 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
           text: assistantMsgRaw.content,
           recipeRecommendation: normalizedDishes.length > 0 ? normalizedDishes[0] : undefined,
           quickReplies: [
-            'Lưu món này vào Thực Đơn Tuần',
             'Gợi ý món canh ăn kèm thanh mát',
-            'Tự động trừ calo hôm nay'
+            'Món này bao nhiêu calo mỗi khẩu phần?'
           ]
         };
 
@@ -517,7 +532,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
                 <span>CHẾ ĐỘ KHÁCH</span>
                 {guestQuota && (
                   <span className="bg-white/20 px-2 py-0.5 rounded-full text-xs">
-                    Còn {guestQuota.remaining}/{guestQuota.limit} lượt hỏi hôm nay
+                    Còn {guestQuota.remaining}/{guestQuota.limit} lượt hỏi trong 24 giờ
                   </span>
                 )}
               </div>
@@ -706,6 +721,14 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
                     <span>{msg.timestamp || 'Vừa xong'}</span>
                   </div>
 
+                  {/* Công thức AI tự đề xuất, không có món tương ứng trong CSDL (UC07 luồng 3a, HLD mục 6 nhóm G) */}
+                  {isReferenceRecipe(msg) && (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 border border-amber-300 text-[11px] font-bold text-amber-800">
+                      <Info className="w-3.5 h-3.5 text-amber-600" />
+                      Gợi ý tham khảo (chưa có trong hệ thống)
+                    </span>
+                  )}
+
                   {/* Message Bubble */}
                   <div
                     className={`p-4 rounded-3xl text-sm leading-relaxed ${
@@ -883,7 +906,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
                 onChange={(e) => setInputMessage(e.target.value)}
                 placeholder={
                   isGuest 
-                    ? `Nhập câu hỏi ẩm thực (Còn ${guestQuota ? guestQuota.remaining : '—'} lượt hôm nay)...`
+                    ? `Nhập câu hỏi ẩm thực (Còn ${guestQuota ? guestQuota.remaining : '—'} lượt trong 24 giờ)...`
                     : "Nhập câu hỏi ẩm thực, nguyên liệu có sẵn, calo mong muốn..."
                 }
                 className="flex-1 px-4 py-3 bg-white border border-slate-200 focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 rounded-2xl text-sm sm:text-base font-medium outline-none shadow-2xs transition-all"

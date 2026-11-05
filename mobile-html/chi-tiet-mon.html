@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ChefAI – Chi tiết món &amp; Công thức</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+  <style>
+    .hero-img {
+      position: relative; height: 260px; padding: 16px;
+      display: flex; flex-direction: column; justify-content: space-between;
+    }
+    .hero-img > img.cover { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    .hero-img .tags { position: relative; display: flex; gap: 6px; }
+
+    .content { display: flex; flex-direction: column; gap: 20px; padding: 16px; }
+
+    .title-block { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+    .rating { display: flex; gap: 4px; align-items: center; }
+
+    .info-grid { display: flex; gap: 8px; }
+    .info-grid > div {
+      flex: 1; min-width: 0;
+      background: var(--white); border: 1px solid var(--slate-100);
+      border-radius: var(--r-xl); padding: 10px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+
+    .nutrition { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    .nutrition .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .kcal { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+    .macro-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .macro-cell {
+      background: var(--slate-50); border-radius: var(--r-xl); padding: 12px;
+      display: flex; flex-direction: column; gap: 6px; min-width: 0;
+    }
+    .macro-cell .top { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; }
+
+    .ingredients { overflow: hidden; }
+    .ing {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--slate-100);
+      cursor: pointer;
+    }
+    .ing:last-child { border-bottom: 0; }
+    .ing .thumb {
+      width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0;
+      background: var(--orange-50);
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+    }
+    .ing .thumb img.photo { width: 100%; height: 100%; object-fit: cover; }
+    .ing .name { flex: 1; min-width: 0; }
+    .ing.unchecked .thumb.check img { opacity: 0; }
+    .ing.unchecked .name { color: var(--slate-400); }
+
+    .tip {
+      background: var(--amber-50); border: 1px solid var(--amber-200);
+      border-radius: var(--r-xl); padding: 12px;
+      display: flex; gap: 10px; align-items: flex-start;
+    }
+    .tip > div { display: flex; flex-direction: column; gap: 2px; }
+
+    .step { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+    .step .head { display: flex; gap: 12px; align-items: flex-start; }
+    .step .num {
+      width: 36px; height: 36px; border-radius: var(--r-full); flex-shrink: 0;
+      background: var(--orange-600); color: var(--white);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12.4px; line-height: 15.5px; font-weight: 700;
+    }
+    .step .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+    .step .note {
+      background: var(--orange-50); border-radius: var(--r-xl); padding: 10px;
+      font-size: 12.4px; line-height: 15.5px; color: var(--orange-800);
+    }
+    .timer.running { background: var(--orange-600); color: var(--white); }
+
+    .sticky-cta {
+      position: sticky; bottom: 0; z-index: 20;
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 16px 32px;
+      background: var(--white); border-top: 1px solid var(--slate-200);
+      margin-top: auto;
+    }
+    .round-52 {
+      width: 52px; height: 52px; border-radius: var(--r-full); flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .round-52.fav { background: var(--orange-50); }
+    .round-52.fav.active { background: var(--orange-100); }
+    .round-52.mark { background: var(--slate-100); }
+    .round-52.mark.active { background: var(--slate-200); }
+    .sticky-cta .btn { flex: 1; min-width: 0; width: auto; }
+  </style>
+</head>
+<body>
+  <div class="screen">
+    <div class="status-bar">
+      <span class="t-sm-b">9:41</span>
+      <div class="ind">
+        <img src="assets/detail/status-signal.svg" width="18" height="12" alt="">
+        <img src="assets/detail/status-wifi.svg" width="16" height="12" alt="">
+        <img src="assets/detail/status-battery.svg" width="26" height="12" alt="">
+      </div>
+    </div>
+
+    <div class="app-bar">
+      <a href="trang-chu.html" class="icon-btn gray" aria-label="Quay lại"><img src="assets/detail/chevron-left.svg" width="20" height="20" alt=""></a>
+      <span class="title t-base-xb c-s900">Chi tiết công thức</span>
+      <button class="icon-btn gray" aria-label="Thêm"><img src="assets/detail/more.svg" width="20" height="20" alt=""></button>
+    </div>
+
+    <div class="hero-img">
+      <img class="cover" src="assets/detail/hero.png" alt="Cá hồi áp chảo sốt bơ tỏi chanh tây">
+      <div class="tags">
+        <span class="pill white-orange">#LowCarb</span>
+        <span class="pill white-orange">#HighProtein</span>
+        <span class="pill white-orange">#KetoFriendly</span>
+      </div>
+    </div>
+
+    <main class="content">
+      <section class="title-block">
+        <span class="pill emerald"><img src="assets/detail/sparkles-green.svg" width="12" height="12" alt="">Được đánh giá cao (4,9/5 từ 128 lượt)</span>
+        <h1 class="t-2xl-xb c-s900">Cá hồi áp chảo sốt bơ tỏi chanh tây</h1>
+        <p class="t-cap11 c-s500">Pan-Seared Lemon Garlic Butter Salmon with Tender Asparagus</p>
+        <div class="rating">
+          <img src="assets/detail/star.svg" width="16" height="16" alt="">
+          <span class="t-sm-b c-s900">4.9</span>
+          <span class="t-cap11 c-s500">/ 5.0 (342 đánh giá)</span>
+        </div>
+      </section>
+
+      <section class="info-grid">
+        <div>
+          <img src="assets/detail/chef.svg" width="16" height="16" alt="">
+          <span class="t-cap10-b c-s400">ĐỘ KHÓ</span>
+          <span class="t-cap11-b c-s800">Dễ (Người mới)</span>
+        </div>
+        <div>
+          <img src="assets/detail/clock.svg" width="16" height="16" alt="">
+          <span class="t-cap10-b c-s400">THỜI GIAN</span>
+          <span class="t-cap11-b c-s800">Ướp 10m • Nấu 15m</span>
+        </div>
+        <div>
+          <img src="assets/detail/user.svg" width="16" height="16" alt="">
+          <span class="t-cap10-b c-s400">KHẨU PHẦN</span>
+          <span class="t-cap11-b c-s800">2 Người (Chuẩn)</span>
+        </div>
+      </section>
+
+      <section class="card nutrition">
+        <div class="head">
+          <h2 class="t-base-xb c-s900 nowrap">Chỉ số Dinh dưỡng</h2>
+          <span class="pill orange"><img src="assets/detail/sparkles-orange.svg" width="12" height="12" alt="">ChefAI Phân tích</span>
+        </div>
+        <div class="kcal">
+          <span class="t-4xl-xb c-o600">450</span>
+          <span class="t-sm c-s500">kcal / khẩu phần</span>
+        </div>
+        <div class="macro-grid">
+          <div class="macro-cell">
+            <div class="top"><span class="t-cap10-b c-s500">PROTEIN</span><span class="t-cap10-s c-s400">84% DV</span></div>
+            <span class="t-lg-b c-s900">42g</span>
+            <div class="progress"><span style="width:84%;background:var(--orange-500)"></span></div>
+          </div>
+          <div class="macro-cell">
+            <div class="top"><span class="t-cap10-b c-s500">CARBS</span><span class="t-cap10-s c-s400">5% DV</span></div>
+            <span class="t-lg-b c-s900">6g</span>
+            <div class="progress"><span style="width:5%;background:var(--amber-500)"></span></div>
+          </div>
+          <div class="macro-cell">
+            <div class="top"><span class="t-cap10-b c-s500">BÉO TỐT</span><span class="t-cap10-s c-s400">Omega-3</span></div>
+            <span class="t-lg-b c-s900">28g</span>
+            <div class="progress"><span style="width:56%;background:var(--emerald-600)"></span></div>
+          </div>
+          <div class="macro-cell">
+            <div class="top"><span class="t-cap10-b c-s500">NATRI</span><span class="t-cap10-s c-s400">16% DV</span></div>
+            <span class="t-lg-b c-s900">380mg</span>
+            <div class="progress"><span style="width:16%;background:var(--blue-600)"></span></div>
+          </div>
+        </div>
+        <p class="t-cap11 c-s600">Cân đối năng lượng: Đạm 38% • Béo 56% • Tinh bột 6% — Tối ưu tổng hợp cơ bắp</p>
+      </section>
+
+      <div style="height:50px" aria-hidden="true"></div>
+
+      <section class="section">
+        <div class="section-header">
+          <h2 class="t-lg-xb c-s900">Nguyên liệu chuẩn bị</h2>
+          <span class="action">2 khẩu phần</span>
+        </div>
+        <div class="card ingredients" id="ingredients">
+          <div class="ing"><div class="thumb"><img class="photo" src="assets/detail/ing-salmon.png" alt=""></div><span class="name t-xs-s c-s800">Phi lê cá hồi Na Uy tươi</span><span class="t-cap11-b c-o700 nowrap">300g</span></div>
+          <div class="ing"><div class="thumb check"><img src="assets/detail/check.svg" width="18" height="18" alt=""></div><span class="name t-xs-s c-s800">Tỏi tươi băm nhuyễn</span><span class="t-cap11-b c-o700 nowrap">2 tép</span></div>
+          <div class="ing"><div class="thumb check"><img src="assets/detail/check.svg" width="18" height="18" alt=""></div><span class="name t-xs-s c-s800">Bơ lạt Anchor chất lượng cao</span><span class="t-cap11-b c-o700 nowrap">15g</span></div>
+          <div class="ing"><div class="thumb check"><img src="assets/detail/check.svg" width="18" height="18" alt=""></div><span class="name t-xs-s c-s800">Chanh vàng Eureka (vắt lấy nước)</span><span class="t-cap11-b c-o700 nowrap">0.5 quả</span></div>
+          <div class="ing"><div class="thumb check"><img src="assets/detail/check.svg" width="18" height="18" alt=""></div><span class="name t-xs-s c-s800">Muối hồng Himalaya &amp; tiêu đen</span><span class="t-cap11-b c-o700 nowrap">1 nhúm</span></div>
+          <div class="ing"><div class="thumb check"><img src="assets/detail/check.svg" width="18" height="18" alt=""></div><span class="name t-xs-s c-s800">Nhánh hương thảo tươi (Rosemary)</span><span class="t-cap11-b c-o700 nowrap">1 nhánh</span></div>
+          <div class="ing"><div class="thumb"><img class="photo" src="assets/detail/ing-asparagus.png" alt=""></div><span class="name t-xs-s c-s800">Măng tây non rửa sạch cắt gốc</span><span class="t-cap11-b c-o700 nowrap">100g</span></div>
+        </div>
+        <div class="tip">
+          <img src="assets/detail/sparkles-amber.svg" width="18" height="18" alt="">
+          <div>
+            <span class="t-cap11-b c-a600">Mẹo thay thế nguyên liệu</span>
+            <span class="t-cap11 c-s700">Không có măng tây? Bạn có thể thay bằng bông cải xanh hoặc đậu cô ve non luộc sơ để giữ trọn chất xơ và vị giòn ngọt.</span>
+          </div>
+        </div>
+        <span class="t-cap10-b c-s400">DỤNG CỤ KHUYÊN DÙNG</span>
+        <div class="wrap-row">
+          <span class="pill gray">Chảo chống dính đáy dày</span>
+          <span class="pill gray">Kẹp gắp silicone</span>
+          <span class="pill gray">Muỗng rưới nước sốt</span>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
+          <h2 class="t-lg-xb c-s900">Quy trình chế biến</h2>
+          <span class="action">4 bước</span>
+        </div>
+        <p class="t-cap11 c-s500">Theo sát các chỉ dẫn của bếp trưởng để thịt cá chín mọng, lớp da giòn hoàn hảo.</p>
+
+        <article class="card step">
+          <div class="head">
+            <div class="num">01</div>
+            <div class="info">
+              <h3 class="t-sm-b c-s900">Sơ chế &amp; Tẩm ướp thịt cá hồi</h3>
+              <div class="meta-item"><img src="assets/detail/clock-gray.svg" width="12" height="12" alt=""><span class="t-cap10-s c-s500">Ướp 7 phút</span></div>
+            </div>
+            <button class="pill orange timer" data-min="7"><img src="assets/detail/clock-orange.svg" width="12" height="12" alt=""><span>Hẹn giờ 7m</span></button>
+          </div>
+          <p class="t-xs c-s700">Dùng khăn giấy chuyên dụng thấm thật khô hai bề mặt miếng phi lê cá hồi. Rắc đều 1 nhúm muối hồng Himalaya và tiêu đen mới xay lên cả mặt thịt và mặt da. Vắt nhẹ vài giọt nước cốt chanh tây để khử vị tanh và làm săn chắc thớ thịt.</p>
+          <div class="note">Tip Bếp trưởng AI: Không ướp nước cốt chanh quá 10 phút trước khi nấu, vì tính axit mạnh sẽ làm chín tái và phá vỡ cấu trúc collagen mềm mại của cá hồi.</div>
+        </article>
+
+        <article class="card step">
+          <div class="head">
+            <div class="num">02</div>
+            <div class="info">
+              <h3 class="t-sm-b c-s900">Áp chảo giòn da với lửa vừa</h3>
+              <div class="meta-item"><img src="assets/detail/clock-gray.svg" width="12" height="12" alt=""><span class="t-cap10-s c-s500">Nấu 4 phút • 180°C – 190°C</span></div>
+            </div>
+          </div>
+          <p class="t-xs c-s700">Làm nóng chảo với 1 muỗng cà phê dầu ô liu ở lửa vừa. Đặt miếng cá hồi với phần da tiếp xúc mặt chảo, ấn nhẹ trong 15 giây đầu để da không co rút. Áp chảo mặt da 3 phút đến khi giòn rụm, sau đó lật sang mặt còn lại 1 phút.</p>
+          <div class="note">Dấu hiệu nhận biết: Thịt cá chuyển màu hồng nhạt từ dưới lên khoảng 2/3 thân miếng cá là thời điểm lật hoàn hảo.</div>
+        </article>
+
+        <article class="card step">
+          <div class="head">
+            <div class="num">03</div>
+            <div class="info">
+              <h3 class="t-sm-b c-s900">Rưới bơ tỏi và thảo mộc (Basting)</h3>
+              <div class="meta-item"><img src="assets/detail/clock-gray.svg" width="12" height="12" alt=""><span class="t-cap10-s c-s500">Nấu 2 phút</span></div>
+            </div>
+            <button class="pill orange timer" data-min="2"><img src="assets/detail/clock-orange.svg" width="12" height="12" alt=""><span>Hẹn giờ 2m</span></button>
+          </div>
+          <p class="t-xs c-s700">Hạ lửa nhỏ. Cho 15g bơ lạt, 2 tép tỏi băm và 1 nhánh hương thảo vào cạnh chảo. Khi bơ tan sủi bọt, nghiêng chảo và liên tục múc bơ tỏi rưới đều lên mặt cá để cá chín đều, ngậm bơ béo ngậy mà không bị khô.</p>
+        </article>
+
+        <article class="card step">
+          <div class="head">
+            <div class="num">04</div>
+            <div class="info">
+              <h3 class="t-sm-b c-s900">Xào măng tây &amp; Trình bày</h3>
+              <div class="meta-item"><img src="assets/detail/clock-gray.svg" width="12" height="12" alt=""><span class="t-cap10-s c-s500">Nghỉ 2 phút • Đảo 2 phút</span></div>
+            </div>
+          </div>
+          <p class="t-xs c-s700">Gắp cá ra đĩa, để thịt nghỉ 2 phút. Tận dụng bơ tỏi trên chảo, đảo nhanh 100g măng tây trong 1.5 – 2 phút cho chín tới mà vẫn giòn xanh. Xếp măng tây lót đĩa, đặt cá hồi lên trên, rưới sốt và trang trí lát chanh vàng.</p>
+        </article>
+      </section>
+    </main>
+
+    <div class="sticky-cta">
+      <button class="round-52 fav" aria-label="Yêu thích"><img src="assets/detail/heart.svg" width="26" height="26" alt=""></button>
+      <button class="round-52 mark" aria-label="Lưu"><img src="assets/detail/bookmark.svg" width="26" height="26" alt=""></button>
+      <button class="btn btn-primary">Bắt đầu nấu ngay<img src="assets/detail/btn-arrow-white.svg" width="18" height="18" alt=""></button>
+    </div>
+  </div>
+
+  <script>
+    // Đánh dấu nguyên liệu đã chuẩn bị (các dòng có ô tick)
+    document.querySelectorAll('#ingredients .ing').forEach(function (row) {
+      if (!row.querySelector('.thumb.check')) return;
+      row.addEventListener('click', function () { row.classList.toggle('unchecked'); });
+    });
+
+    // Nút yêu thích / lưu
+    document.querySelectorAll('.round-52').forEach(function (b) {
+      b.addEventListener('click', function () { b.classList.toggle('active'); });
+    });
+
+    // Hẹn giờ đếm ngược đơn giản
+    document.querySelectorAll('.timer').forEach(function (btn) {
+      var label = btn.querySelector('span');
+      var original = label.textContent;
+      var handle = null;
+      btn.addEventListener('click', function () {
+        if (handle) {
+          clearInterval(handle); handle = null;
+          btn.classList.remove('running'); label.textContent = original;
+          return;
+        }
+        var left = Number(btn.dataset.min) * 60;
+        btn.classList.add('running');
+        var tick = function () {
+          var m = Math.floor(left / 60), s = left % 60;
+          label.textContent = m + ':' + String(s).padStart(2, '0');
+          if (left-- <= 0) { clearInterval(handle); handle = null; btn.classList.remove('running'); label.textContent = 'Xong!'; }
+        };
+        tick();
+        handle = setInterval(tick, 1000);
+      });
+    });
+  </script>
+</body>
+</html>

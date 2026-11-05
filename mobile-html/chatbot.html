@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ChefAI – Chatbot Bếp Trưởng</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+  <style>
+    .chat-header {
+      position: sticky; top: 0; z-index: 10;
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 16px;
+      background: var(--white); border-bottom: 1px solid var(--slate-200);
+    }
+    .chat-header .bot {
+      width: 44px; height: 44px; border-radius: var(--r-full); flex-shrink: 0;
+      background: var(--orange-600); box-shadow: var(--shadow-orange-md);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .chat-header .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .chat-header .status { display: flex; align-items: center; gap: 6px; }
+
+    .profile-sync {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 16px; background: var(--emerald-50);
+    }
+
+    .messages { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+    .day { display: flex; justify-content: center; }
+    .time { display: flex; font-size: 11.6px; line-height: 14px; color: var(--slate-400); white-space: nowrap; }
+    .time.right { justify-content: flex-end; }
+    .indent { padding-left: 40px; display: flex; flex-direction: column; gap: 10px; }
+
+    .analysis {
+      background: var(--orange-50); border-radius: var(--r-xl); padding: 10px;
+      display: flex; gap: 8px; align-items: flex-start;
+    }
+
+    .ref-label {
+      display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+      padding: 5px 12px 5px 10px;
+      background: #fef3c7; border: 1px solid #fcd34d; border-radius: 999px;
+      font-size: 11px; font-weight: 700; color: #92400e; white-space: nowrap;
+    }
+    .ref-label .i {
+      width: 16px; height: 16px; border-radius: 8px; background: #d97706;
+      color: #fff; font-size: 10px; font-weight: 800;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    .ai-recipe {
+      background: var(--white); border: 1px solid var(--slate-100);
+      border-radius: var(--r-2xl); box-shadow: var(--shadow-md);
+      padding: 14px; display: flex; flex-direction: column; gap: 10px;
+    }
+    .macro4 { display: flex; gap: 6px; }
+    .macro4 > div {
+      flex: 1; min-width: 0;
+      background: var(--slate-50); border-radius: var(--r-xl); padding: 8px;
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+      font-weight: 700; white-space: nowrap;
+    }
+    .macro4 .v { font-size: 14px; line-height: 20px; }
+    .macro4 .l { font-size: 11px; line-height: 12.65px; color: var(--slate-400); }
+    .mini-step { display: flex; gap: 10px; align-items: flex-start; }
+    .mini-step .n {
+      width: 24px; height: 24px; border-radius: var(--r-full); flex-shrink: 0;
+      background: var(--orange-100); color: var(--orange-700);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11.6px; line-height: 14px; font-weight: 700;
+    }
+    .mini-step > div { display: flex; flex-direction: column; gap: 2px; font-size: 12.4px; line-height: 15.5px; }
+
+    .dish-section { display: flex; flex-direction: column; gap: 10px; }
+    .dish-card {
+      display: flex; align-items: center; gap: 12px;
+      height: 88px; padding: 12px;
+      background: #fff; border: 1px solid #fed7aa; border-radius: 16px;
+      filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .04));
+      transition: border-color .15s;
+    }
+    .dish-card:hover { border-color: var(--orange-500); }
+    .dish-card .img { width: 64px; height: 64px; border-radius: 12px; border: 1px solid #f1f5f9; overflow: hidden; flex-shrink: 0; }
+    .dish-card .img img { width: 100%; height: 100%; object-fit: cover; }
+    .dish-card .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; white-space: nowrap; }
+    .dish-card .title { font-size: 13px; font-weight: 700; color: #0f172a; overflow: hidden; text-overflow: ellipsis; }
+    .dish-card .meta { font-size: 11px; color: #64748b; }
+    .dish-card .cta { font-size: 11px; font-weight: 700; color: #ea580c; }
+
+    .footer-stack { position: sticky; bottom: 0; z-index: 20; margin-top: auto; }
+    .footer-stack .bottom-nav { position: static; }
+    .composer {
+      background: var(--white); border-top: 1px solid var(--slate-200);
+      padding: 10px 12px; display: flex; flex-direction: column; gap: 6px;
+    }
+    .composer form { display: flex; align-items: center; gap: 8px; }
+    .composer .field {
+      flex: 1; min-width: 0;
+      background: var(--slate-50); border: 1px solid var(--slate-200); border-radius: var(--r-full);
+      padding: 10px 16px; display: flex;
+    }
+    .composer .field input { flex: 1; min-width: 0; font-size: 12.5px; line-height: 20px; }
+    .composer .field input::placeholder { color: var(--slate-400); }
+    .composer .send {
+      width: 44px; height: 44px; border-radius: var(--r-full); flex-shrink: 0;
+      background: var(--orange-600); box-shadow: var(--shadow-orange-md);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .composer .safety { display: flex; align-items: center; justify-content: center; gap: 4px; }
+  </style>
+</head>
+<body>
+  <div class="screen">
+    <div class="status-bar">
+      <span class="t-sm-b">9:41</span>
+      <div class="ind">
+        <img src="assets/chat/status-signal.svg" width="18" height="12" alt="">
+        <img src="assets/chat/status-wifi.svg" width="16" height="12" alt="">
+        <img src="assets/chat/status-battery.svg" width="26" height="12" alt="">
+      </div>
+    </div>
+
+    <header class="chat-header">
+      <a href="trang-chu.html" class="icon-btn gray" aria-label="Quay lại"><img src="assets/chat/chevron-left.svg" width="20" height="20" alt=""></a>
+      <div class="bot"><img src="assets/chat/header-chef.svg" width="22" height="22" alt=""></div>
+      <div class="info">
+        <span class="t-sm-b c-s900">Bếp Trưởng AI ChefAI</span>
+        <div class="status">
+          <img src="assets/chat/online-dot.svg" width="8" height="8" alt="">
+          <span class="t-cap10-s c-s500">Đang hoạt động • Gemini 3.5 Flash-Lite</span>
+        </div>
+      </div>
+      <button class="icon-btn gray" aria-label="Làm mới" id="resetBtn"><img src="assets/chat/refresh.svg" width="20" height="20" alt=""></button>
+    </header>
+
+    <div class="profile-sync">
+      <img src="assets/chat/shield-green.svg" width="16" height="16" alt="">
+      <span class="t-cap11-s c-e800">Đã đồng bộ Hồ sơ khẩu vị Minh Hoàng (Eat Clean • 2,100 kcal • Không dị ứng lạc)</span>
+    </div>
+
+    <main class="messages" id="messages">
+      <div class="day"><span class="pill gray" style="color:var(--slate-500)">Hôm nay</span></div>
+
+      <div class="chat-row user">
+        <div class="bubble user">Chào Bếp trưởng, trưa nay tôi vừa tập gym về (buổi tập chân tiêu hao khoảng 450 kcal). Tủ lạnh còn ức gà, nấm đùi gà, ớt chuông đỏ và cơm gạo lứt. Gợi ý món đậm vị thảo mộc, nhiều đạm, nấu dưới 20 phút nhé! Tôi dị ứng đậu phộng.</div>
+      </div>
+      <div class="time right">11:42 • Đã gửi</div>
+
+      <div class="indent">
+        <div class="analysis">
+          <img src="assets/chat/sparkles-orange.svg" width="16" height="16" alt="">
+          <span class="t-cap11-s c-o800">Phân tích khẩu vị: Ưu tiên đạm cao (45g+), không mặn, thảo mộc tiêu đen, kiểm duyệt 100% không đậu phộng.</span>
+        </div>
+      </div>
+
+      <div class="chat-row ai">
+        <div class="chat-avatar"><img src="assets/chat/bubble-chef.svg" width="18" height="18" alt=""></div>
+        <div class="bubble ai">Chào Minh Hoàng! Chúc mừng buổi tập chân bùng nổ năng lượng. Với 450 kcal tiêu hao, cơ bắp của bạn đang cần protein tinh khiết và carb phức hợp để phục hồi glycogen.
+
+Hệ thống chưa có món đúng hoàn toàn yêu cầu này, Bếp trưởng gợi ý một công thức tham khảo. Các món có sẵn trong hệ thống nằm ngay bên dưới.</div>
+      </div>
+
+      <div class="indent">
+        <div class="ai-recipe">
+          <span class="ref-label"><span class="i">i</span>Gợi ý tham khảo (chưa có trong hệ thống)</span>
+          <h3 class="t-base-xb c-s900">Ức Gà Áp Chảo Sốt Tiêu Thảo Mộc, Nấm Đùi Gà &amp; Cơm Lứt</h3>
+          <div class="meta-item" style="gap:6px"><img src="assets/chat/clock.svg" width="14" height="14" alt=""><span class="t-cap11-s c-s500">18 Phút • Chảo chống dính / chảo gang</span></div>
+          <div class="macro4">
+            <div><span class="v c-o600">480</span><span class="l">KCAL</span></div>
+            <div><span class="v c-e600">46g</span><span class="l">PROTEIN</span></div>
+            <div><span class="v c-a600">48g</span><span class="l">CARB</span></div>
+            <div><span class="v c-b600">10g</span><span class="l">BÉO TỐT</span></div>
+          </div>
+          <span class="t-cap11-b c-s700">3 bước thực hiện nhanh (dưới 20 phút)</span>
+          <div class="mini-step"><span class="n">1</span><div><b class="c-s900">Áp chảo ức gà (6 phút)</b><span class="c-s600">Thái miếng dày 1.5cm, xát muối hồng và tiêu giã dập. Áp chảo lửa vừa mỗi mặt 3 phút cho vàng xém.</span></div></div>
+          <div class="mini-step"><span class="n">2</span><div><b class="c-s900">Xào nấm &amp; ớt chuông (5 phút)</b><span class="c-s600">Trút gà ra dĩa. Xào nấm và ớt chuông lửa lớn với lá thyme/oregano khô.</span></div></div>
+          <div class="mini-step"><span class="n">3</span><div><b class="c-s900">Hòa sốt &amp; Lên món (4 phút)</b><span class="c-s600">Cho gà trở lại chảo, rưới 1 thìa dầu olive, nước dùng và tiêu đen. Dùng kèm cơm gạo lứt nóng.</span></div></div>
+          <button class="btn btn-primary">Bắt đầu nấu ngay<img src="assets/chat/btn-arrow-white.svg" width="18" height="18" alt=""></button>
+        </div>
+        <span class="t-cap10-b c-s400">NGUYÊN LIỆU NHẬN DIỆN (4)</span>
+        <div class="wrap-row" style="gap:6px">
+          <span class="pill white">Ức gà phi lê · 200g</span>
+          <span class="pill white">Nấm đùi gà · 120g</span>
+          <span class="pill white">Ớt chuông đỏ · 1 quả</span>
+          <span class="pill white">Cơm gạo lứt · 140g</span>
+        </div>
+      </div>
+
+      <!-- Thẻ món tư vấn (FR-25): luôn trỏ tới món có trong CSDL -->
+      <div class="dish-section">
+        <span style="font-size:11px;font-weight:700;color:#c2410c">✦ MÓN ĂN TƯ VẤN KÈM HÌNH ẢNH &amp; CÔNG THỨC:</span>
+        <a href="chi-tiet-mon.html" class="dish-card">
+          <div class="img"><img src="assets/chat/dish-1.png" alt=""></div>
+          <div class="info">
+            <span class="title">Ức gà cuộn măng tây đút lò sốt tiêu đen</span>
+            <span class="meta">30 phút • Trung bình</span>
+            <span class="cta">Xem công thức &amp; nấu ngay →</span>
+          </div>
+        </a>
+        <a href="chi-tiet-mon.html" class="dish-card">
+          <div class="img"><img src="assets/chat/dish-2.png" alt=""></div>
+          <div class="info">
+            <span class="title">Cá hồi áp chảo bơ tỏi</span>
+            <span class="meta">15 phút • Dễ</span>
+            <span class="cta">Xem công thức &amp; nấu ngay →</span>
+          </div>
+        </a>
+      </div>
+
+      <div class="time" style="padding-left:40px">11:43</div>
+
+      <div class="chat-row user">
+        <div class="bubble user">Tuyệt quá, nếu tôi muốn sốt sánh hơn mà không dùng bột năng hay bơ sữa thì làm thế nào?</div>
+      </div>
+      <div class="time right">11:45 • Đã gửi</div>
+
+      <div style="padding-left:38px;display:flex"><span class="ref-label"><span class="i">i</span>Gợi ý tham khảo (chưa có trong hệ thống)</span></div>
+
+      <div class="chat-row ai">
+        <div class="chat-avatar"><img src="assets/chat/bubble-chef.svg" width="18" height="18" alt=""></div>
+        <div class="bubble ai">Mẹo Bếp trưởng cho thực đơn Eat Clean: không cần bột năng hay bơ sữa, bạn có 2 cách thuần tự nhiên:
+
+• Cách 1 – Xay 1 thìa cơm lứt ấm: dầm nhuyễn với 3 thìa nước luộc rau rồi cho vào chảo, tinh bột kháng giúp sốt sánh mịn.
+
+• Cách 2 – Gel hạt chia / hạt lanh: ngâm 1/2 thìa cafe với nước ấm 3 phút, sốt dày hơn và thêm 2.5g chất xơ.</div>
+      </div>
+
+      <div class="chat-row ai">
+        <div class="chat-avatar"><img src="assets/chat/bubble-chef.svg" width="18" height="18" alt=""></div>
+        <div class="bubble ai">Bạn có muốn Bếp trưởng gợi ý thêm một món canh nhẹ để bữa tối cân bằng hơn không?</div>
+      </div>
+
+      <div class="indent" style="gap:6px">
+        <div style="display:flex;gap:6px">
+          <button class="pill gray" style="color:var(--slate-600)" id="copyBtn">Sao chép</button>
+          <button class="pill gray" style="color:var(--slate-600)">Đã lưu</button>
+        </div>
+      </div>
+      <div class="time" style="padding-left:40px">11:46</div>
+
+      <div class="section" style="gap:8px" id="suggestions">
+        <span class="t-cap10-b c-s400">GỢI Ý NHANH</span>
+        <div class="wrap-row">
+          <button class="chip">Gợi ý món tráng miệng thanh mát</button>
+          <button class="chip">Tính calo nếu thêm 1 quả trứng</button>
+        </div>
+      </div>
+    </main>
+
+    <div class="footer-stack">
+      <div class="composer">
+        <form id="composer">
+          <button type="button" class="icon-btn gray" aria-label="Đính kèm"><img src="assets/chat/plus.svg" width="20" height="20" alt=""></button>
+          <label class="field"><input id="msgInput" type="text" placeholder="Nhập món ăn, nguyên liệu, calo…" autocomplete="off"></label>
+          <button type="submit" class="send" aria-label="Gửi"><img src="assets/chat/send.svg" width="20" height="20" alt=""></button>
+        </form>
+        <div class="safety">
+          <img src="assets/chat/shield-gray.svg" width="12" height="12" alt="">
+          <span class="t-cap10 c-s500">Kiểm duyệt an toàn dị ứng đang bật</span>
+        </div>
+      </div>
+      <nav class="bottom-nav">
+        <a href="trang-chu.html"><span class="pill-ic"><img src="assets/chat/nav-home.svg" width="22" height="22" alt=""></span>Khám phá</a>
+        <a href="#"><span class="pill-ic"><img src="assets/chat/nav-search.svg" width="22" height="22" alt=""></span>Tìm kiếm</a>
+        <a href="chatbot.html" class="active"><span class="fab"><img src="assets/chat/nav-chef.svg" width="24" height="24" alt=""></span>Chef AI</a>
+        <a href="#"><span class="pill-ic"><img src="assets/chat/nav-user.svg" width="22" height="22" alt=""></span>Hồ sơ</a>
+      </nav>
+    </div>
+  </div>
+
+  <script>
+    var messages = document.getElementById('messages');
+    var input = document.getElementById('msgInput');
+    var suggestions = document.getElementById('suggestions');
+
+    function now() {
+      var d = new Date();
+      return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    }
+
+    function addUserMessage(text) {
+      var row = document.createElement('div');
+      row.className = 'chat-row user';
+      var bubble = document.createElement('div');
+      bubble.className = 'bubble user';
+      bubble.textContent = text;
+      row.appendChild(bubble);
+      var time = document.createElement('div');
+      time.className = 'time right';
+      time.textContent = now() + ' • Đã gửi';
+      messages.insertBefore(row, suggestions);
+      messages.insertBefore(time, suggestions);
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    document.getElementById('composer').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var text = input.value.trim();
+      if (!text) return;
+      addUserMessage(text);
+      input.value = '';
+    });
+
+    suggestions.querySelectorAll('.chip').forEach(function (chip) {
+      chip.addEventListener('click', function () { input.value = chip.textContent; input.focus(); });
+    });
+
+    document.getElementById('copyBtn').addEventListener('click', function (e) {
+      var bubbles = messages.querySelectorAll('.bubble.ai');
+      var text = bubbles[bubbles.length - 1].textContent;
+      if (navigator.clipboard) navigator.clipboard.writeText(text).catch(function () {});
+      e.currentTarget.textContent = 'Đã chép!';
+    });
+  </script>
+</body>
+</html>

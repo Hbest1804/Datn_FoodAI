@@ -5,7 +5,7 @@
 import crypto from 'crypto';
 import { generateCulinaryReply } from '../services/aiService.js';
 import { getSettings } from '../services/settingsService.js';
-import { checkTopic, detectQuestionAllergens, parsePantry, retrieveDishes, toDishCard } from '../services/chatContextService.js';
+import { checkTopic, detectQuestionAllergens, getDietConstraints, parsePantry, retrieveDishes, toDishCard } from '../services/chatContextService.js';
 import { sendError, sendOk } from '../utils/http.js';
 
 const MAX_CONTENT_LENGTH = 1000;
@@ -131,19 +131,23 @@ export async function sendGuestMessage(req, res) {
   if (topic.outOfScope) {
     reply = { type: 'out_of_scope', content: topic.reply, dishes: [] };
   } else {
-    // Khách không có hồ sơ: chỉ lọc theo dị ứng nêu ngay trong câu hỏi
+    // Khách không có hồ sơ: chỉ lọc theo dị ứng và chế độ ăn bắt buộc (chay) nêu ngay trong câu hỏi
     const asked = await detectQuestionAllergens(question);
+    const diet = await getDietConstraints({ content: question });
+    const forbidden = new Set([...asked.ingredientIds, ...diet.forbiddenIngredientIds]);
     const dishesContext = await retrieveDishes({
       questionVector: topic.questionVector,
       content: question,
       pantry,
-      forbiddenIngredientIds: asked.ingredientIds,
+      forbiddenIngredientIds: forbidden,
+      dishFilter: diet.dishFilter,
       limit: Number(settings.max_context_dishes) || 8,
     });
     const aiResult = await generateCulinaryReply({
       content: question,
       fridge: pantry,
       allergens: asked.allergens,
+      strictDiets: diet.strict,
       dishesContext,
       systemPrompt: settings.system_prompt,
     });

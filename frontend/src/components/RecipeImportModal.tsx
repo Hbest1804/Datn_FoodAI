@@ -15,6 +15,7 @@ const FIELD_LABELS: Record<string, string> = {
   quantity: 'Số lượng',
   unit: 'Đơn vị',
   is_optional: 'Tùy chọn',
+  groups: 'Nhóm',
   step_order: 'Thứ tự bước',
   content: 'Nội dung bước',
 };
@@ -265,6 +266,15 @@ export default function RecipeImportModal({ onClose, onImported }: RecipeImportM
                   {result.dry_run ? 'Nguyên liệu mới sẽ được tạo' : 'Đã tạo nguyên liệu mới'}:{' '}
                 </span>
                 {result.new_ingredients.join(', ')}
+              </div>
+            )}
+
+            {result.new_groups.length > 0 && (
+              <div className="p-3 bg-violet-50 border border-violet-200 rounded-2xl text-violet-800">
+                <span className="font-bold">
+                  {result.dry_run ? 'Nhóm nguyên liệu sẽ thêm' : 'Đã thêm nhóm nguyên liệu'}:{' '}
+                </span>
+                {result.new_groups.map((g) => `${g.ingredient} → ${g.group}`).join(', ')}
               </div>
             )}
 

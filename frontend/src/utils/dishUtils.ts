@@ -20,6 +20,14 @@ export function formatMetric(value?: number | null, unit = ''): string {
   return `${Math.round(value * 10) / 10}${unit}`;
 }
 
+/** Món có ít nhất một chỉ số dinh dưỡng (calo, protein, carb, chất béo) hay không. */
+export function hasNutrition(macros?: { calories?: number | null; protein?: number | null; carbs?: number | null; fat?: number | null } | null): boolean {
+  if (!macros) return false;
+  return [macros.calories, macros.protein, macros.carbs, macros.fat].some(v => v != null && !isNaN(v as number));
+}
+
+export const NO_NUTRITION_TEXT = 'Chưa có thông tin dinh dưỡng';
+
 export const DEFAULT_AVATAR = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='none'%3E%3Crect width='100' height='100' fill='%23cbd5e1'/%3E%3Ccircle cx='50' cy='38' r='18' fill='%23ffffff'/%3E%3Cpath d='M18 88C18 70.327 32.327 56 50 56C67.673 56 82 70.327 82 88H18Z' fill='%23ffffff'/%3E%3C/svg%3E";
 
 

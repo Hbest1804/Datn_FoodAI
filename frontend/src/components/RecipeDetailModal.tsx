@@ -4,7 +4,6 @@ import {
   Clock, 
   Users, 
   Flame, 
-  Bookmark, 
   Share2, 
   Printer, 
   Sparkles, 
@@ -22,14 +21,13 @@ import {
 } from 'lucide-react';
 import { Recipe, UserProfile } from '../types';
 import { apiService } from '../api';
-import { formatVND, formatMetric } from '../utils/dishUtils';
+import { formatVND, formatMetric, hasNutrition, NO_NUTRITION_TEXT } from '../utils/dishUtils';
 import { toast } from './NotificationModal';
 
 interface RecipeDetailModalProps {
   recipe: Recipe | null;
   onClose: () => void;
   currentUser: UserProfile;
-  onAddToPlanner: (recipe: Recipe) => void;
   onOpenAuth?: () => void;
   onOpenChatWithPrompt?: (prompt: string, fridgeContext?: string[]) => void;
 }
@@ -47,7 +45,6 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
   recipe: initialRecipe,
   onClose,
   currentUser,
-  onAddToPlanner,
   onOpenAuth,
   onOpenChatWithPrompt,
 }) => {
@@ -274,13 +271,6 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
               <Heart className={`w-4 h-4 ${isFavorite ? 'fill-rose-500 text-rose-500' : ''}`} />
             </button>
             <button
-              onClick={() => onAddToPlanner(recipe)}
-              className="p-2 text-slate-600 hover:text-orange-600 hover:bg-orange-50 rounded-xl transition-colors cursor-pointer"
-              title="Lưu vào thực đơn"
-            >
-              <Bookmark className="w-4 h-4" />
-            </button>
-            <button
               onClick={() => {
                 if (navigator.share) {
                   navigator.share({ title: recipe.title, text: recipe.description, url: window.location.href });
@@ -314,10 +304,10 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
           {/* ===================== HERO SECTION ===================== */}
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
-              {recipe.matchPercentage ? (
+              {recipe.recommendReasons?.[0] ? (
                 <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 text-xs font-bold border border-emerald-200 flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                  AI Match {recipe.matchPercentage}% khẩu vị
+                  {recipe.recommendReasons[0]}
                 </span>
               ) : null}
               {recipe.tags && recipe.tags.map(t => (
@@ -392,11 +382,21 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
                   <Flame className="w-4 h-4 text-orange-500" />
                   Chỉ số Dinh dưỡng Tính toán Theo Khẩu phần
                 </h4>
-                <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
-                  Chuẩn Macro / {servings} người
-                </span>
+                {hasNutrition(recipe.macros) && (
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                    Chuẩn Macro / {servings} người
+                  </span>
+                )}
               </div>
 
+              {!hasNutrition(recipe.macros) ? (
+                <div className="p-4 rounded-2xl border border-dashed border-slate-300 bg-white">
+                  <div className="text-sm font-bold text-slate-700">{NO_NUTRITION_TEXT}</div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Món này chưa được cập nhật calo, protein, carb và chất béo. Khi lọc theo dinh dưỡng, món sẽ không nằm trong kết quả.
+                  </p>
+                </div>
+              ) : (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
                 <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-2xs">
                   <span className="text-[10px] font-bold text-slate-400 uppercase">Năng lượng</span>
@@ -419,6 +419,7 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
                   <span className="text-[10px] text-slate-400">Lipid lành mạnh</span>
                 </div>
               </div>
+              )}
 
               {/* CTAs */}
               <div className="flex flex-wrap items-center gap-3 pt-2">
@@ -428,13 +429,6 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
                 >
                   <Clock className="w-4 h-4" />
                   Bắt đầu nấu
-                </button>
-                <button
-                  onClick={() => onAddToPlanner(recipe)}
-                  className="px-5 py-3 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold text-xs sm:text-sm rounded-2xl transition-colors flex items-center gap-2 cursor-pointer shadow-2xs"
-                >
-                  <Bookmark className="w-4 h-4 text-orange-500" />
-                  Thêm vào Thực đơn tuần
                 </button>
               </div>
             </div>

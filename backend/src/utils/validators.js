@@ -29,3 +29,24 @@ export function sanitizeSearchKeyword(str) {
     .slice(0, 100);
 }
 
+
+/**
+ * Đọc thông tin xác thực đặt lại mật khẩu (4.1.6, 4.1.7) từ body:
+ * { token } (liên kết trong email) hoặc { email, code } (mã 6 số nhập tay).
+ * Trả về { credentials } khi hợp lệ, ngược lại { errors } theo trường.
+ */
+export function parseResetCredentials(body) {
+  const token = typeof body?.token === 'string' ? body.token.trim() : '';
+  if (token) {
+    if (token.length < 32 || token.length > 128) {
+      return { errors: [{ field: 'token', code: 'INVALID_TOKEN', message: 'Liên kết đặt lại mật khẩu không hợp lệ.' }] };
+    }
+    return { credentials: { token } };
+  }
+  const email = typeof body?.email === 'string' ? body.email.trim() : '';
+  const code = typeof body?.code === 'string' ? body.code.trim() : '';
+  const errors = [];
+  if (!isValidEmail(email)) errors.push({ field: 'email', code: 'INVALID_EMAIL', message: 'Email sai định dạng.' });
+  if (!/^\d{6}$/.test(code)) errors.push({ field: 'code', code: 'INVALID_CODE', message: 'Mã xác thực gồm đúng 6 chữ số.' });
+  return errors.length ? { errors } : { credentials: { email, code } };
+}

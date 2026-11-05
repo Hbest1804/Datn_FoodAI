@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { Recipe, UserProfile, MetaFilters } from '../types';
 import { apiService } from '../api';
-import { formatVND, formatDifficulty, formatMetric } from '../utils/dishUtils';
+import { formatVND, formatDifficulty, formatMetric, hasNutrition, NO_NUTRITION_TEXT } from '../utils/dishUtils';
 
 interface SearchFilterViewProps {
   currentUser: UserProfile;
@@ -652,17 +652,13 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
                       />
                       
                       {/* Smart Fridge Match Badge */}
-                      {recipe.match ? (
+                      {/* Tỉ lệ nguyên liệu có sẵn khi tìm theo nguyên liệu (FR-06); không hiện điểm "% phù hợp" */}
+                      {recipe.match && (
                         <div className={`absolute top-3 left-3 px-2.5 py-1 rounded-full text-xs font-bold shadow-xs flex items-center gap-1 text-white ${
                           recipe.match.ratio === 1 ? 'bg-emerald-600' : 'bg-orange-500'
                         }`}>
                           <Sparkles className="w-3 h-3" />
                           {recipe.match.ratio === 1 ? 'Nấu được ngay 100%' : `Khớp ${Math.round(recipe.match.ratio * 100)}%`}
-                        </div>
-                      ) : (
-                        <div className="absolute top-3 left-3 px-2.5 py-1 rounded-full bg-slate-900/70 backdrop-blur-xs text-white text-xs font-bold shadow-xs flex items-center gap-1">
-                          <Sparkles className="w-3 h-3 text-orange-400" />
-                          {recipe.matchPercentage != null ? `${recipe.matchPercentage}%` : '—'} Phù hợp
                         </div>
                       )}
 
@@ -716,13 +712,19 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
                       )}
 
                       {/* Macro Strip */}
-                      <div className="flex items-center justify-between py-2 border-y border-slate-100 text-xs font-semibold text-slate-700">
-                        <span>Calo: <strong className="text-orange-600">{formatMetric(recipe.macros.calories)}</strong></span>
-                        <span className="text-slate-300">•</span>
-                        <span>Đạm: {formatMetric(recipe.macros.protein, 'g')}</span>
-                        <span className="text-slate-300">•</span>
-                        <span>Carb: {formatMetric(recipe.macros.carbs, 'g')}</span>
-                      </div>
+                      {hasNutrition(recipe.macros) ? (
+                        <div className="flex items-center justify-between py-2 border-y border-slate-100 text-xs font-semibold text-slate-700">
+                          <span>Calo: <strong className="text-orange-600">{formatMetric(recipe.macros.calories)}</strong></span>
+                          <span className="text-slate-300">•</span>
+                          <span>Đạm: {formatMetric(recipe.macros.protein, 'g')}</span>
+                          <span className="text-slate-300">•</span>
+                          <span>Carb: {formatMetric(recipe.macros.carbs, 'g')}</span>
+                        </div>
+                      ) : (
+                        <div className="py-2 border-y border-slate-100 text-xs font-semibold text-slate-500">
+                          {NO_NUTRITION_TEXT}
+                        </div>
+                      )}
                     </div>
                   </div>
 

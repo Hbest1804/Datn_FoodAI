@@ -43,10 +43,9 @@ Giá trị này được gắn vào mã khi build, nên cần build lại sau kh
 | `/` | Khám phá món ăn |
 | `/search` | Tìm kiếm và lọc món (`?q=<từ khóa>`) |
 | `/chat` | Trò chuyện với trợ lý AI |
-| `/planner` | Thực đơn tuần |
 | `/taste-profile` | Hồ sơ khẩu vị |
 | `/account` | Tài khoản cá nhân |
-| `/admin` | Cổng quản trị, chỉ dành cho quản trị viên (`?tab=overview`, `dishes`, `recipes`, `users`, `chatbot`) |
+| `/admin` | Cổng quản trị, chỉ dành cho quản trị viên (`?tab=overview`, `dishes`, `recipes`, `users`, `chatbot`, `audit`) |
 
 Thêm `?dish=<id>` vào đường dẫn để mở trực tiếp cửa sổ chi tiết món. Hai đường dẫn `/reset-password` và `/auth/callback` dùng cho liên kết đặt lại mật khẩu và đăng nhập Google.
 

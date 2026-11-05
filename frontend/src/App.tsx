@@ -17,7 +17,6 @@ const ChatbotView = lazy(() => import('./components/ChatbotView').then((m) => ({
 const SearchFilterView = lazy(() => import('./components/SearchFilterView').then((m) => ({ default: m.SearchFilterView })));
 const TasteProfileView = lazy(() => import('./components/TasteProfileView').then((m) => ({ default: m.TasteProfileView })));
 const UserProfileView = lazy(() => import('./components/UserProfileView').then((m) => ({ default: m.UserProfileView })));
-const MealPlannerView = lazy(() => import('./components/MealPlannerView').then((m) => ({ default: m.MealPlannerView })));
 const AdminStudioView = lazy(() => import('./components/AdminStudioView').then((m) => ({ default: m.AdminStudioView })));
 
 const DEFAULT_GUEST: UserProfile = {
@@ -65,7 +64,6 @@ const TAB_PATHS: Record<string, string> = {
   discovery: '/',
   search: '/search',
   chat: '/chat',
-  planner: '/planner',
   profile: '/taste-profile',
   account: '/account',
   admin: '/admin',
@@ -332,10 +330,6 @@ export default function App() {
     navigate(q ? `/search?q=${encodeURIComponent(q)}` : '/search');
   };
 
-  const handleAddToPlanner = (recipe: Recipe) => {
-    toast.success(`Đã thêm món "${recipe.title}" vào Thực Đơn Tuần của bạn!`, 'Kế hoạch bữa ăn');
-  };
-
   const handleUpdateUser = (updated: Partial<UserProfile>) => {
     setCurrentUser(prev => ({ ...prev, ...updated }));
   };
@@ -410,7 +404,6 @@ export default function App() {
                 onOpenChatWithPrompt={handleOpenChatWithPrompt}
                 onOpenRegisterModal={openRegisterModal}
                 onGoToProfile={() => setCurrentTab('profile')}
-                onGoToPlanner={() => setCurrentTab('planner')}
               />
             }
           />
@@ -442,7 +435,6 @@ export default function App() {
                 onOpenRecipe={openRecipe}
                 onOpenRegisterModal={openRegisterModal}
                 onGoToProfile={() => setCurrentTab('profile')}
-                onAddToPlanner={handleAddToPlanner}
               />
             }
           />
@@ -469,18 +461,6 @@ export default function App() {
                   setCurrentTab('chat');
                 }}
                 onGoToTasteProfile={() => setCurrentTab('profile')}
-              />
-            }
-          />
-
-          <Route
-            path="/planner"
-            element={
-              <MealPlannerView
-                currentUser={currentUser}
-                recipes={recipes}
-                onOpenRecipe={openRecipe}
-                onOpenChatWithPrompt={handleOpenChatWithPrompt}
               />
             }
           />
@@ -533,7 +513,6 @@ export default function App() {
           recipe={selectedRecipeForModal}
           onClose={closeRecipe}
           currentUser={currentUser}
-          onAddToPlanner={handleAddToPlanner}
           onOpenAuth={() => {
             setAuthModalType('login');
             setIsAuthModalOpen(true);

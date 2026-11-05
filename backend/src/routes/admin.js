@@ -101,7 +101,7 @@ router.patch('/users/:userId/status', adminUpdateUserStatus);              // 4.
 router.patch('/users/:userId/role', adminUpdateUserRole);                  // 4.11.4
 router.delete('/users/:userId', adminDeleteUser);                          // 4.11.5
 router.get('/audit-logs', adminGetAuditLogs);                              // 4.11.6
-router.delete('/ratings/:ratingId', adminDeleteRating);                    // 5.8.1
+router.delete('/ratings/:ratingId', adminDeleteRating);                    // 4.11.7
 
 // 4.12 Giám sát chatbot
 router.get('/chatbot/overview', adminGetChatbotOverview);                  // 4.12.1
@@ -119,6 +119,6 @@ router.get('/stats/top-dishes', adminGetStatsTopDishes);                   // 4.
 router.get('/stats/timeseries', adminGetStatsTimeseries);                  // 4.13.3
 router.get('/stats/search-trends', adminGetStatsSearchTrends);             // 4.13.4
 router.get('/stats/export', adminExportStats);                             // 4.13.5
-router.get('/stats/chatbot-usage', adminGetStatsChatbotUsage);             // 5.9.1
+router.get('/stats/chatbot-usage', adminGetStatsChatbotUsage);             // 5.8.1
 
 export default router;

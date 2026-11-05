@@ -274,11 +274,11 @@ async function callGeminiWithFailover({ prompt, maxOutputTokens = 900, temperatu
  * Sinh câu trả lời cho chatbot ở chế độ khách (mục 4.4).
  * Nhận nội dung câu hỏi, nguyên liệu có sẵn và các món liên quan đã truy hồi; trả về loại câu trả lời, nội dung và thẻ món.
  */
-export async function generateCulinaryReply({ content, fridge = {}, allergens = [], dishesContext = [], systemPrompt }) {
+export async function generateCulinaryReply({ content, fridge = {}, allergens = [], strictDiets = [], dishesContext = [], systemPrompt }) {
   const normKey = (content || '').toLowerCase().trim().replace(/[?!.,]/g, '').trim();
 
   // 1. Câu hỏi gợi ý nhanh có câu trả lời soạn sẵn (nội dung soạn sẵn không lọc theo dị ứng)
-  if (!allergens.length && !fridge?.ingredient_names?.length && !fridge?.custom_ingredients?.length) {
+  if (!allergens.length && !strictDiets.length && !fridge?.ingredient_names?.length && !fridge?.custom_ingredients?.length) {
     if (PRESEEDED_QUICK_REPLIES[normKey]) {
       const pre = PRESEEDED_QUICK_REPLIES[normKey];
       const matched = matchDishesFromContext(normKey, dishesContext);
@@ -306,7 +306,7 @@ export async function generateCulinaryReply({ content, fridge = {}, allergens = 
   }
 
   // 4. Tạo câu lệnh gửi mô hình (rút gọn dữ liệu để phản hồi nhanh)
-  const prompt = buildGeminiPrompt({ content, fridge, allergens, dishesContext, systemPrompt });
+  const prompt = buildGeminiPrompt({ content, fridge, allergens, strictDiets, dishesContext, systemPrompt });
 
   // Dịch vụ AI lỗi hoặc quá thời gian chờ thì ném lỗi để API trả 502 AI_SERVICE_ERROR / 504 AI_TIMEOUT (luồng 3a)
   const { rawText, tokenCount } = await callGeminiWithFailover({
@@ -336,7 +336,16 @@ QUY TẮC AN TOÀN DỊ ỨNG (ưu tiên cao nhất):
 `;
 }
 
-function buildGeminiPrompt({ content, fridge, allergens = [], dishesContext, systemPrompt }) {
+/** Quy tắc chế độ ăn bắt buộc (chay, thuần chay) – món trong danh sách đã được lọc cứng, mô hình không được tự thêm món khác. */
+function dietRules(strictDiets = []) {
+  if (!strictDiets?.length) return '';
+  return `🌱 CHẾ ĐỘ ĂN BẮT BUỘC: ${strictDiets.map((d) => `${d.name} (${d.promptRule})`).join('; ')}.
+- Mọi món, nguyên liệu, nước dùng và gia vị trong câu trả lời phải đúng chế độ này; không gợi ý món mặn rồi bảo "bỏ thịt ra".
+- Thiếu món phù hợp trong danh sách thì nói rõ và hướng dẫn món chay tự nấu, không giới thiệu thẻ món ngoài danh sách.
+`;
+}
+
+function buildGeminiPrompt({ content, fridge, allergens = [], strictDiets = [], dishesContext, systemPrompt }) {
   // Chỉ gửi id, tên, thời gian nấu và độ khó; bỏ ảnh và mô tả dài
   const dishesSummary = dishesContext.map((d) => ({
     id: d.id,
@@ -356,8 +365,8 @@ function buildGeminiPrompt({ content, fridge, allergens = [], dishesContext, sys
   return `${systemPrompt || 'Bạn là "Trợ lý ẩm thực" của website gợi ý món ăn Việt Nam.'}
 Hãy trả lời câu hỏi nhanh gọn, rõ ràng, gạch đầu dòng súc tích, định dạng Markdown đẹp mắt.
 Nếu câu hỏi hoàn toàn KHÔNG liên quan ẩm thực, dinh dưỡng, nấu nướng: từ chối lịch sự và đặt "type":"out_of_scope".
-${allergyRules(allergens)}
-DANH SÁCH MÓN ĂN HỆ THỐNG PHÙ HỢP (đã loại món chứa nguyên liệu dị ứng; chỉ được giới thiệu thẻ món trong danh sách này):
+${allergyRules(allergens)}${dietRules(strictDiets)}
+DANH SÁCH MÓN ĂN HỆ THỐNG PHÙ HỢP (đã loại món chứa nguyên liệu dị ứng và món không hợp chế độ ăn bắt buộc; chỉ được giới thiệu thẻ món trong danh sách này):
 ${JSON.stringify(dishesSummary)}
 
 NGUYÊN LIỆU TRONG TỦ LẠNH:
@@ -497,7 +506,8 @@ export async function generatePersonalizedReply({
   //    vì nội dung soạn sẵn không lọc theo dị ứng, nguyên liệu không thích hay chế độ ăn)
   const hasConstraints = userProfile?.allergen_groups?.length > 0
     || userProfile?.disliked_ingredients?.length > 0
-    || userProfile?.diet_types?.length > 0;
+    || userProfile?.diet_types?.length > 0
+    || userProfile?.strict_diets?.length > 0;
   if (!hasConstraints && !fridge?.ingredient_names?.length && PRESEEDED_QUICK_REPLIES[normKey]) {
     const pre = PRESEEDED_QUICK_REPLIES[normKey];
     const matched = matchDishesFromContext(normKey, dishesContext);
@@ -608,8 +618,8 @@ HỒ SƠ KHẨU VỊ:
 ${profileParts.length ? profileParts.join('\n') : '(Chưa thiết lập)'}
 ${favList ? `Món yêu thích: ${favList}` : ''}
 ${fridgeParts.length ? fridgeParts.join('\n') : ''}
-${allergyRules(userProfile.allergen_groups)}
-MÓN ĂN AN TOÀN TRONG HỆ THỐNG (đã loại món chứa nguyên liệu dị ứng/không thích; chỉ được giới thiệu thẻ món trong danh sách này):
+${allergyRules(userProfile.allergen_groups)}${dietRules(userProfile.strict_diets)}
+MÓN ĂN AN TOÀN TRONG HỆ THỐNG (đã loại món chứa nguyên liệu dị ứng/không thích và món không hợp chế độ ăn bắt buộc; chỉ được giới thiệu thẻ món trong danh sách này):
 ${JSON.stringify(dishesSummary)}
 
 ${historyText ? `LỊCH SỬ HỘI THOẠI:\n${historyText}\n` : ''}
