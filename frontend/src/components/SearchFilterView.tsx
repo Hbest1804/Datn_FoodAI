@@ -78,6 +78,13 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
   }, [fridgeIngredients]);
   const [ingredientSearchInput, setIngredientSearchInput] = useState('');
   const [ingredientSuggestions, setIngredientSuggestions] = useState<Array<{ id: number; name: string }>>([]);
+  // Nguyên liệu phổ biến để chọn nhanh (FR-06): hệ thống tự tính theo số món đang hiển thị dùng
+  const [commonIngredients, setCommonIngredients] = useState<Array<{ id: number; name: string }>>([]);
+  useEffect(() => {
+    apiService.ingredients.getCommonIngredients()
+      .then((res) => setCommonIngredients((res.data || []).map((i) => ({ id: i.id, name: i.name }))))
+      .catch(() => setCommonIngredients([]));
+  }, []);
   const [onlyReadyToCook, setOnlyReadyToCook] = useState(false); // min_match_ratio = 1
 
   // Results
@@ -367,6 +374,28 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Chọn nhanh nguyên liệu phổ biến */}
+            {commonIngredients.some(c => !fridgeIngredients.some(i => i.id === c.id)) && (
+              <div className="space-y-1">
+                <span className="text-[10px] font-bold text-slate-500 uppercase">Chọn nhanh</span>
+                <div className="flex flex-wrap gap-1">
+                  {commonIngredients
+                    .filter(c => !fridgeIngredients.some(i => i.id === c.id))
+                    .slice(0, 12)
+                    .map(item => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => handleAddFridgeIngredient(item)}
+                        className="px-2 py-0.5 bg-white/70 border border-dashed border-orange-300 hover:border-orange-500 hover:text-orange-700 text-slate-600 rounded-lg text-[11px] cursor-pointer transition-colors"
+                      >
+                        + {item.name}
+                      </button>
+                    ))}
+                </div>
+              </div>
+            )}
 
             {/* Selected Fridge Tags */}
             <div className="flex flex-wrap gap-1.5 pt-1">

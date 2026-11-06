@@ -84,6 +84,8 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
   // Global notice / error
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  // Tài khoản chỉ đăng nhập bằng Google chưa có mật khẩu (GET /me trả has_password = false)
+  const [hasPassword, setHasPassword] = useState(true);
 
   // 1. Load initial profile data from backend
   useEffect(() => {
@@ -97,6 +99,7 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
           if (p.display_name) setDisplayName(p.display_name);
           if (p.avatar_url && !isPersonPhoto(p.avatar_url)) setAvatarUrl(p.avatar_url);
           if (p.email) setEmail(p.email);
+          if (typeof p.has_password === 'boolean') setHasPassword(p.has_password);
         }
       } catch (err) {
         console.warn('Could not fetch user profile:', err);
@@ -301,24 +304,28 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
       return;
     }
 
-    const password = await showPrompt({
-      title: 'Xác thực mật khẩu',
-      message: 'Vui lòng nhập mật khẩu hiện tại của bạn để xác thực yêu cầu xóa tài khoản:',
-      placeholder: 'Nhập mật khẩu hiện tại...',
-      inputType: 'password',
-      confirmText: 'Xóa tài khoản vĩnh viễn',
-      cancelText: 'Hủy bỏ',
-      variant: 'danger',
-      required: true,
-    });
-    if (password === null) return;
-    if (!password) {
-      toast.warning('Chưa nhập mật khẩu. Đã hủy thao tác.');
-      return;
+    // Tài khoản chỉ đăng nhập bằng Google chưa có mật khẩu: bước xác nhận cụm từ ở trên là đủ
+    let password: string | null = null;
+    if (hasPassword) {
+      password = await showPrompt({
+        title: 'Xác thực mật khẩu',
+        message: 'Vui lòng nhập mật khẩu hiện tại của bạn để xác thực yêu cầu xóa tài khoản:',
+        placeholder: 'Nhập mật khẩu hiện tại...',
+        inputType: 'password',
+        confirmText: 'Xóa tài khoản vĩnh viễn',
+        cancelText: 'Hủy bỏ',
+        variant: 'danger',
+        required: true,
+      });
+      if (password === null) return;
+      if (!password) {
+        toast.warning('Chưa nhập mật khẩu. Đã hủy thao tác.');
+        return;
+      }
     }
 
     try {
-      await apiService.me.deleteAccount(password);
+      await apiService.me.deleteAccount(password ?? true);
       toast.success('Tài khoản của bạn đã được xóa vĩnh viễn. Đang chuyển hướng...', 'Đã xóa tài khoản');
       localStorage.clear();
       setTimeout(() => {
@@ -601,6 +608,12 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
           <section id="account-security" className="scroll-mt-24 bg-white rounded-2xl p-6 shadow-[0_1px_1px_rgba(0,0,0,0.05)] space-y-6">
             {sectionHeading('Phần 2', 'Đổi mật khẩu & Bảo mật', <ShieldCheck className="w-6 h-6 text-orange-500 shrink-0" />)}
 
+            {!hasPassword ? (
+              <p className="flex items-start gap-1.5 text-sm text-slate-600">
+                <Info className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                Tài khoản của bạn đăng nhập bằng Google nên chưa có mật khẩu. Muốn đăng nhập bằng email và mật khẩu, hãy đăng xuất rồi đặt mật khẩu qua chức năng “Quên mật khẩu”.
+              </p>
+            ) : (
             <form onSubmit={handleChangePassword} className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
                 {passwordField('Mật khẩu hiện tại', currentPassword, setCurrentPassword, '••••••••', 'current')}
@@ -631,6 +644,7 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
                 </button>
               </div>
             </form>
+            )}
           </section>
 
           {/* PHẦN 3: Món yêu thích & lịch sử hoạt động */}

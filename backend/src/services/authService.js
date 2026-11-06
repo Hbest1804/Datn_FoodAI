@@ -49,6 +49,18 @@ export async function verifyPassword(email, password) {
   return data.session;
 }
 
+/**
+ * Tài khoản có mật khẩu chưa: có danh tính email (đăng ký bằng mật khẩu) hoặc đã đặt mật khẩu qua UC15.
+ * Tài khoản chỉ đăng nhập bằng Google thì chưa có mật khẩu.
+ */
+export async function accountHasPassword(userId) {
+  const { data, error } = await supabaseAdmin.auth.admin.getUserById(userId);
+  if (error || !data?.user) return true; // không xác định được thì giữ cách cũ (yêu cầu mật khẩu)
+  const u = data.user;
+  if (u.app_metadata?.has_password === true) return true;
+  return (u.identities || []).some((i) => i.provider === 'email');
+}
+
 // ── Thu hồi mã truy cập khi đăng xuất (mã vẫn hợp lệ tới khi hết hạn nên cần danh sách chặn) ──
 const revokedTokens = new Map();
 setInterval(() => {
@@ -347,7 +359,11 @@ export async function resetPassword(credentials, newPassword) {
   if (claimError) throw claimError;
   if (!claimed?.length) throw invalidResetError();
 
-  const { data: updated, error } = await supabaseAdmin.auth.admin.updateUserById(row.user_id, { password: newPassword });
+  // has_password: tài khoản Google đặt mật khẩu qua UC15 từ nay đổi mật khẩu / xóa tài khoản bằng mật khẩu
+  const { data: updated, error } = await supabaseAdmin.auth.admin.updateUserById(row.user_id, {
+    password: newPassword,
+    app_metadata: { has_password: true },
+  });
   if (error) {
     // Không đổi được mật khẩu thì trả lại yêu cầu để người dùng thử lại
     await supabaseAdmin.from('password_reset_tokens').update({ used_at: null }).eq('id', row.id);

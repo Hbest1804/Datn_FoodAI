@@ -426,7 +426,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
           timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
           content: reply.content,
           text: reply.content,
-          outcome: reply.type,
+          outcome: reply.outcome ?? reply.type,
           referenced_dishes: reply.dishes,
           recipeRecommendation: normalizedDishes.length > 0 ? normalizedDishes[0] : undefined,
           quickReplies: [

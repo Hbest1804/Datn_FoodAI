@@ -131,10 +131,9 @@ export async function getPersonalizedRecommendations({ userId, limit = 12, categ
   // 2. Món ứng viên đã loại nguyên liệu dị ứng / không thích và món không hợp chế độ ăn bắt buộc (chay, thuần chay)
   const [allDishes, forbidden, diet, embeddings] = await Promise.all([
     getPublishedDishes(),
-    getForbiddenIngredientIds({
-      allergenGroupIds: profile.allergen_group_ids,
-      dislikedIngredientIds: profile.disliked_ingredient_ids,
-    }),
+    // Hồ sơ không khai nhóm dị ứng riêng (user_allergies chỉ giữ để tương thích); nguyên liệu gây dị ứng
+    // nằm trong danh sách nguyên liệu kiêng, cùng cách lọc với chatbot và danh sách món
+    getForbiddenIngredientIds({ dislikedIngredientIds: profile.disliked_ingredient_ids }),
     getDietConstraints({ dietTypeIds: profile.diet_type_ids || [] }),
     personalized ? getDishEmbeddings() : Promise.resolve(new Map()),
   ]);

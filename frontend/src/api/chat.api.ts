@@ -7,7 +7,8 @@ import { ChatSession, ChatMessage, GuestQuota } from '../types';
 export interface SendGuestMessageResponse {
   guest_id: string;
   reply: {
-    type: 'clarification' | 'out_of_scope' | 'qa' | 'recipe';
+    type: 'recipe' | 'general' | 'out_of_scope';
+    outcome?: 'answered' | 'no_match' | 'out_of_scope';
     content: string;
     dishes: Array<{
       id: string;

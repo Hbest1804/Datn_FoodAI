@@ -2,7 +2,7 @@
 // Tài khoản & dữ liệu cá nhân – mục 4.9 và 5.5 của tài liệu API
 
 import { supabaseAdmin } from '../config/supabase.js';
-import { verifyPassword } from '../services/authService.js';
+import { accountHasPassword, verifyPassword } from '../services/authService.js';
 import { invalidateRecommendationCache, toDishSummary } from '../services/recommendationService.js';
 import { recomputeUserVectorsInBackground } from '../services/embeddingService.js';
 import { passwordErrors } from './authController.js';
@@ -37,9 +37,12 @@ function publicUser(u) {
 export async function getMe(req, res) {
   const userId = req.user.id;
   const count = (table) => supabaseAdmin.from(table).select('*', { count: 'exact', head: true }).eq('user_id', userId);
-  const [favs, ratings, sessions] = await Promise.all([count('favorites'), count('ratings'), count('chat_sessions')]);
+  const [favs, ratings, sessions, hasPassword] = await Promise.all([
+    count('favorites'), count('ratings'), count('chat_sessions'), accountHasPassword(userId),
+  ]);
   return sendOk(res, {
     ...publicUser(req.user),
+    has_password: hasPassword,
     stats: { favorites: favs.count || 0, ratings: ratings.count || 0, chat_sessions: sessions.count || 0 },
   });
 }
@@ -69,6 +72,10 @@ export async function updateMe(req, res) {
  */
 export async function changePassword(req, res) {
   const body = req.body || {};
+  if (!(await accountHasPassword(req.user.id))) {
+    return sendError(res, 400, 'PASSWORD_NOT_SET',
+      'Tài khoản đăng nhập bằng Google chưa có mật khẩu. Hãy đặt mật khẩu qua chức năng "Quên mật khẩu".');
+  }
   const current = body.current_password ?? body.old_password;
   const details = passwordErrors(body.new_password, body.confirm_password, 'new_password');
   if (typeof current !== 'string' || !current) {
@@ -149,7 +156,7 @@ export async function deleteUserAccount(userId) {
 }
 
 /**
- * 4.9.6 Xóa tài khoản – DELETE /me { password, confirm: true }
+ * 4.9.6 Xóa tài khoản – DELETE /me { password?, confirm: true } (password bắt buộc nếu tài khoản có mật khẩu)
  */
 export async function deleteMe(req, res) {
   const { password, confirm } = req.body || {};
@@ -159,8 +166,11 @@ export async function deleteMe(req, res) {
   if (req.user.role === 'admin') {
     return sendError(res, 403, 'FORBIDDEN', 'Tài khoản Admin không tự xóa qua API này.');
   }
-  if (typeof password !== 'string' || !(await verifyPassword(req.user.email, password))) {
-    return sendError(res, 400, 'WRONG_CURRENT_PASSWORD', 'Mật khẩu xác nhận không đúng.');
+  // Tài khoản chỉ đăng nhập bằng Google chưa có mật khẩu: chỉ cần confirm = true (UC10 luồng 3b, 3d)
+  if (await accountHasPassword(req.user.id)) {
+    if (typeof password !== 'string' || !(await verifyPassword(req.user.email, password))) {
+      return sendError(res, 400, 'WRONG_CURRENT_PASSWORD', 'Mật khẩu xác nhận không đúng.');
+    }
   }
   await deleteUserAccount(req.user.id);
   return res.status(204).send();

@@ -129,7 +129,7 @@ export async function sendGuestMessage(req, res) {
   const topic = await checkTopic(question, settings);
   let reply;
   if (topic.outOfScope) {
-    reply = { type: 'out_of_scope', content: topic.reply, dishes: [] };
+    reply = { type: 'out_of_scope', outcome: 'out_of_scope', content: topic.reply, dishes: [] };
   } else {
     // Khách không có hồ sơ: chỉ lọc theo dị ứng và chế độ ăn bắt buộc (chay) nêu ngay trong câu hỏi
     const asked = await detectQuestionAllergens(question);
@@ -151,7 +151,9 @@ export async function sendGuestMessage(req, res) {
       dishesContext,
       systemPrompt: settings.system_prompt,
     });
-    reply = { type: aiResult.type, content: aiResult.content, dishes: aiResult.dishes.map(toDishCard) };
+    // outcome cùng bộ giá trị với chatbot người dùng; type (recipe | general | out_of_scope) giữ để tương thích
+    const outcome = aiResult.type === 'out_of_scope' ? 'out_of_scope' : 'answered';
+    reply = { type: aiResult.type, outcome, content: aiResult.content, dishes: aiResult.dishes.map(toDishCard) };
   }
 
   // 4. Trừ một lượt hỏi và cập nhật số liệu tổng hợp

@@ -146,7 +146,7 @@ export const FloatingChefWidget: React.FC<FloatingChefWidgetProps> = ({
         publishGuestQuota(guestRes.quota);
         replyText = guestRes.reply?.content || 'Đã phân tích khẩu vị của bạn!';
         rawDishes = guestRes.reply?.dishes || [];
-        outcome = guestRes.reply?.type;
+        outcome = guestRes.reply?.outcome ?? guestRes.reply?.type;
       }
 
       const dishes = rawDishes.map(normalizeDish);
