@@ -54,8 +54,8 @@ router.get('/recommendations', getRecommendations);       // 4.7.1
 router.get('/favorites', getMyFavorites);                 // 4.9.4
 router.delete('/favorites', clearMyFavorites);            // 5.5.1
 router.get('/ratings', getMyRatings);                     // 5.5.2
-router.get('/view-history', getMyViewHistory);            // 5.5.3
-router.delete('/view-history', clearMyViewHistory);       // 5.5.4
+router.get('/view-history', getMyViewHistory);            // 4.9.7
+router.delete('/view-history', clearMyViewHistory);       // 4.9.8
 
 // 5.6 Bộ sưu tập
 router.get('/collections', listCollections);                                              // 5.6.1

@@ -6,9 +6,13 @@ import {
   Send, 
   Trash2,
   Maximize2,
-  ChevronDown
+  ChevronDown,
+  ChevronRight,
+  Info
 } from 'lucide-react';
 import { UserProfile, Recipe } from '../types';
+import { normalizeDish, formatDifficulty } from '../utils/dishUtils';
+import { publishGuestQuota } from '../utils/guestQuota';
 import { ChefLogo3D } from './ChefLogo3D';
 import { apiService } from '../api';
 import { toast, showConfirm } from './NotificationModal';
@@ -24,6 +28,10 @@ interface MiniMessage {
   sender: 'chef' | 'user';
   text: string;
   timestamp: string;
+  /** Thẻ món do backend trả về, luôn là món có trong CSDL (FR-25) */
+  dishes?: Recipe[];
+  /** Công thức AI tự đề xuất, không có món tương ứng trong CSDL */
+  isReference?: boolean;
   dishIdea?: {
     title: string;
     calo: number;
@@ -118,6 +126,8 @@ export const FloatingChefWidget: React.FC<FloatingChefWidgetProps> = ({
 
     try {
       let replyText = '';
+      let rawDishes: any[] = [];
+      let outcome: string | undefined;
       if (currentUser.isLoggedIn) {
         // Authenticated user - maintain active session
         let targetSessionId = activeSessionId;
@@ -128,17 +138,29 @@ export const FloatingChefWidget: React.FC<FloatingChefWidgetProps> = ({
         }
         const msgRes = await apiService.chat.sendMessage(targetSessionId, promptText);
         replyText = msgRes.assistant_message?.content || 'Bếp trưởng đã ghi nhận yêu cầu!';
+        rawDishes = msgRes.assistant_message?.referenced_dishes || [];
+        outcome = msgRes.assistant_message?.outcome;
       } else {
         // Guest mode
         const guestRes = await apiService.chat.sendGuestMessage(promptText);
+        publishGuestQuota(guestRes.quota);
         replyText = guestRes.reply?.content || 'Đã phân tích khẩu vị của bạn!';
+        rawDishes = guestRes.reply?.dishes || [];
+        outcome = guestRes.reply?.outcome ?? guestRes.reply?.type;
       }
+
+      const dishes = rawDishes.map(normalizeDish);
+      const isReference = dishes.length === 0
+        && outcome !== 'out_of_scope' && outcome !== 'error'
+        && /nguyên liệu|cách làm|các bước|bước\s*\d|^\s*\d+[.)]\s/im.test(replyText);
 
       const chefMsg: MiniMessage = {
         id: `c-${Date.now() + 1}`,
         sender: 'chef',
         text: replyText,
         timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+        dishes,
+        isReference,
       };
 
       setMessages(prev => [...prev, chefMsg]);
@@ -249,6 +271,12 @@ export const FloatingChefWidget: React.FC<FloatingChefWidgetProps> = ({
                   </div>
                 )}
                 <div className={`space-y-1.5 max-w-[85%] ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
+                  {msg.isReference && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-300 text-[10px] font-bold text-amber-800">
+                      <Info className="w-3 h-3 text-amber-600" />
+                      Gợi ý tham khảo (chưa có trong hệ thống)
+                    </span>
+                  )}
                   <div
                     className={`p-3 rounded-2xl text-xs leading-relaxed ${
                       msg.sender === 'user'
@@ -258,6 +286,36 @@ export const FloatingChefWidget: React.FC<FloatingChefWidgetProps> = ({
                   >
                     <div className="whitespace-pre-line">{msg.text}</div>
                   </div>
+                  {msg.dishes && msg.dishes.length > 0 && (
+                    <div className="space-y-1.5 w-full">
+                      <div className="text-[10px] font-bold text-orange-700 uppercase tracking-wide flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 text-orange-500" />
+                        Món ăn tư vấn kèm hình ảnh & công thức:
+                      </div>
+                      {msg.dishes.slice(0, 4).map(dish => (
+                        <button
+                          key={dish.id || dish.title}
+                          type="button"
+                          onClick={() => onOpenRecipe(dish)}
+                          className="w-full text-left bg-white p-2 rounded-xl border border-orange-200/90 hover:border-orange-300 hover:shadow-sm transition-all cursor-pointer flex gap-2 items-center group"
+                        >
+                          <img
+                            src={dish.image}
+                            alt={dish.title}
+                            loading="lazy" decoding="async"
+                            className="w-11 h-11 rounded-lg object-cover shrink-0 border border-slate-100"
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="block font-bold text-[11px] text-slate-900 group-hover:text-orange-600 truncate">{dish.title}</span>
+                            <span className="block text-[10px] text-slate-500">{dish.cookingTime} phút • {formatDifficulty(dish.difficulty)}</span>
+                            <span className="text-[10px] font-bold text-orange-600 inline-flex items-center gap-0.5">
+                              Xem công thức & nấu ngay <ChevronRight className="w-3 h-3" />
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <div className="text-[9px] text-slate-400 px-1">
                     {msg.timestamp}
                   </div>

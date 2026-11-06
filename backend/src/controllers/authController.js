@@ -12,7 +12,7 @@ import {
   resetPassword as resetPasswordService,
   verifyResetToken,
 } from '../services/authService.js';
-import { isStrongPassword, isValidEmail } from '../utils/validators.js';
+import { isStrongPassword, isValidEmail, parseResetCredentials } from '../utils/validators.js';
 import { sendError, sendOk } from '../utils/http.js';
 
 const WEAK_PASSWORD_MSG = 'Mật khẩu tối thiểu 8 ký tự, gồm chữ hoa, chữ thường và chữ số.';
@@ -136,17 +136,21 @@ export async function requestPasswordReset(req, res) {
  * 4.1.6 Kiểm tra liên kết/mã đặt lại – POST /auth/reset-password/verify
  */
 export async function verifyPasswordReset(req, res) {
-  return sendOk(res, await verifyResetToken(req.body?.token));
+  const { credentials, errors } = parseResetCredentials(req.body);
+  if (errors) return sendError(res, 422, 'VALIDATION_ERROR', 'Cần gửi email kèm mã 6 số, hoặc token trong liên kết.', errors);
+  return sendOk(res, await verifyResetToken(credentials));
 }
 
 /**
  * 4.1.7 Đặt mật khẩu mới – POST /auth/reset-password
  */
 export async function resetPassword(req, res) {
-  const { token, new_password: newPassword, confirm_password: confirm } = req.body || {};
+  const { new_password: newPassword, confirm_password: confirm } = req.body || {};
+  const { credentials, errors } = parseResetCredentials(req.body);
+  if (errors) return sendError(res, 422, 'VALIDATION_ERROR', 'Cần gửi email kèm mã 6 số, hoặc token trong liên kết.', errors);
   const details = passwordErrors(newPassword, confirm, 'new_password');
   if (details.length > 0) return sendError(res, 422, 'VALIDATION_ERROR', 'Mật khẩu yếu hoặc không khớp phần xác nhận.', details);
 
-  await resetPasswordService(token, newPassword);
+  await resetPasswordService(credentials, newPassword);
   return sendOk(res, { message: 'Đặt lại mật khẩu thành công. Vui lòng đăng nhập lại.' });
 }

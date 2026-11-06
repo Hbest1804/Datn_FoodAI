@@ -43,3 +43,12 @@ export function slugify(str) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
 }
+
+/**
+ * Regex khớp trọn một trong các từ/cụm từ tiếng Việt có dấu (\b của JS không hiểu chữ có dấu).
+ * Dùng trên chuỗi đã chuẩn hóa NFC, chữ thường.
+ */
+export function wordsRe(words) {
+  const alt = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).sort((a, b) => b.length - a.length).join('|');
+  return new RegExp(`(?:^|[^\\p{L}])(?:${alt})(?=$|[^\\p{L}])`, 'u');
+}

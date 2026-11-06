@@ -3,6 +3,8 @@
 
 import { supabaseAdmin } from '../config/supabase.js';
 import { recordAuditLog } from '../services/auditService.js';
+import { invalidateCatalog } from '../services/cacheService.js';
+import { DIET_RULES, getDietTypes, violatesDiet } from '../services/dietService.js';
 import { reindexDishInBackground } from '../services/embeddingService.js';
 import { buildXlsx, fileExtension, parseFlag, parseTable, readImportSheets, XLSX_MIME } from '../utils/importFile.js';
 import { normalizeText, slugify } from '../utils/textUtils.js';
@@ -10,7 +12,7 @@ import { parseBool, sendError, sendOk } from '../utils/http.js';
 
 const SHEET_INGREDIENTS = 'nguyen_lieu_mon';
 const SHEET_STEPS = 'buoc_che_bien';
-const INGREDIENT_COLUMNS = ['slug', 'ingredient', 'quantity', 'unit', 'is_optional'];
+const INGREDIENT_COLUMNS = ['slug', 'ingredient', 'quantity', 'unit', 'is_optional', 'groups'];
 const STEP_COLUMNS = ['slug', 'step_order', 'content'];
 const MAX_RECIPE_ROWS = 5000;
 const SHEET_ORDER = [SHEET_INGREDIENTS, SHEET_STEPS];
@@ -39,6 +41,7 @@ export async function adminGetRecipeImportTemplate(req, res) {
     [SHEET_INGREDIENTS, 'quantity', 'Có', 'Số lượng, lớn hơn 0, tối đa 2 chữ số thập phân.'],
     [SHEET_INGREDIENTS, 'unit', 'Không', 'Đơn vị; để trống thì dùng đơn vị mặc định của nguyên liệu (nguyên liệu mới: g).'],
     [SHEET_INGREDIENTS, 'is_optional', 'Không', 'Nguyên liệu tùy chọn: true/false hoặc có/không (mặc định false).'],
+    [SHEET_INGREDIENTS, 'groups', 'Không', 'Nhóm của nguyên liệu (tên nguyên liệu gốc), nhiều nhóm phân tách bằng ";". Người dùng kiêng nguyên liệu gốc thì món chứa nguyên liệu này cũng bị loại. Ví dụ Tôm sú tươi → "Tôm"; Gan heo, đậu phộng → "Thịt heo; Đậu phộng". Nguyên liệu gốc chưa có sẽ được tạo mới. Chỉ thêm nhóm, không xóa nhóm đã có; ghi một lần ở một dòng là đủ.'],
     [SHEET_STEPS, 'slug', 'Có', 'Mã món đã có trong hệ thống.'],
     [SHEET_STEPS, 'step_order', 'Có', 'Thứ tự bước, số nguyên dương, không trùng trong cùng món.'],
     [SHEET_STEPS, 'content', 'Có', 'Nội dung bước.'],
@@ -54,8 +57,8 @@ export async function adminGetRecipeImportTemplate(req, res) {
   return res.send(buildXlsx([
     {
       name: SHEET_INGREDIENTS,
-      rows: [INGREDIENT_COLUMNS, [sample, 'Thịt bò', 500, 'g', 'false'], [sample, 'Hành lá', 3, 'nhánh', 'false'], [sample, 'Ớt', 2, 'quả', 'true']],
-      cols: [22, 20, 10, 12, 12],
+      rows: [INGREDIENT_COLUMNS, [sample, 'Thịt bò', 500, 'g', 'false', ''], [sample, 'Tôm sú tươi', 200, 'g', 'false', 'Tôm'], [sample, 'Ớt', 2, 'quả', 'true', '']],
+      cols: [22, 20, 10, 12, 12, 24],
     },
     {
       name: SHEET_STEPS,
@@ -92,10 +95,17 @@ function readRecipeFile(file) {
 
 /** Kiểm tra toàn bộ file theo từng món (không ghi CSDL). */
 async function validateRecipeImport({ ingredients, steps }) {
-  const [dishRes, ingRes] = await Promise.all([
-    supabaseAdmin.from('dishes').select('id, name, slug, is_published, recipe_steps(count), dish_ingredients(count)'),
+  const [dishRes, ingRes, linkRes, dietTypes] = await Promise.all([
+    supabaseAdmin.from('dishes').select('id, name, slug, is_published, dish_tags(tag_id), recipe_steps(count), dish_ingredients(count)'),
     supabaseAdmin.from('ingredients').select('id, name, normalized_name, aliases, default_unit'),
+    supabaseAdmin.from('ingredient_parents').select('ingredient_id, parent_id'),
+    getDietTypes(),
   ]);
+  if (linkRes.error) throw linkRes.error;
+  // Thẻ của chế độ ăn bắt buộc (Chay, Thuần chay) → mã chế độ, để kiểm tra công thức không chứa nguyên liệu động vật
+  const strictDietByTag = new Map(dietTypes
+    .filter((d) => d.is_strict && d.tag_id != null && DIET_RULES[d.code])
+    .map((d) => [Number(d.tag_id), d]));
   if (dishRes.error) throw dishRes.error;
   if (ingRes.error) throw ingRes.error;
   const dishBySlug = new Map((dishRes.data || []).map((d) => [d.slug, d]));
@@ -156,15 +166,63 @@ async function validateRecipeImport({ ingredients, steps }) {
       err('ingredient', 'DUPLICATE_INGREDIENT', `Nguyên liệu "${ingredient ? ingredient.name : name}" bị lặp lại trong cùng món.`);
       continue;
     }
+    // Nhóm: tên nguyên liệu gốc, phân tách bằng ";" (tên nguyên liệu có thể chứa dấu phẩy)
+    const groups = [];
+    for (const g of text('groups').split(';').map((s) => s.trim().replace(/\s+/g, ' ')).filter(Boolean)) {
+      const parent = ingredientByName.get(normalizeText(g));
+      const groupKey = parent ? `id:${parent.id}` : `new:${normalizeText(g)}`;
+      if (g.length > 100) err('groups', 'INVALID_VALUE', `Tên nhóm "${g.slice(0, 30)}…" tối đa 100 ký tự.`);
+      else if (groupKey === key) err('groups', 'SELF_GROUP', `Nguyên liệu "${name}" không thể thuộc nhóm của chính nó.`);
+      else if (!groups.some((x) => x.key === groupKey)) groups.push({ key: groupKey, ingredient_id: parent ? Number(parent.id) : null, name: parent ? parent.name : g });
+    }
     entry.ingredients.push({
+      row: line.row,
       key,
       ingredient_id: ingredient ? Number(ingredient.id) : null,
       name,
       quantity,
       unit: text('unit') || ingredient?.default_unit || 'g',
       is_optional: optional === true,
+      groups,
     });
   }
+
+  // Nhóm không được tạo vòng lặp (vd Tôm thuộc nhóm Mắm tôm trong khi Mắm tôm đã thuộc nhóm Tôm)
+  const parentsOf = new Map();
+  const addEdge = (child, parent) => {
+    if (!parentsOf.has(child)) parentsOf.set(child, new Set());
+    parentsOf.get(child).add(parent);
+  };
+  for (const l of linkRes.data || []) addEdge(`id:${l.ingredient_id}`, `id:${l.parent_id}`);
+  const reaches = (from, target) => {
+    const seen = new Set();
+    const stack = [from];
+    while (stack.length) {
+      const node = stack.pop();
+      if (node === target) return true;
+      if (seen.has(node)) continue;
+      seen.add(node);
+      stack.push(...(parentsOf.get(node) || []));
+    }
+    return false;
+  };
+  for (const entry of entries.values()) {
+    for (const ing of entry.ingredients) {
+      ing.groups = ing.groups.filter((g) => {
+        if (reaches(g.key, ing.key)) {
+          entry.errors++;
+          errors.push({
+            sheet: SHEET_INGREDIENTS, row: ing.row, slug: entry.dish.slug, field: 'groups', code: 'GROUP_CYCLE',
+            message: `"${g.name}" đã thuộc nhóm "${ing.name}" nên "${ing.name}" không thể thuộc nhóm "${g.name}".`,
+          });
+          return false;
+        }
+        addEdge(ing.key, g.key);
+        return true;
+      });
+    }
+  }
+  const existingLinks = new Set((linkRes.data || []).map((l) => `${l.ingredient_id}>${l.parent_id}`));
 
   for (const line of steps.data) {
     const { entry, err, text } = lineOf(SHEET_STEPS, line);
@@ -190,13 +248,25 @@ async function validateRecipeImport({ ingredients, steps }) {
         message: hasIng ? `Món có nguyên liệu nhưng chưa có bước chế biến ở sheet ${SHEET_STEPS}.` : `Món có bước chế biến nhưng chưa có nguyên liệu ở sheet ${SHEET_INGREDIENTS}.`,
       });
     }
+    // Món gắn thẻ chế độ bắt buộc (vd Chay) không được có nguyên liệu vi phạm chế độ đó
+    for (const tag of entry.dish.dish_tags || []) {
+      const diet = strictDietByTag.get(Number(tag.tag_id));
+      if (!diet) continue;
+      for (const ing of entry.ingredients.filter((i) => violatesDiet(i.name, diet.code))) {
+        entry.errors++;
+        errors.push({
+          sheet: SHEET_INGREDIENTS, row: ing.row, slug: entry.dish.slug, field: 'ingredient', code: 'DIET_CONFLICT',
+          message: `Món gắn thẻ chế độ "${diet.name}" nhưng có nguyên liệu "${ing.name}". Đổi nguyên liệu (vd nước tương, dầu hào chay) hoặc bỏ thẻ.`,
+        });
+      }
+    }
     // Bước được đánh số lại liên tục từ 1 theo step_order, như khi lưu công thức thủ công
     entry.steps.sort((a, b) => a.order - b.order).forEach((s, idx) => { s.order = idx + 1; });
   }
   errors.sort((a, b) => SHEET_ORDER.indexOf(a.sheet) - SHEET_ORDER.indexOf(b.sheet) || a.row - b.row);
 
   const all = [...entries.values()];
-  return { all, valid: all.filter((e) => e.errors === 0), errors };
+  return { all, valid: all.filter((e) => e.errors === 0), errors, existingLinks };
 }
 
 /** Ghi đè công thức của một món: ghi dòng mới rồi xóa dòng thừa để công thức không lúc nào rỗng (món đang hiển thị). */
@@ -229,7 +299,10 @@ const toRows = (entry, newIds) => ({
   stepRows: entry.steps.map((s) => ({ dish_id: entry.dish.id, step_order: s.order, content: s.content })),
 });
 
-/** Nguyên liệu mới cần tạo cho các món sẽ lưu: khóa đã chuẩn hóa → tên và đơn vị mặc định (lấy từ dòng đầu tiên). */
+/**
+ * Nguyên liệu mới cần tạo cho các món sẽ lưu: khóa đã chuẩn hóa → tên và đơn vị mặc định (lấy từ dòng đầu tiên).
+ * Nguyên liệu gốc của nhóm chưa có trong danh mục cũng được tạo (đơn vị mặc định g).
+ */
 function collectNewIngredients(entries) {
   const pending = new Map();
   for (const e of entries) {
@@ -237,7 +310,28 @@ function collectNewIngredients(entries) {
       if (i.ingredient_id === null && !pending.has(i.key)) pending.set(i.key, { name: i.name, default_unit: i.unit });
     }
   }
+  for (const e of entries) {
+    for (const g of e.ingredients.flatMap((i) => i.groups)) {
+      if (g.ingredient_id === null && !pending.has(g.key)) pending.set(g.key, { name: g.name, default_unit: 'g' });
+    }
+  }
   return pending;
+}
+
+/** Liên kết nhóm chưa có trong CSDL của các món sẽ lưu: (khóa nguyên liệu, khóa nhóm) kèm tên để hiển thị. */
+function collectNewGroupLinks(entries, existingLinks) {
+  const links = new Map();
+  for (const e of entries) {
+    for (const i of e.ingredients) {
+      for (const g of i.groups) {
+        const pair = `${i.key}>${g.key}`;
+        if (links.has(pair)) continue;
+        if (i.ingredient_id !== null && g.ingredient_id !== null && existingLinks.has(`${i.ingredient_id}>${g.ingredient_id}`)) continue;
+        links.set(pair, { childKey: i.key, parentKey: g.key, childName: i.name, parentName: g.name });
+      }
+    }
+  }
+  return [...links.values()];
 }
 
 /**
@@ -245,7 +339,7 @@ function collectNewIngredients(entries) {
  * (lưu bản cũ trước để khôi phục) → công khai. Supabase không hỗ trợ giao dịch nhiều câu lệnh nên lỗi ở bước nào
  * cũng hoàn tác phần đã ghi, kể cả nguyên liệu vừa tạo.
  */
-async function writeRecipes(toCreate, toReplace, publishIds, pendingNew, userId) {
+async function writeRecipes(toCreate, toReplace, publishIds, pendingNew, groupLinks, userId) {
   const createIds = toCreate.map((e) => e.dish.id);
   const replaceIds = toReplace.map((e) => e.dish.id);
   const snapshot = new Map(replaceIds.map((id) => [id, { ingRows: [], stepRows: [] }]));
@@ -286,6 +380,15 @@ async function writeRecipes(toCreate, toReplace, publishIds, pendingNew, userId)
     }
     if (publishIds.length > 0) {
       const { error } = await supabaseAdmin.from('dishes').update({ is_published: true }).in('id', publishIds);
+      if (error) throw error;
+    }
+    // Ghi nhóm sau cùng: một câu lệnh duy nhất, lỗi thì không dòng nào được ghi nên không cần hoàn tác riêng
+    if (groupLinks.length > 0) {
+      const idOf = (k) => (k.startsWith('id:') ? Number(k.slice(3)) : newIds.get(k));
+      const { error } = await supabaseAdmin.from('ingredient_parents').upsert(
+        groupLinks.map((l) => ({ ingredient_id: idOf(l.childKey), parent_id: idOf(l.parentKey) })),
+        { onConflict: 'ingredient_id,parent_id', ignoreDuplicates: true },
+      );
       if (error) throw error;
     }
   } catch (err) {
@@ -336,7 +439,7 @@ export async function adminImportRecipes(req, res) {
   }
   const warnings = [...file.ingredients.warnings, ...file.steps.warnings];
 
-  const { all, valid, errors } = await validateRecipeImport(file);
+  const { all, valid, errors, existingLinks } = await validateRecipeImport(file);
   const toCreate = valid.filter((e) => !e.hasExisting);
   const toReplace = onExisting === 'replace' ? valid.filter((e) => e.hasExisting) : [];
   const skipped = onExisting === 'skip'
@@ -345,6 +448,7 @@ export async function adminImportRecipes(req, res) {
   const saving = [...toCreate, ...toReplace];
   const publishIds = publish ? saving.filter((e) => !e.dish.is_published).map((e) => e.dish.id) : [];
   const pendingNew = collectNewIngredients(saving);
+  const groupLinks = collectNewGroupLinks(saving, existingLinks);
 
   const result = {
     dry_run: dryRun,
@@ -356,6 +460,7 @@ export async function adminImportRecipes(req, res) {
     replaced_count: toReplace.length,
     published_count: publishIds.length,
     new_ingredients: [...pendingNew.values()].map((n) => n.name),
+    new_groups: groupLinks.map((l) => ({ ingredient: l.childName, group: l.parentName })),
     skipped,
     errors,
     warnings,
@@ -367,11 +472,13 @@ export async function adminImportRecipes(req, res) {
 
   let createdIngredients;
   try {
-    createdIngredients = await writeRecipes(toCreate, toReplace, publishIds, pendingNew, req.user.id);
+    createdIngredients = await writeRecipes(toCreate, toReplace, publishIds, pendingNew, groupLinks, req.user.id);
   } catch (err) {
     console.error('[Import] Lỗi ghi công thức, đã hoàn tác:', err);
     return sendError(res, 500, 'IMPORT_FAILED', 'Lỗi khi ghi dữ liệu; đã hoàn tác, không công thức nào được lưu.');
   }
+  // Bộ lọc nguyên liệu kiêng dùng nhóm mới ngay, không đợi hết hạn đệm
+  if (groupLinks.length > 0 || createdIngredients.length > 0) invalidateCatalog();
 
   saving.forEach((e) => reindexDishInBackground(e.dish.id));
   recordAuditLog(req.user, 'recipe.import', 'dish', null, {
@@ -382,6 +489,7 @@ export async function adminImportRecipes(req, res) {
     replaced_ids: toReplace.map((e) => e.dish.id),
     published_ids: publishIds,
     new_ingredient_ids: createdIngredients.map((i) => Number(i.id)),
+    new_group_count: groupLinks.length,
     skipped_count: skipped.length,
   });
 

@@ -6,7 +6,7 @@
 import { supabaseAdmin } from '../config/supabase.js';
 import { getSettings } from './settingsService.js';
 import { cosineSimilarity, getDishEmbeddings, parseVector } from './embeddingService.js';
-import { getForbiddenIngredientIds } from './chatContextService.js';
+import { getDietConstraints, getForbiddenIngredientIds } from './chatContextService.js';
 import { fetchTasteProfile } from './tasteProfileService.js';
 import { getPublishedDishes } from './cacheService.js';
 import { normalizeText } from '../utils/textUtils.js';
@@ -102,7 +102,7 @@ export async function getPersonalizedRecommendations({ userId, limit = 12, categ
   const weights = { sim: 0.45, rating: 0.2, pop: 0.15, budget: 0.1, cal: 0.1, ...(settings.recommendation_weights || {}) };
 
   // 1. Dữ liệu người dùng
-  let profile = { completeness: 0, allergen_group_ids: [], disliked_ingredient_ids: [] };
+  let profile = { completeness: 0, allergen_group_ids: [], disliked_ingredient_ids: [], diet_type_ids: [] };
   let tasteVector = null;
   let favSet = new Set();
   let lowRatedSet = new Set();
@@ -128,18 +128,20 @@ export async function getPersonalizedRecommendations({ userId, limit = 12, categ
   const personalized = Boolean(tasteVector) && (profile.completeness >= 30 || hasInteractions);
   const strategy = personalized ? 'personalized' : 'popular_fallback';
 
-  // 2. Món ứng viên đã loại nguyên liệu dị ứng / không thích
-  const [allDishes, forbidden, embeddings] = await Promise.all([
+  // 2. Món ứng viên đã loại nguyên liệu dị ứng / không thích và món không hợp chế độ ăn bắt buộc (chay, thuần chay)
+  const [allDishes, forbidden, diet, embeddings] = await Promise.all([
     getPublishedDishes(),
-    getForbiddenIngredientIds({
-      allergenGroupIds: profile.allergen_group_ids,
-      dislikedIngredientIds: profile.disliked_ingredient_ids,
-    }),
+    // Hồ sơ không khai nhóm dị ứng riêng (user_allergies chỉ giữ để tương thích); nguyên liệu gây dị ứng
+    // nằm trong danh sách nguyên liệu kiêng, cùng cách lọc với chatbot và danh sách món
+    getForbiddenIngredientIds({ dislikedIngredientIds: profile.disliked_ingredient_ids }),
+    getDietConstraints({ dietTypeIds: profile.diet_type_ids || [] }),
     personalized ? getDishEmbeddings() : Promise.resolve(new Map()),
   ]);
+  diet.forbiddenIngredientIds.forEach((id) => forbidden.add(id));
   const candidates = allDishes.filter((d) =>
     (!categoryKey || d.category_normalized === categoryKey)
     && !lowRatedSet.has(d.id)
+    && (!diet.dishFilter || diet.dishFilter(d))
     && !(d.dish_ingredients || []).some((di) => forbidden.has(Number(di.ingredient_id))));
 
   // 3. Chấm điểm

@@ -12,6 +12,7 @@ const MAX_FAILED_LOGINS = 5;
 const LOGIN_LOCK_MINUTES = 15;
 const RESET_TOKEN_MINUTES = 15;
 const RESET_REQUESTS_PER_WINDOW = 3;
+const MAX_RESET_CODE_ATTEMPTS = 5;
 
 const USER_FIELDS = 'id, email, display_name, avatar_url, role, status, created_at';
 
@@ -46,6 +47,18 @@ export async function verifyPassword(email, password) {
   const { data, error } = await freshClient().auth.signInWithPassword({ email, password });
   if (error || !data.session) return null;
   return data.session;
+}
+
+/**
+ * Tài khoản có mật khẩu chưa: có danh tính email (đăng ký bằng mật khẩu) hoặc đã đặt mật khẩu qua UC15.
+ * Tài khoản chỉ đăng nhập bằng Google thì chưa có mật khẩu.
+ */
+export async function accountHasPassword(userId) {
+  const { data, error } = await supabaseAdmin.auth.admin.getUserById(userId);
+  if (error || !data?.user) return true; // không xác định được thì giữ cách cũ (yêu cầu mật khẩu)
+  const u = data.user;
+  if (u.app_metadata?.has_password === true) return true;
+  return (u.identities || []).some((i) => i.provider === 'email');
 }
 
 // ── Thu hồi mã truy cập khi đăng xuất (mã vẫn hợp lệ tới khi hết hạn nên cần danh sách chặn) ──
@@ -237,18 +250,33 @@ export async function refreshSession(refreshToken) {
   return tokenPayload(data.session);
 }
 
-// ── 4.1.5 – 4.1.7 Đặt lại mật khẩu (mã 6 số, lưu SHA-256, hạn 15 phút, dùng một lần) ──
+// ── 4.1.5 – 4.1.7 Đặt lại mật khẩu ───────────────────────────────────────────
+// Mỗi yêu cầu sinh hai thứ dùng chung một bản ghi, hạn 15 phút, dùng một lần:
+//  • mã 6 số để người dùng gõ tay – chỉ được kiểm tra kèm email, sai tối đa 5 lần thì yêu cầu bị hủy;
+//  • token ngẫu nhiên 32 byte nằm trong liên kết email – đủ dài để không thể dò.
+// CSDL chỉ lưu bản băm SHA-256 của cả hai.
 
 const resetRequestLog = new Map(); // email → danh sách thời điểm gửi yêu cầu
 
-function hashToken(token) {
-  return crypto.createHash('sha256').update(String(token).trim()).digest('hex');
+function sha256(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+/** Băm mã 6 số kèm user_id để cùng một mã ở hai tài khoản cho ra hai bản băm khác nhau. */
+function hashResetCode(userId, code) {
+  return sha256(`${userId}:${code}`);
+}
+
+const INVALID_RESET_MSG = `Mã không đúng, đã dùng hoặc đã hết hạn. Mỗi mã chỉ được nhập sai tối đa ${MAX_RESET_CODE_ATTEMPTS} lần; hãy yêu cầu mã mới nếu cần.`;
+
+function invalidResetError() {
+  return new ApiError(400, 'INVALID_OR_EXPIRED_TOKEN', INVALID_RESET_MSG);
 }
 
 export async function requestPasswordReset(email) {
   const normalizedEmail = email.trim().toLowerCase();
 
-  // Giới hạn 3 yêu cầu / 15 phút cho mỗi email (luồng 4c); giới hạn theo IP nằm ở lớp chặn tần suất
+  // Giới hạn 3 yêu cầu / 15 phút cho mỗi email (luồng 2b); giới hạn theo IP nằm ở lớp chặn tần suất
   const now = Date.now();
   const recent = (resetRequestLog.get(normalizedEmail) || []).filter((t) => now - t < RESET_TOKEN_MINUTES * 60 * 1000);
   if (recent.length >= RESET_REQUESTS_PER_WINDOW) {
@@ -258,62 +286,91 @@ export async function requestPasswordReset(email) {
   resetRequestLog.set(normalizedEmail, [...recent, now]);
 
   const user = await findUserByEmail(normalizedEmail);
-  // Chỉ gửi email khi tài khoản tồn tại và không bị khóa; kết quả trả về luôn giống nhau (luồng 4a)
+  // Chỉ gửi email khi tài khoản tồn tại và không bị khóa; kết quả trả về luôn giống nhau (luồng 2a)
   if (!user || user.status !== 'active') return;
 
+  // Yêu cầu mới thay thế các yêu cầu cũ chưa dùng của tài khoản
   await supabaseAdmin.from('password_reset_tokens').delete().eq('user_id', user.id).is('used_at', null);
 
-  let code;
-  for (let attempt = 0; attempt < 5; attempt++) {
-    code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
-    const { error } = await supabaseAdmin.from('password_reset_tokens').insert({
-      user_id: user.id,
-      token_hash: hashToken(code),
-      expires_at: new Date(now + RESET_TOKEN_MINUTES * 60 * 1000).toISOString(),
-    });
-    if (!error) break;
-    if (error.code !== '23505') throw error; // trùng mã đang hiệu lực của người khác → sinh lại
-    code = null;
-  }
-  if (!code) throw new Error('Không sinh được mã đặt lại mật khẩu');
+  const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+  const linkToken = crypto.randomBytes(32).toString('base64url');
+  const { error } = await supabaseAdmin.from('password_reset_tokens').insert({
+    user_id: user.id,
+    token_hash: sha256(linkToken),
+    code_hash: hashResetCode(user.id, code),
+    expires_at: new Date(now + RESET_TOKEN_MINUTES * 60 * 1000).toISOString(),
+  });
+  if (error) throw error;
 
   try {
-    await sendPasswordResetEmail(user.email, code, `${env.frontendUrl}/reset-password?token=${code}`);
+    await sendPasswordResetEmail(user.email, code, `${env.frontendUrl}/reset-password?token=${linkToken}`);
   } catch (err) {
     console.error('[Auth] Gửi email đặt lại mật khẩu thất bại:', err.message);
     throw new ApiError(502, 'EMAIL_SEND_FAILED', 'Không gửi được email. Vui lòng thử lại.');
   }
 }
 
-async function findValidResetToken(token) {
-  if (!token || typeof token !== 'string') return null;
-  const { data, error } = await supabaseAdmin
-    .from('password_reset_tokens')
-    .select('id, user_id, expires_at, used_at')
-    .eq('token_hash', hashToken(token))
-    .maybeSingle();
+/**
+ * Tìm yêu cầu đặt lại còn hiệu lực theo { token } (liên kết email) hoặc { email, code } (nhập tay).
+ * Trả về { id, user_id, expires_at } hoặc null. Với email + mã, mỗi lần sai được đếm trong CSDL.
+ */
+async function findValidReset({ token, email, code }) {
+  if (token) {
+    const { data, error } = await supabaseAdmin
+      .from('password_reset_tokens')
+      .select('id, user_id, expires_at, used_at, failed_attempts')
+      .eq('token_hash', sha256(token))
+      .maybeSingle();
+    if (error) throw error;
+    if (!data || data.used_at || new Date(data.expires_at) <= new Date()) return null;
+    if (data.failed_attempts >= MAX_RESET_CODE_ATTEMPTS) return null; // yêu cầu đã bị hủy do nhập sai mã quá số lần
+    return data;
+  }
+
+  const user = await findUserByEmail(email.trim().toLowerCase());
+  if (!user) return null;
+  const { data, error } = await supabaseAdmin.rpc('check_password_reset_code', {
+    p_user_id: user.id,
+    p_code_hash: hashResetCode(user.id, code),
+    p_max_attempts: MAX_RESET_CODE_ATTEMPTS,
+  });
   if (error) throw error;
-  if (!data || data.used_at || new Date(data.expires_at) <= new Date()) return null;
-  return data;
+  const hit = (data || []).find((r) => r.matched);
+  return hit ? { id: hit.reset_id, user_id: hit.reset_user_id, expires_at: hit.reset_expires_at } : null;
 }
 
-export async function verifyResetToken(token) {
-  const row = await findValidResetToken(token);
-  if (!row) throw new ApiError(400, 'INVALID_OR_EXPIRED_TOKEN', 'Mã đặt lại mật khẩu không hợp lệ hoặc đã hết hạn.');
+export async function verifyResetToken(credentials) {
+  const row = await findValidReset(credentials);
+  if (!row) throw invalidResetError();
   return { valid: true, expires_at: row.expires_at };
 }
 
-export async function resetPassword(token, newPassword) {
-  const row = await findValidResetToken(token);
-  if (!row) throw new ApiError(400, 'INVALID_OR_EXPIRED_TOKEN', 'Mã đặt lại mật khẩu không hợp lệ hoặc đã hết hạn.');
+export async function resetPassword(credentials, newPassword) {
+  const row = await findValidReset(credentials);
+  if (!row) throw invalidResetError();
 
-  const { data: updated, error } = await supabaseAdmin.auth.admin.updateUserById(row.user_id, { password: newPassword });
-  if (error) throw error;
+  // Đánh dấu đã dùng trước (có điều kiện) để hai request đồng thời không cùng dùng được một yêu cầu
+  const { data: claimed, error: claimError } = await supabaseAdmin
+    .from('password_reset_tokens')
+    .update({ used_at: new Date().toISOString() })
+    .eq('id', row.id)
+    .is('used_at', null)
+    .select('id');
+  if (claimError) throw claimError;
+  if (!claimed?.length) throw invalidResetError();
 
-  await Promise.all([
-    supabaseAdmin.from('password_reset_tokens').update({ used_at: new Date().toISOString() }).eq('id', row.id),
-    supabaseAdmin.from('users').update({ failed_login_count: 0, locked_until: null }).eq('id', row.user_id),
-  ]);
+  // has_password: tài khoản Google đặt mật khẩu qua UC15 từ nay đổi mật khẩu / xóa tài khoản bằng mật khẩu
+  const { data: updated, error } = await supabaseAdmin.auth.admin.updateUserById(row.user_id, {
+    password: newPassword,
+    app_metadata: { has_password: true },
+  });
+  if (error) {
+    // Không đổi được mật khẩu thì trả lại yêu cầu để người dùng thử lại
+    await supabaseAdmin.from('password_reset_tokens').update({ used_at: null }).eq('id', row.id);
+    throw error;
+  }
+
+  await supabaseAdmin.from('users').update({ failed_login_count: 0, locked_until: null }).eq('id', row.user_id);
 
   // Hủy mọi phiên cũ: đăng nhập bằng mật khẩu mới để lấy một phiên rồi đăng xuất khỏi tất cả thiết bị
   const session = await verifyPassword(updated.user.email, newPassword);

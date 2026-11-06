@@ -74,14 +74,6 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab, onOpenLoginModal })
                   Thông tin cá nhân & Món yêu thích
                 </button>
               </li>
-              <li>
-                <button
-                  onClick={() => onSelectTab('planner')}
-                  className="hover:text-orange-600 transition-colors text-left cursor-pointer"
-                >
-                  Lên thực đơn tuần
-                </button>
-              </li>
             </ul>
           </div>
 

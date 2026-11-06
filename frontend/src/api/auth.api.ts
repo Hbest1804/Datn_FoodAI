@@ -28,11 +28,13 @@ export interface RegisterData {
   confirmPassword?: string;
 }
 
-export interface ResetPasswordData {
-  token: string;
+/** Thông tin xác thực đặt lại mật khẩu: email + mã 6 số nhập tay, hoặc token trong liên kết email. */
+export type ResetCredentials = { email: string; code: string } | { token: string };
+
+export type ResetPasswordData = ResetCredentials & {
   new_password: string;
   confirm_password: string;
-}
+};
 
 export const authApi = {
   async login(email: string, password: string): Promise<LoginResult> {
@@ -138,10 +140,10 @@ export const authApi = {
     };
   },
 
-  async verifyResetToken(token: string): Promise<{ valid: boolean; expires_at?: string }> {
+  async verifyResetToken(credentials: ResetCredentials): Promise<{ valid: boolean; expires_at?: string }> {
     const res = await apiClient<any>('/auth/reset-password/verify', {
       method: 'POST',
-      body: JSON.stringify({ token }),
+      body: JSON.stringify(credentials),
     });
     return {
       valid: res.data?.valid ?? true,

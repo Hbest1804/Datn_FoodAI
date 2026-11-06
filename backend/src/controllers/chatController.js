@@ -7,6 +7,7 @@ import { getSettings } from '../services/settingsService.js';
 import {
   checkTopic,
   detectQuestionAllergens,
+  getDietConstraints,
   getForbiddenIngredientIds,
   parsePantry,
   retrieveDishes,
@@ -221,11 +222,16 @@ export async function sendChatMessage(req, res) {
       ctx.userProfile.allergen_groups.push(...asked.allergens);
       const forbidden = await getForbiddenIngredientIds(ctx);
       asked.ingredientIds.forEach((id) => forbidden.add(id));
+      // Chế độ ăn bắt buộc (chay, thuần chay) trong hồ sơ hoặc câu hỏi: lọc cứng theo thẻ món và nguyên liệu
+      const diet = await getDietConstraints({ dietTypeIds: ctx.userProfile.diet_types.map((d) => d.id), content: question });
+      diet.forbiddenIngredientIds.forEach((id) => forbidden.add(id));
+      ctx.userProfile.strict_diets = diet.strict;
       const dishesContext = await retrieveDishes({
         questionVector: topic.questionVector,
         content: question,
         pantry,
         forbiddenIngredientIds: forbidden,
+        dishFilter: diet.dishFilter,
         limit: Number(settings.max_context_dishes) || 8,
       });
       result = await generatePersonalizedReply({

@@ -46,3 +46,6 @@ __pycache__/
 web-html/
 *.drawio
 *.drawio.bkp
+
+# Bản thiết kế HTML tĩnh, không đưa lên git
+mobile-html/

@@ -48,6 +48,7 @@ import { normalizeDish, formatVND, formatMetric } from '../utils/dishUtils';
 import { toast, showConfirm, showPrompt } from './NotificationModal';
 import type { DishImportResult } from '../api/admin.api';
 import RecipeImportModal from './RecipeImportModal';
+import AuditLogPanel from './AuditLogPanel';
 import { ADMIN_TABS, type AdminTab } from './adminTabs';
 
 // Tên hiển thị của các cột trong file nhập món
@@ -185,9 +186,6 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
   const [userSearch, setUserSearch] = useState('');
 
   // Audit Logs
-  const [showAuditLogs, setShowAuditLogs] = useState(false);
-  const [auditLogs, setAuditLogs] = useState<any[]>([]);
-  const [loadingAuditLogs, setLoadingAuditLogs] = useState(false);
 
   // Chatbot overview & monitoring state
   const [chatbotOverview, setChatbotOverview] = useState<any>(null);
@@ -216,6 +214,8 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
     name: string;
     quantity: string | number;
     unit: string;
+    // Nhóm của nguyên liệu (tên nguyên liệu gốc), phân tách bằng ";"
+    groups: string;
   }>>([]);
   const [recipeSteps, setRecipeSteps] = useState<Array<{ step_number: number; title: string; instruction: string; duration_minutes: number }>>([]);
   const [loadingRecipe, setLoadingRecipe] = useState(false);
@@ -302,7 +302,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
       setSystemHealthy(healthRes ? (healthRes.data || healthRes).status === 'up' : null);
       if (statsRes) {
         const errorRate = Number(chatRes?.error_rate) || 0;
-        const repliesCount = Object.values(chatRes?.outcomes || {}).reduce((sum: number, v: any) => sum + (Number(v) || 0), 0);
+        const repliesCount = Object.values(chatRes?.outcomes || {}).reduce<number>((sum, v) => sum + (Number(v) || 0), 0);
         setStats({
           chatbotInteractions: (statsRes.chat?.messages || 0) + (chatRes?.guest_messages || 0),
           chatSessions: statsRes.chat?.sessions || 0,
@@ -524,6 +524,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
           name: ing.name || ing.ingredient?.name || '',
           quantity: ing.quantity || ing.amount || 1,
           unit: ing.unit || '',
+          groups: Array.isArray(ing.groups) ? ing.groups.join('; ') : '',
         })));
       } else {
         setRecipeIngredients([]);
@@ -580,6 +581,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
           ...(ing.ingredient_id ? { ingredient_id: ing.ingredient_id } : { name: ing.name }),
           quantity: Number(ing.quantity) || 1,
           unit: ing.unit || undefined,
+          groups: ing.groups.split(';').map(g => g.trim()).filter(Boolean),
         })),
         steps: recipeSteps.map((st, idx) => ({ order: idx + 1, content: st.instruction })),
         publish,
@@ -653,7 +655,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
     setRecipeFormOpen(true);
   };
 
-  const updateIngredient = (index: number, patch: { quantity?: string; unit?: string }) => {
+  const updateIngredient = (index: number, patch: { quantity?: string; unit?: string; groups?: string }) => {
     setRecipeIngredients(prev => prev.map((ing, i) => (i === index ? { ...ing, ...patch } : ing)));
   };
 
@@ -669,6 +671,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
         name: newIngName.trim(),
         quantity: newIngQty.trim() || 1,
         unit: newIngUnit.trim() || 'g',
+        groups: '',
       }
     ]);
     setNewIngName('');
@@ -736,19 +739,6 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
     }
   };
 
-  const loadAuditLogs = async () => {
-    setLoadingAuditLogs(true);
-    setShowAuditLogs(true);
-    try {
-      const res = await apiService.admin.getAuditLogs({ limit: 50 });
-      setAuditLogs(res.data || []);
-    } catch (err: any) {
-      console.warn('Lỗi tải nhật ký thao tác:', err);
-      setAuditLogs([]);
-    } finally {
-      setLoadingAuditLogs(false);
-    }
-  };
 
   // Chatbot handlers
   const loadChatSessions = async (status = sessionStatusFilter) => {
@@ -1116,6 +1106,16 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
               Giám sát Chatbot AI
               <span className="w-2 h-2 rounded-full bg-emerald-500 ml-auto" />
             </button>
+            <button
+              onClick={() => setAdminTab('audit')}
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer ${adminTab === 'audit'
+                ? 'bg-orange-500 text-white shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                }`}
+            >
+              <FileText className="w-4 h-4" />
+              Nhật ký thao tác
+            </button>
           </nav>
         </div>
 
@@ -1136,6 +1136,9 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
 
       {/* Admin Content Area */}
       <div className="flex-1 min-w-0 space-y-8">
+        {/* ===================== TAB: NHẬT KÝ THAO TÁC (FR-41) ===================== */}
+        {adminTab === 'audit' && <AuditLogPanel />}
+
         {/* ===================== TAB 1: SYSTEM OVERVIEW & STATS ===================== */}
         {adminTab === 'overview' && (
           <div className="space-y-6">
@@ -1949,7 +1952,17 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                             ) : recipeIngredients.map((ing, idx) => (
                               <div key={idx} className="flex items-center gap-2 bg-white rounded-xl p-2">
                                 <span className="w-6 h-6 rounded-full bg-orange-50 text-orange-600 text-[11px] font-bold flex items-center justify-center shrink-0">{idx + 1}</span>
-                                <span className="flex-1 min-w-0 text-sm font-semibold text-ink truncate">{ing.name}</span>
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-sm font-semibold text-ink truncate">{ing.name}</div>
+                                  <input
+                                    value={ing.groups}
+                                    onChange={(e) => updateIngredient(idx, { groups: e.target.value })}
+                                    placeholder="Nhóm, vd Tôm"
+                                    title="Nhóm của nguyên liệu (tên nguyên liệu gốc), nhiều nhóm phân tách bằng ;. Người kiêng nguyên liệu gốc sẽ không được gợi ý món có nguyên liệu này. Nhóm áp dụng cho nguyên liệu ở mọi món."
+                                    aria-label="Nhóm nguyên liệu"
+                                    className="mt-1 w-full px-2 py-0.5 bg-surface rounded-md text-[11px] text-slate-600 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-orange-500/30"
+                                  />
+                                </div>
                                 <input
                                   value={ing.quantity}
                                   onChange={(e) => updateIngredient(idx, { quantity: e.target.value })}
@@ -2112,7 +2125,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
 
               <div className="flex items-center gap-2">
                 <button
-                  onClick={loadAuditLogs}
+                  onClick={() => setAdminTab('audit')}
                   className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
                 >
                   <FileText className="w-3.5 h-3.5" />
@@ -2504,84 +2517,6 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
           </div>
         )}
       </div>
-
-      {/* Audit Logs Modal */}
-      {showAuditLogs && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-3xl w-full space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
-                <FileText className="w-4 h-4 text-orange-500" />
-                Nhật Ký Thao Tác Quản Trị (Audit Logs)
-              </h3>
-              <button
-                onClick={() => setShowAuditLogs(false)}
-                className="p-1.5 hover:bg-slate-100 rounded-xl text-slate-500 cursor-pointer text-sm font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="max-h-96 overflow-y-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 text-[11px] font-bold text-slate-400 uppercase">
-                  <tr>
-                    <th className="py-2.5 pl-3">THỜI GIAN</th>
-                    <th className="py-2.5">HÀNH ĐỘNG</th>
-                    <th className="py-2.5">ĐỐI TƯỢNG</th>
-                    <th className="py-2.5 pr-3">CHI TIẾT</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {loadingAuditLogs ? (
-                    <tr>
-                      <td colSpan={4} className="py-8 text-center text-slate-400">
-                        <Loader2 className="w-5 h-5 animate-spin mx-auto text-orange-500 mb-1" />
-                        Đang tải nhật ký thao tác...
-                      </td>
-                    </tr>
-                  ) : auditLogs.length === 0 ? (
-                    <tr>
-                      <td colSpan={4} className="py-8 text-center text-slate-400">
-                        Chưa có bản ghi nhật ký thao tác nào.
-                      </td>
-                    </tr>
-                  ) : (
-                    auditLogs.map((log, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50">
-                        <td className="py-2.5 pl-3 text-slate-500 font-mono text-[11px]">
-                          {log.created_at ? new Date(log.created_at).toLocaleString('vi-VN') : 'Vừa xong'}
-                        </td>
-                        <td className="py-2.5 font-bold text-slate-800">
-                          {log.action}
-                          {log.actor?.display_name && (
-                            <div className="text-[10px] font-normal text-slate-400">{log.actor.display_name}</div>
-                          )}
-                        </td>
-                        <td className="py-2.5 text-slate-600">
-                          {log.target_type} ({log.target_id ? log.target_id.substring(0, 8) : 'hệ thống'})
-                        </td>
-                        <td className="py-2.5 pr-3 text-slate-500 text-[11px]">
-                          {log.detail && typeof log.detail === 'object' ? JSON.stringify(log.detail) : log.detail || '-'}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="flex justify-end pt-2">
-              <button
-                onClick={() => setShowAuditLogs(false)}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer"
-              >
-                Đóng
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {showRecipeImportModal && (
         <RecipeImportModal

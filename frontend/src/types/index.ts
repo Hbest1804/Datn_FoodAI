@@ -193,7 +193,6 @@ export interface UserProfile {
   kitchenDevices: string[];
   availableCookingTime: string;
   chatQueriesCount: number;
-  dailyGuestLimitLeft?: number;
   isTasteSyncedWithAi: boolean;
   tasteAccuracy: number;
   isLoggedIn?: boolean;

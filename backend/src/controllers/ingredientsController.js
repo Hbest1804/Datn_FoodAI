@@ -5,6 +5,29 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { normalizeText } from '../utils/textUtils.js';
 import { pageMeta, parseBool, parsePagination, sendError, sendOk } from '../utils/http.js';
 
+// Nguyên liệu phổ biến do hệ thống tự tính: N nguyên liệu được nhiều món đang hiển thị dùng nhất
+const COMMON_LIMIT = 20;
+const COMMON_TTL_MS = 10 * 60 * 1000;
+let commonCache = { at: 0, ids: [] };
+
+async function commonIngredientIds() {
+  if (Date.now() - commonCache.at < COMMON_TTL_MS) return commonCache.ids;
+  const counts = new Map();
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabaseAdmin
+      .from('dish_ingredients')
+      .select('ingredient_id, dishes!inner(is_published)')
+      .eq('dishes.is_published', true)
+      .range(from, from + 999);
+    if (error) throw error;
+    for (const r of data || []) counts.set(Number(r.ingredient_id), (counts.get(Number(r.ingredient_id)) || 0) + 1);
+    if (!data || data.length < 1000) break;
+  }
+  const ids = [...counts].sort((a, b) => b[1] - a[1] || a[0] - b[0]).slice(0, COMMON_LIMIT).map(([id]) => id);
+  commonCache = { at: Date.now(), ids };
+  return ids;
+}
+
 export async function getIngredients(req, res) {
   const pg = parsePagination(req.query);
   const isCommon = req.query.is_common === undefined ? undefined : parseBool(req.query.is_common);
@@ -13,16 +36,24 @@ export async function getIngredients(req, res) {
   }
   const keyword = typeof req.query.q === 'string' ? normalizeText(req.query.q).slice(0, 100) : '';
 
-  let query = supabaseAdmin
-    .from('ingredients')
-    .select('id, name, normalized_name, aliases, default_unit, is_common, allergen_group:allergen_groups(id, name)')
-    .order('name');
-  if (isCommon === true) query = query.eq('is_common', true);
-  const { data, error } = await query;
+  const [{ data, error }, commonIds] = await Promise.all([
+    supabaseAdmin
+      .from('ingredients')
+      .select('id, name, normalized_name, aliases, default_unit, allergen_group:allergen_groups(id, name)')
+      .order('name'),
+    commonIngredientIds(),
+  ]);
   if (error) throw error;
+  const commonRank = new Map(commonIds.map((id, i) => [id, i]));
+
+  let rows = data || [];
+  // is_common=true: chỉ nguyên liệu phổ biến, xếp theo số món dùng giảm dần
+  if (isCommon === true) {
+    rows = rows.filter((r) => commonRank.has(Number(r.id)))
+      .sort((a, b) => commonRank.get(Number(a.id)) - commonRank.get(Number(b.id)));
+  }
 
   // So khớp không dấu trên tên và bí danh; tên bắt đầu bằng từ khóa được xếp trước
-  let rows = data || [];
   if (keyword) {
     rows = rows
       .map((r) => {
@@ -39,7 +70,7 @@ export async function getIngredients(req, res) {
     id: Number(r.id),
     name: r.name,
     default_unit: r.default_unit,
-    is_common: r.is_common,
+    is_common: commonRank.has(Number(r.id)),
     allergen_group: r.allergen_group || null,
   }));
   return sendOk(res, items, { meta: pageMeta(pg, rows.length) });

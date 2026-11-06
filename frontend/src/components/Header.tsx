@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Search, 
   ShieldCheck, 
@@ -10,7 +10,9 @@ import {
   User,
   ChefHat
 } from 'lucide-react';
-import { UserProfile, UserRole } from '../types';
+import { UserProfile, UserRole, GuestQuota } from '../types';
+import { apiService } from '../api';
+import { GUEST_QUOTA_EVENT } from '../utils/guestQuota';
 import { ChefLogo3D } from './ChefLogo3D';
 import { DEFAULT_AVATAR } from '../utils/dishUtils';
 
@@ -41,6 +43,19 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const [searchInput, setSearchInput] = useState('');
   const [showUserDropdown, setShowUserDropdown] = useState(false);
+  const [guestQuota, setGuestQuota] = useState<GuestQuota | null>(null);
+
+  // Hạn mức khách lấy từ backend (GET /chat/guest/quota), cập nhật khi trang chat / widget gửi câu hỏi
+  useEffect(() => {
+    if (currentUser.role !== 'guest') { setGuestQuota(null); return; }
+    let cancelled = false;
+    apiService.chat.getGuestQuota()
+      .then(q => { if (!cancelled) setGuestQuota(q); })
+      .catch(() => {});
+    const onQuota = (e: Event) => setGuestQuota((e as CustomEvent<GuestQuota>).detail);
+    window.addEventListener(GUEST_QUOTA_EVENT, onQuota);
+    return () => { cancelled = true; window.removeEventListener(GUEST_QUOTA_EVENT, onQuota); };
+  }, [currentUser.role]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,7 +74,9 @@ export const Header: React.FC<HeaderProps> = ({
               Chế Độ Khách
             </span>
             <span>
-              Bạn đang dùng thử miễn phí (Còn {currentUser.dailyGuestLimitLeft ?? 5}/5 câu hỏi AI hôm nay).
+              {guestQuota
+                ? `Bạn đang dùng thử miễn phí (Còn ${guestQuota.remaining}/${guestQuota.limit} lượt hỏi AI trong 24 giờ).`
+                : 'Bạn đang dùng thử miễn phí với số lượt hỏi AI giới hạn trong 24 giờ.'}
             </span>
             <button
               onClick={onOpenRegisterModal}
@@ -163,16 +180,6 @@ export const Header: React.FC<HeaderProps> = ({
                 }`}
               >
                 Trò chuyện AI
-              </button>
-              <button
-                onClick={() => onTabChange('planner')}
-                className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer ${
-                  currentTab === 'planner'
-                    ? 'text-orange-600 bg-orange-50 font-bold'
-                    : 'text-slate-600 hover:text-ink hover:bg-surface-2'
-                }`}
-              >
-                Thực đơn tuần
               </button>
             </nav>
           ) : null}
@@ -339,14 +346,6 @@ export const Header: React.FC<HeaderProps> = ({
               }`}
             >
               Trò chuyện AI
-            </button>
-            <button
-              onClick={() => onTabChange('planner')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg shrink-0 ${
-                currentTab === 'planner' ? 'bg-orange-500 text-white' : 'bg-surface-2 text-slate-700'
-              }`}
-            >
-              Thực đơn
             </button>
           </div>
         )}
