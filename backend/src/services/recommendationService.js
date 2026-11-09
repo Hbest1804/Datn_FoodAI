@@ -13,15 +13,22 @@ import { normalizeText } from '../utils/textUtils.js';
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const recommendationCache = new Map();
-// Món đã trả cho người dùng ở lần gần nhất (theo khóa người dùng + danh mục); khi "Làm mới" (UC luồng 6a)
-// điểm của các món này nhân REFRESH_PENALTY để danh sách mới đổi bớt món
+// Các danh sách đã trả gần đây (theo khóa người dùng + danh mục); khi "Làm mới" (UC luồng 6a) món nằm trong
+// SERVED_HISTORY danh sách gần nhất bị nhân REFRESH_PENALTY khi xếp hạng, để không quay lại đúng danh sách cũ.
+// Hệ số chỉ dùng để xếp thứ tự, điểm trả về và lưu cache vẫn là điểm thật.
 const REFRESH_PENALTY = 0.7;
+const SERVED_HISTORY = 3;
 const MAX_LAST_SERVED = 5000;
 const lastServed = new Map();
 
 function rememberServed(key, items) {
+  const ids = new Set(items.map((it) => it.dish.id));
+  const history = lastServed.get(key) || [];
+  const last = history[history.length - 1];
+  // Tải lại từ cache trả đúng danh sách cũ → không ghi thêm
+  if (last && last.size === ids.size && [...ids].every((id) => last.has(id))) return;
   if (lastServed.size >= MAX_LAST_SERVED && !lastServed.has(key)) lastServed.delete(lastServed.keys().next().value);
-  lastServed.set(key, new Set(items.map((it) => it.dish.id)));
+  lastServed.set(key, [...history, ids].slice(-SERVED_HISTORY));
 }
 
 /** Xóa bộ nhớ đệm gợi ý khi hồ sơ, yêu thích hoặc đánh giá thay đổi (quy tắc 3). */
@@ -109,7 +116,7 @@ export async function getPersonalizedRecommendations({ userId, limit = 12, categ
       return { data, meta: cached.meta };
     }
   }
-  const previous = refresh ? lastServed.get(cacheKey) : null;
+  const previous = refresh ? new Set((lastServed.get(cacheKey) || []).flatMap((s) => [...s])) : null;
 
   const settings = await getSettings();
   const weights = { sim: 0.45, rating: 0.2, pop: 0.15, budget: 0.1, cal: 0.1, ...(settings.recommendation_weights || {}) };
@@ -176,7 +183,7 @@ export async function getPersonalizedRecommendations({ userId, limit = 12, categ
       score += weights[k] * v;
     }
     score = weightSum > 0 ? score / weightSum : 0;
-    if (previous?.has(d.id)) score *= REFRESH_PENALTY;
+    const rank = previous?.has(d.id) ? score * REFRESH_PENALTY : score;
 
     const contributions = Object.entries(parts)
       .filter(([, v]) => v !== null && v > 0)
@@ -193,9 +200,11 @@ export async function getPersonalizedRecommendations({ userId, limit = 12, categ
       dish: toDishSummary(d, favSet.has(d.id)),
       score: Math.round(Math.min(1, Math.max(0, score)) * 10000) / 10000,
       reasons,
+      rank,
     };
   });
-  items.sort((a, b) => b.score - a.score);
+  items.sort((a, b) => b.rank - a.rank);
+  items.forEach((it) => { delete it.rank; });
 
   const meta = {
     strategy,

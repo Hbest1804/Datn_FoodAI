@@ -135,10 +135,8 @@ export async function loginUser({ email, password }) {
   const normalizedEmail = email.trim().toLowerCase();
   const user = await findUserByEmail(normalizedEmail);
 
-  // Kiểm tra trạng thái khóa trước khi gọi dịch vụ xác thực (luồng 4a, 4b): bị Admin khóa hoặc đang tạm khóa 15 phút
-  if (user?.status === 'locked') {
-    throw new ApiError(403, 'ACCOUNT_LOCKED', 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.');
-  }
+  // Đang tạm khóa 15 phút (luồng 4b). Tài khoản bị Admin khóa (luồng 4a) chỉ báo sau khi mật khẩu đúng,
+  // để người không biết mật khẩu không dò được email nào tồn tại / bị khóa
   if (user?.locked_until && new Date(user.locked_until) > new Date()) {
     const retryAfter = Math.ceil((new Date(user.locked_until) - Date.now()) / 1000);
     throw new ApiError(429, 'TOO_MANY_ATTEMPTS', `Bạn đã nhập sai quá ${MAX_FAILED_LOGINS} lần. Vui lòng thử lại sau ${Math.ceil(retryAfter / 60)} phút.`, { retry_after: retryAfter });

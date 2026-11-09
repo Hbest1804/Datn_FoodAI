@@ -107,7 +107,8 @@ export function normalizeDietSelection(dietIds, dietTypes = []) {
   const ids = [...new Set((dietIds || []).map(Number))];
   const kindOf = new Map(dietTypes.map((d) => [Number(d.id), dietExclusiveKind(d)]));
   const kinds = new Set(ids.map((id) => kindOf.get(id)));
-  const hasOther = ids.some((id) => kindOf.get(id) !== 'normal');
+  // Chỉ tính id có trong danh mục; id lạ không được làm mất "Bình thường" (id lạ bị báo lỗi ở bước kiểm tra sau)
+  const hasOther = ids.some((id) => kindOf.has(id) && kindOf.get(id) !== 'normal');
   const firstNormal = ids.find((id) => kindOf.get(id) === 'normal');
   return ids.filter((id) => {
     const kind = kindOf.get(id);
