@@ -13,6 +13,16 @@ import { normalizeText } from '../utils/textUtils.js';
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const recommendationCache = new Map();
+// Món đã trả cho người dùng ở lần gần nhất (theo khóa người dùng + danh mục); khi "Làm mới" (UC luồng 6a)
+// điểm của các món này nhân REFRESH_PENALTY để danh sách mới đổi bớt món
+const REFRESH_PENALTY = 0.7;
+const MAX_LAST_SERVED = 5000;
+const lastServed = new Map();
+
+function rememberServed(key, items) {
+  if (lastServed.size >= MAX_LAST_SERVED && !lastServed.has(key)) lastServed.delete(lastServed.keys().next().value);
+  lastServed.set(key, new Set(items.map((it) => it.dish.id)));
+}
 
 /** Xóa bộ nhớ đệm gợi ý khi hồ sơ, yêu thích hoặc đánh giá thay đổi (quy tắc 3). */
 export function invalidateRecommendationCache(userId) {
@@ -94,9 +104,12 @@ export async function getPersonalizedRecommendations({ userId, limit = 12, categ
   if (!refresh) {
     const cached = recommendationCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
-      return { data: cached.items.slice(0, safeLimit), meta: cached.meta };
+      const data = cached.items.slice(0, safeLimit);
+      rememberServed(cacheKey, data);
+      return { data, meta: cached.meta };
     }
   }
+  const previous = refresh ? lastServed.get(cacheKey) : null;
 
   const settings = await getSettings();
   const weights = { sim: 0.45, rating: 0.2, pop: 0.15, budget: 0.1, cal: 0.1, ...(settings.recommendation_weights || {}) };
@@ -163,6 +176,7 @@ export async function getPersonalizedRecommendations({ userId, limit = 12, categ
       score += weights[k] * v;
     }
     score = weightSum > 0 ? score / weightSum : 0;
+    if (previous?.has(d.id)) score *= REFRESH_PENALTY;
 
     const contributions = Object.entries(parts)
       .filter(([, v]) => v !== null && v > 0)
@@ -190,5 +204,7 @@ export async function getPersonalizedRecommendations({ userId, limit = 12, categ
     generated_at: new Date().toISOString(),
   };
   recommendationCache.set(cacheKey, { items, meta, expiresAt: Date.now() + CACHE_TTL_MS });
-  return { data: items.slice(0, safeLimit), meta };
+  const data = items.slice(0, safeLimit);
+  rememberServed(cacheKey, data);
+  return { data, meta };
 }

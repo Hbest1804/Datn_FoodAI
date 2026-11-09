@@ -16,6 +16,30 @@ const guestQuotaMap = new Map();
 const ipQuotaMap = new Map();
 // Số tin nhắn của khách theo ngày, dùng cho GET /admin/chatbot/overview: ngày (YYYY-MM-DD) → số tin nhắn
 const guestDailyCounts = new Map();
+// Lịch sử phiên khách theo guest_id (UC03): { messages: [{ role, content }], resetsAt }; hết chu kỳ hạn mức thì mất
+const guestHistoryMap = new Map();
+const MAX_GUEST_HISTORY = 8;
+const MAX_GUEST_SESSIONS = 10000;
+
+function readGuestHistory(guestId) {
+  const record = guestHistoryMap.get(guestId);
+  if (!record || record.resetsAt <= Date.now()) {
+    guestHistoryMap.delete(guestId);
+    return [];
+  }
+  return record.messages;
+}
+
+function appendGuestHistory(guestId, windowMs, ...messages) {
+  let record = guestHistoryMap.get(guestId);
+  if (!record || record.resetsAt <= Date.now()) {
+    if (guestHistoryMap.size >= MAX_GUEST_SESSIONS) guestHistoryMap.delete(guestHistoryMap.keys().next().value);
+    record = { messages: [], resetsAt: Date.now() + windowMs };
+    guestHistoryMap.set(guestId, record);
+  }
+  record.messages.push(...messages);
+  if (record.messages.length > MAX_GUEST_HISTORY) record.messages.splice(0, record.messages.length - MAX_GUEST_HISTORY);
+}
 
 function getClientIp(req) {
   const forwarded = req.headers['x-forwarded-for'];
@@ -25,7 +49,7 @@ function getClientIp(req) {
 
 setInterval(() => {
   const now = Date.now();
-  for (const map of [guestQuotaMap, ipQuotaMap]) {
+  for (const map of [guestQuotaMap, ipQuotaMap, guestHistoryMap]) {
     for (const [key, record] of map.entries()) {
       if (record.resetsAt <= now) map.delete(key);
     }
@@ -149,6 +173,7 @@ export async function sendGuestMessage(req, res) {
       allergens: asked.allergens,
       strictDiets: diet.strict,
       dishesContext,
+      chatHistory: readGuestHistory(guestId),
       systemPrompt: settings.system_prompt,
     });
     // outcome cùng bộ giá trị với chatbot người dùng; type (recipe | general | out_of_scope) giữ để tương thích
@@ -156,8 +181,10 @@ export async function sendGuestMessage(req, res) {
     reply = { type: aiResult.type, outcome, content: aiResult.content, dishes: aiResult.dishes.map(toDishCard) };
   }
 
-  // 4. Trừ một lượt hỏi và cập nhật số liệu tổng hợp
+  // 4. Trừ một lượt hỏi, lưu lịch sử phiên khách trong bộ nhớ (không ghi CSDL) và cập nhật số liệu tổng hợp
   quota._consume();
+  const windowMs = Math.max(1, Number(settings.guest_window_hours) || 24) * HOUR_MS;
+  appendGuestHistory(guestId, windowMs, { role: 'user', content: question }, { role: 'assistant', content: reply.content });
   const today = new Date().toISOString().slice(0, 10);
   guestDailyCounts.set(today, (guestDailyCounts.get(today) || 0) + 1);
 

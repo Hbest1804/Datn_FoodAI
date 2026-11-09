@@ -5,6 +5,8 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { invalidateRecommendationCache } from '../services/recommendationService.js';
 import { recomputeUserVectors } from '../services/embeddingService.js';
 import { fetchTasteProfile } from '../services/tasteProfileService.js';
+import { getDietTypes } from '../services/dietService.js';
+import { normalizeDietSelection } from '../utils/dietRules.js';
 import { sendError, sendOk } from '../utils/http.js';
 
 const LEVEL_KEYS = ['spicy_level', 'salty_level', 'sweet_level', 'sour_level'];
@@ -80,7 +82,8 @@ async function saveTasteProfile(req, res, body) {
 
   const prefs = body.taste_prefs ?? {};
   const likedIds = [...new Set((prefs.liked_ingredient_ids || []).map(Number))];
-  const dietIds = [...new Set((body.diet_type_ids || []).map(Number))];
+  // Chuẩn hóa chế độ ăn loại trừ nhau ("Bình thường" đi một mình; Ăn chay / Thuần chay chỉ giữ một)
+  const dietIds = normalizeDietSelection(body.diet_type_ids || [], await getDietTypes());
   const dislikedIds = [...new Set((body.disliked_ingredient_ids || []).map(Number))];
 
   // Luồng 5a: nguyên liệu vừa thích vừa không thích

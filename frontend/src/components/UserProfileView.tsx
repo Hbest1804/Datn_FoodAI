@@ -604,16 +604,11 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
             </form>
           </section>
 
-          {/* PHẦN 2: Đổi mật khẩu */}
+          {/* PHẦN 2: Đổi mật khẩu – tài khoản chỉ đăng nhập bằng Google không có mật khẩu nên không hiện mục này */}
+          {hasPassword && (
           <section id="account-security" className="scroll-mt-24 bg-white rounded-2xl p-6 shadow-[0_1px_1px_rgba(0,0,0,0.05)] space-y-6">
             {sectionHeading('Phần 2', 'Đổi mật khẩu & Bảo mật', <ShieldCheck className="w-6 h-6 text-orange-500 shrink-0" />)}
 
-            {!hasPassword ? (
-              <p className="flex items-start gap-1.5 text-sm text-slate-600">
-                <Info className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                Tài khoản của bạn đăng nhập bằng Google nên chưa có mật khẩu. Muốn đăng nhập bằng email và mật khẩu, hãy đăng xuất rồi đặt mật khẩu qua chức năng “Quên mật khẩu”.
-              </p>
-            ) : (
             <form onSubmit={handleChangePassword} className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
                 {passwordField('Mật khẩu hiện tại', currentPassword, setCurrentPassword, '••••••••', 'current')}
@@ -644,13 +639,13 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
                 </button>
               </div>
             </form>
-            )}
           </section>
+          )}
 
           {/* PHẦN 3: Món yêu thích & lịch sử hoạt động */}
           <section id="account-activity" className="scroll-mt-24 bg-white rounded-2xl p-6 shadow-[0_1px_1px_rgba(0,0,0,0.05)] space-y-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              {sectionHeading('Phần 3', 'Món yêu thích & Lịch sử hoạt động')}
+              {sectionHeading(hasPassword ? 'Phần 3' : 'Phần 2', 'Món yêu thích & Lịch sử hoạt động')}
               <div className="flex items-center gap-1 p-1 bg-surface rounded-xl overflow-x-auto no-scrollbar shrink-0">
                 {activityTabButton('favorites', 'Yêu thích', favoritesList.length)}
                 {activityTabButton('history', 'Đã xem', viewHistoryList.length)}
@@ -784,7 +779,7 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
           <section id="account-danger" className="scroll-mt-24 bg-white rounded-2xl p-6 shadow-[0_1px_1px_rgba(0,0,0,0.05)] space-y-4">
             <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-danger">
               <AlertTriangle className="w-4 h-4" />
-              Phần 4 - Vùng nhạy cảm & Quyền riêng tư
+              {hasPassword ? 'Phần 4' : 'Phần 3'} - Vùng nhạy cảm & Quyền riêng tư
             </div>
             <h2 className="text-2xl sm:text-[28px] sm:leading-[36px] font-bold text-ink">Xóa tài khoản vĩnh viễn</h2>
 

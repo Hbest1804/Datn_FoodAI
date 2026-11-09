@@ -10,7 +10,7 @@ import {
   getDietConstraints,
   getForbiddenIngredientIds,
   parsePantry,
-  retrieveDishes,
+  retrieveDishesWithStatus,
   toDishCard,
 } from '../services/chatContextService.js';
 import {
@@ -226,7 +226,7 @@ export async function sendChatMessage(req, res) {
       const diet = await getDietConstraints({ dietTypeIds: ctx.userProfile.diet_types.map((d) => d.id), content: question });
       diet.forbiddenIngredientIds.forEach((id) => forbidden.add(id));
       ctx.userProfile.strict_diets = diet.strict;
-      const dishesContext = await retrieveDishes({
+      const { dishes: dishesContext, status: retrievalStatus } = await retrieveDishesWithStatus({
         questionVector: topic.questionVector,
         content: question,
         pantry,
@@ -241,6 +241,7 @@ export async function sendChatMessage(req, res) {
         chatHistory: ctx.chatHistory,
         fridge: pantry,
         dishesContext,
+        retrievalStatus,
         systemPrompt: settings.system_prompt,
       });
       if (result.outcome === 'answered' && dishesContext.length === 0) result.outcome = 'no_match';
@@ -259,8 +260,9 @@ export async function sendChatMessage(req, res) {
     return sendError(res, err.status || 502, err.code || 'AI_SERVICE_ERROR', err.message, { user_message_id: userMsg.id });
   }
 
-  // 3. Lưu câu trả lời
+  // 3. Lưu câu trả lời; lưu lỗi thì vẫn trả câu trả lời đã sinh kèm cảnh báo chưa lưu lịch sử (luồng 8a)
   const dishes = (result.dishes || []).map(toDishCard);
+  const outcome = result.outcome || 'answered';
   const { data: assistantMsg, error: asstErr } = await supabaseAdmin
     .from('chat_messages')
     .insert({
@@ -268,19 +270,36 @@ export async function sendChatMessage(req, res) {
       role: 'assistant',
       content: result.content,
       referenced_dish_ids: dishes.map((d) => d.id),
-      outcome: result.outcome || 'answered',
+      outcome,
       tokens: result.tokens ?? null,
       latency_ms: Date.now() - startedAt,
     })
     .select('id, role, content, outcome, tokens, created_at')
     .single();
-  if (asstErr) throw asstErr;
-  await supabaseAdmin.from('chat_sessions').update({ updated_at: new Date().toISOString() }).eq('id', session.id);
+  let saved = true;
+  if (asstErr) {
+    console.error('[Chat] Không lưu được câu trả lời:', asstErr.message);
+    saved = false;
+  } else {
+    await supabaseAdmin.from('chat_sessions').update({ updated_at: new Date().toISOString() }).eq('id', session.id);
+  }
 
   const data = {
     session_title: sessionTitle,
     user_message: userMsg,
-    assistant_message: { ...assistantMsg, referenced_dishes: dishes },
+    assistant_message: saved
+      ? { ...assistantMsg, referenced_dishes: dishes }
+      : {
+        id: null,
+        role: 'assistant',
+        content: result.content,
+        outcome,
+        tokens: result.tokens ?? null,
+        created_at: new Date().toISOString(),
+        referenced_dishes: dishes,
+      },
+    saved,
+    ...(saved ? {} : { warning: 'Không lưu được lịch sử hội thoại cho câu trả lời này.' }),
   };
 
   if (wantsStream(req)) {

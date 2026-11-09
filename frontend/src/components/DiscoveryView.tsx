@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  Sparkles, 
-  Clock, 
-  ChevronRight, 
-  Heart, 
-  ArrowRight, 
-  ShieldCheck, 
-  RefreshCw, 
-  ChefHat, 
-  Sliders, 
+import {
+  Sparkles,
+  Clock,
+  ChevronRight,
+  Heart,
+  ArrowRight,
+  ShieldCheck,
+  RefreshCw,
+  ChefHat,
+  Sliders,
   AlertTriangle,
   CheckCircle2,
   Lock,
@@ -76,6 +76,23 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
     return () => { cancelled = true; };
   }, [isGuest, profileKey]);
 
+  // "Làm mới" (UC gợi ý luồng 6a): máy chủ tính lại và giảm điểm các món vừa gợi ý ở lần trước
+  const [refreshingRecs, setRefreshingRecs] = useState(false);
+  const handleRefreshRecommendations = async () => {
+    if (isGuest || refreshingRecs) return;
+    setRefreshingRecs(true);
+    try {
+      const list = await apiService.dishes.getRecommendations(20, true);
+      if (list.length > 0) {
+        setPersonalRecipes(list);
+        setGoldenMealIndex(0);
+      }
+      setRecsUpdatedAt(new Date());
+    } finally {
+      setRefreshingRecs(false);
+    }
+  };
+
   const recipes = !isGuest && personalRecipes.length > 0 ? personalRecipes : allRecipes;
 
   // Quick dietary filter tags
@@ -98,16 +115,20 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
 
     if (isGuest) {
       if (selectedFilter === 'Tất cả') return recipes.slice(1, 5);
+      // Chay là chế độ bắt buộc: chỉ nhận món gắn thẻ chay (Ăn chay / Thuần chay) hoặc tên món có chữ "chay".
+      // Không đoán theo "rau"/"nấm" (món mặn cũng có rau, nấm) và không lấy món bất kỳ để lấp chỗ trống.
+      const isVegFilter = selectedFilter.includes('chay');
       const filtered = recipes.filter(r => {
         const text = `${r.title} ${r.description} ${r.category} ${(r.tags || []).join(' ')}`.toLowerCase();
         if (selectedFilter.includes('15 phút')) return (r.cookingTime != null && r.cookingTime <= 20) || text.includes('sáng');
         if (selectedFilter.includes('Eat Clean')) return (r.macros.calories != null && r.macros.calories < 500) || text.includes('clean') || text.includes('salad');
-        if (selectedFilter.includes('chay')) return text.includes('chay') || text.includes('rau') || text.includes('nấm');
+        if (isVegFilter) return (r.tags || []).some(t => t.toLowerCase().includes('chay')) || r.title.toLowerCase().includes('chay');
         if (selectedFilter.includes('Cơm nhà')) return text.includes('cơm') || text.includes('kho') || text.includes('xào') || text.includes('canh');
         if (selectedFilter.includes('Keto')) return (r.macros.carbs != null && r.macros.carbs < 25) || text.includes('keto');
         if (selectedFilter.includes('Tăng cơ') || selectedFilter.includes('đạm')) return (r.macros.protein != null && r.macros.protein >= 25);
         return text.includes(selectedFilter.toLowerCase());
       });
+      if (isVegFilter) return filtered.slice(0, 4);
       return filtered.length > 0 ? filtered.slice(0, 4) : recipes.slice(1, 5);
     }
 
@@ -368,9 +389,8 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
   const mealTabButton = (tab: 'lunch' | 'dinner' | 'snack', label: string) => (
     <button
       onClick={() => setActiveMealTab(tab)}
-      className={`px-4 py-1.5 rounded-xl whitespace-nowrap transition-all cursor-pointer ${
-        activeMealTab === tab ? 'bg-white text-orange-600 shadow-xs' : 'text-slate-600 hover:text-ink'
-      }`}
+      className={`px-4 py-1.5 rounded-xl whitespace-nowrap transition-all cursor-pointer ${activeMealTab === tab ? 'bg-white text-orange-600 shadow-xs' : 'text-slate-600 hover:text-ink'
+        }`}
     >
       {label}
     </button>
@@ -483,7 +503,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                     onClick={() => handleWidgetAsk(
                       label === 'Giảm béo bụng' ? 'Gợi ý thực đơn giảm béo bụng'
                         : label === 'Ăn chay giàu đạm' ? 'Thực đơn ăn chay thanh tịnh giàu đạm'
-                        : 'Gợi ý món từ trứng, cà chua và hành lá có sẵn'
+                          : 'Gợi ý món từ trứng, cà chua và hành lá có sẵn'
                     )}
                     className="px-2.5 py-1 bg-surface-2 hover:bg-orange-50 hover:text-orange-600 rounded-lg text-[11px] font-semibold text-slate-600 transition-colors cursor-pointer"
                   >
@@ -606,6 +626,17 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                     Cập nhật lúc {recsUpdatedAt.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 )}
+                {!isGuest && (
+                  <button
+                    onClick={handleRefreshRecommendations}
+                    disabled={refreshingRecs}
+                    className="h-8 px-3 rounded-lg bg-white hover:bg-slate-50 text-slate-600 text-[11px] font-semibold flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-60"
+                    title="Làm mới gợi ý"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${refreshingRecs ? 'animate-spin' : ''}`} />
+                    Làm mới
+                  </button>
+                )}
                 <button
                   onClick={() => setInsightDismissed(true)}
                   className="w-8 h-8 rounded-lg bg-white hover:bg-slate-50 text-slate-600 flex items-center justify-center shadow-xs cursor-pointer"
@@ -667,29 +698,29 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                     <p className="text-slate-500 mt-0.5">Món này chưa được cập nhật calo và các chất dinh dưỡng.</p>
                   </div>
                 ) : (
-                <div className="p-4 rounded-2xl bg-surface space-y-2.5">
-                  <div className="flex items-center justify-between text-[11px] font-bold">
-                    <span className="text-slate-600">Phân bổ đa lượng (Macros)</span>
-                    {currentGoldenMeal.tags?.[0] && <span className="text-emerald-600">#{currentGoldenMeal.tags[0]}</span>}
+                  <div className="p-4 rounded-2xl bg-surface space-y-2.5">
+                    <div className="flex items-center justify-between text-[11px] font-bold">
+                      <span className="text-slate-600">Phân bổ đa lượng (Macros)</span>
+                      {currentGoldenMeal.tags?.[0] && <span className="text-emerald-600">#{currentGoldenMeal.tags[0]}</span>}
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div>
+                        <div className="h-1.5 rounded-full bg-orange-500 mb-1.5" />
+                        <div className="text-[11px] text-slate-500 font-semibold">Đạm</div>
+                        <div className="text-sm font-bold text-ink">{formatMetric(currentGoldenMeal.macros.protein, 'g')}</div>
+                      </div>
+                      <div>
+                        <div className="h-1.5 rounded-full bg-emerald-600 mb-1.5" />
+                        <div className="text-[11px] text-slate-500 font-semibold">Carbs</div>
+                        <div className="text-sm font-bold text-ink">{formatMetric(currentGoldenMeal.macros.carbs, 'g')}</div>
+                      </div>
+                      <div>
+                        <div className="h-1.5 rounded-full bg-amber-400 mb-1.5" />
+                        <div className="text-[11px] text-slate-500 font-semibold">Chất béo</div>
+                        <div className="text-sm font-bold text-ink">{formatMetric(currentGoldenMeal.macros.fat, 'g')}</div>
+                      </div>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 text-center">
-                    <div>
-                      <div className="h-1.5 rounded-full bg-orange-500 mb-1.5" />
-                      <div className="text-[11px] text-slate-500 font-semibold">Đạm</div>
-                      <div className="text-sm font-bold text-ink">{formatMetric(currentGoldenMeal.macros.protein, 'g')}</div>
-                    </div>
-                    <div>
-                      <div className="h-1.5 rounded-full bg-emerald-600 mb-1.5" />
-                      <div className="text-[11px] text-slate-500 font-semibold">Carbs</div>
-                      <div className="text-sm font-bold text-ink">{formatMetric(currentGoldenMeal.macros.carbs, 'g')}</div>
-                    </div>
-                    <div>
-                      <div className="h-1.5 rounded-full bg-amber-400 mb-1.5" />
-                      <div className="text-[11px] text-slate-500 font-semibold">Chất béo</div>
-                      <div className="text-sm font-bold text-ink">{formatMetric(currentGoldenMeal.macros.fat, 'g')}</div>
-                    </div>
-                  </div>
-                </div>
                 )}
 
                 <div className="flex flex-wrap items-center gap-2">
@@ -732,11 +763,10 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                 <button
                   key={tag}
                   onClick={() => setSelectedFilter(tag)}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-                    selectedFilter === tag
+                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${selectedFilter === tag
                       ? 'bg-orange-500 text-white shadow-md shadow-orange-500/20'
                       : 'bg-white text-slate-700 shadow-xs hover:bg-orange-50 hover:text-orange-600'
-                  }`}
+                    }`}
                 >
                   {tag}
                 </button>
@@ -769,6 +799,9 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           {displayedMeals.map(recipeCard)}
         </div>
+        {isGuest && displayedMeals.length === 0 && (
+          <p className="text-sm text-slate-500 text-center py-6">Chưa có món nào phù hợp với bộ lọc "{selectedFilter}".</p>
+        )}
       </section>
 
       {/* ======================= HÀNH VI 7 NGÀY / MỜI ĐĂNG KÝ ======================= */}

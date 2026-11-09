@@ -3,7 +3,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { detectQuestionDietCodes, violatesDiet } from '../src/utils/dietRules.js';
+import { detectQuestionDietCodes, normalizeDietSelection, violatesDiet } from '../src/utils/dietRules.js';
 
 describe('violatesDiet', () => {
   it('chay: loại thịt, cá, hải sản và gia vị động vật', () => {
@@ -13,9 +13,15 @@ describe('violatesDiet', () => {
     }
   });
 
-  it('chay: giữ thực vật, trứng, sữa và các tên trùng mặt chữ', () => {
+  it('chay (cách hiểu ở Việt Nam): loại trứng', () => {
+    for (const n of ['Trứng gà', 'Trứng cút', 'Trứng vịt muối', 'Lòng đỏ trứng', 'Lòng trắng trứng', 'Mayonnaise']) {
+      assert.equal(violatesDiet(n, 'vegetarian'), true, n);
+    }
+  });
+
+  it('chay: giữ thực vật, sữa và các tên trùng mặt chữ', () => {
     for (const n of ['Đậu hũ chiên', 'Nấm rơm tươi', 'Nấm đùi gà', 'Dầu hào chay', 'Nước tương', 'Khoai mỡ tím',
-      'Thịt gấc đỏ', 'Trứng gà', 'Trứng cút', 'Bơ lạt', 'Sữa đậu nành', 'Hạt nêm nấm', 'Bí đỏ']) {
+      'Thịt gấc đỏ', 'Bơ lạt', 'Sữa bò tươi', 'Sữa đậu nành', 'Hạt nêm nấm', 'Bí đỏ', 'Trứng chay']) {
       assert.equal(violatesDiet(n, 'vegetarian'), false, n);
     }
   });
@@ -52,5 +58,33 @@ describe('detectQuestionDietCodes', () => {
     assert.deepEqual(detectQuestionDietCodes('toi khong an chay'), []);
     assert.deepEqual(detectQuestionDietCodes('Gợi ý vài món keto kiểu Việt.'), []);
     assert.deepEqual(detectQuestionDietCodes('Tủ lạnh còn trứng, cà chua, nấu gì?'), []);
+  });
+});
+
+describe('normalizeDietSelection', () => {
+  const types = [
+    { id: 1, code: 'normal', name: 'Bình thường' },
+    { id: 2, code: 'eat_clean', name: 'Eat Clean' },
+    { id: 3, code: 'vegetarian', name: 'Ăn chay' },
+    { id: 4, code: 'vegan', name: 'Thuần chay' },
+    { id: 5, name: 'Keto / Low-Carb' },
+  ];
+
+  it('bỏ trùng và giữ chế độ không loại trừ nhau', () => {
+    assert.deepEqual(normalizeDietSelection([2, 5, 2, '3'], types), [2, 5, 3]);
+  });
+
+  it('"Bình thường" bị bỏ khi có chế độ khác, giữ khi đi một mình', () => {
+    assert.deepEqual(normalizeDietSelection([1, 2], types), [2]);
+    assert.deepEqual(normalizeDietSelection([1], types), [1]);
+  });
+
+  it('Ăn chay và Thuần chay chỉ giữ Thuần chay', () => {
+    assert.deepEqual(normalizeDietSelection([3, 4, 2], types), [4, 2]);
+  });
+
+  it('nhận diện theo tên khi thiếu mã', () => {
+    const byName = [{ id: 7, name: 'Bình thường' }, { id: 8, name: 'Ăn chay' }, { id: 9, name: 'Thuần chay' }];
+    assert.deepEqual(normalizeDietSelection([7, 8, 9], byName), [9]);
   });
 });

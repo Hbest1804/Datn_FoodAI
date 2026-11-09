@@ -242,11 +242,43 @@ export const TasteProfileView: React.FC<TasteProfileViewProps> = ({
     setLikedIngredients([]);
   };
 
+  const dietOptions: Array<{ id: number; name: string; code?: string }> = metaFilters?.diet_types || [
+    { id: 1, name: 'Bình thường' },
+    { id: 2, name: 'Eat Clean' },
+    { id: 3, name: 'Ăn chay' },
+    { id: 4, name: 'Thuần chay' },
+    { id: 5, name: 'Keto / Low-Carb' },
+    { id: 6, name: 'Tăng cơ' },
+  ];
+
+  // Nhóm loại trừ (khớp utils/dietRules.js phía backend): "Bình thường" đi một mình; Ăn chay / Thuần chay chỉ chọn một
+  const dietKind = (id: number): 'normal' | 'vegetarian' | 'vegan' | null => {
+    const dt = dietOptions.find(d => d.id === id);
+    if (!dt) return null;
+    const code = (dt.code || '').toLowerCase();
+    const name = dt.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd').toLowerCase().trim();
+    if (['normal', 'regular', 'standard', 'binh_thuong'].includes(code) || name === 'binh thuong') return 'normal';
+    if (code === 'vegan' || name === 'thuan chay') return 'vegan';
+    if (code === 'vegetarian' || name === 'an chay') return 'vegetarian';
+    return null;
+  };
+
   const toggleDietType = (id: number) => {
     const exists = profile.diet_type_ids.includes(id);
-    const updated = exists 
-      ? profile.diet_type_ids.filter(d => d !== id)
-      : [...profile.diet_type_ids, id];
+    let updated: number[];
+    if (exists) {
+      updated = profile.diet_type_ids.filter(d => d !== id);
+    } else {
+      const kind = dietKind(id);
+      const kept = profile.diet_type_ids.filter(d => {
+        const other = dietKind(d);
+        if (kind === 'normal') return false;
+        if (other === 'normal') return false;
+        if ((kind === 'vegetarian' && other === 'vegan') || (kind === 'vegan' && other === 'vegetarian')) return false;
+        return true;
+      });
+      updated = [...kept, id];
+    }
     setProfile({ ...profile, diet_type_ids: updated });
   };
 
@@ -741,15 +773,11 @@ export const TasteProfileView: React.FC<TasteProfileViewProps> = ({
             <label className="text-xs font-bold text-slate-700 uppercase block">
               Chế độ dinh dưỡng áp dụng (Chọn một hoặc nhiều)
             </label>
+            <p className="text-[11px] text-slate-500">
+              "Bình thường" không đi cùng chế độ khác; "Ăn chay" và "Thuần chay" chỉ chọn một.
+            </p>
             <div className="flex flex-wrap gap-2">
-              {(metaFilters?.diet_types || [
-                { id: 1, name: 'Bình thường' },
-                { id: 2, name: 'Eat Clean' },
-                { id: 3, name: 'Ăn chay' },
-                { id: 4, name: 'Thuần chay' },
-                { id: 5, name: 'Keto / Low-Carb' },
-                { id: 6, name: 'Tăng cơ' },
-              ]).map(dt => {
+              {dietOptions.map(dt => {
                 const active = profile.diet_type_ids.includes(dt.id);
                 return (
                   <button

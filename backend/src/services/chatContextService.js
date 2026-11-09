@@ -192,11 +192,24 @@ export async function getUserAvoidedIngredientIds(userId) {
  * Truy hồi tối đa `limit` món đang hiển thị, đã loại món chứa nguyên liệu bị cấm.
  * Xếp theo độ tương đồng véc-tơ với câu hỏi, cộng điểm khi dùng được nguyên liệu có sẵn.
  */
-export async function retrieveDishes({ questionVector, content, pantry, forbiddenIngredientIds = new Set(), dishFilter = null, limit = 8 }) {
+export async function retrieveDishes(options) {
+  return (await retrieveDishesWithStatus(options)).dishes;
+}
+
+/**
+ * Như retrieveDishes nhưng kèm trạng thái truy hồi để chatbot chọn cách trả lời (UC chatbot luồng 4a, 5a):
+ *  • 'ok'           – còn món phù hợp;
+ *  • 'none'         – không truy hồi được món nào (danh mục rỗng);
+ *  • 'all_excluded' – có món nhưng đều chứa nguyên liệu kiêng / dị ứng hoặc trái chế độ ăn bắt buộc.
+ */
+export async function retrieveDishesWithStatus({ questionVector, content, pantry, forbiddenIngredientIds = new Set(), dishFilter = null, limit = 8 }) {
   const dishes = await getPublishedDishes();
   const safe = dishes.filter((d) =>
     (!dishFilter || dishFilter(d))
     && !(d.dish_ingredients || []).some((di) => forbiddenIngredientIds.has(Number(di.ingredient_id))));
+  if (safe.length === 0) {
+    return { dishes: [], status: dishes.length > 0 ? 'all_excluded' : 'none' };
+  }
 
   let embeddings = new Map();
   if (questionVector) {
@@ -225,7 +238,7 @@ export async function retrieveDishes({ questionVector, content, pantry, forbidde
   });
 
   scored.sort((a, b) => b.score - a.score || Number(b.dish.avg_rating) - Number(a.dish.avg_rating));
-  return scored.slice(0, limit).map(({ dish: d }) => ({
+  const top = scored.slice(0, limit).map(({ dish: d }) => ({
     id: d.id,
     name: d.name,
     slug: d.slug,
@@ -238,6 +251,7 @@ export async function retrieveDishes({ questionVector, content, pantry, forbidde
     avg_rating: d.avg_rating,
     favorite_count: d.favorite_count,
   }));
+  return { dishes: top, status: top.length > 0 ? 'ok' : 'none' };
 }
 
 /** Định dạng thẻ món trả về cho giao diện. */
