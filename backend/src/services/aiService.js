@@ -25,6 +25,7 @@ function getCacheKey(prefix, content, fridge = {}, extra = '') {
 }
 
 function getFromCache(key) {
+  if (!env.gemini.responseCache) return null;
   const entry = responseCache.get(key);
   if (!entry) return null;
   if (Date.now() > entry.expiresAt) {
@@ -35,6 +36,7 @@ function getFromCache(key) {
 }
 
 function setToCache(key, data) {
+  if (!env.gemini.responseCache) return; // tắt bằng CHAT_RESPONSE_CACHE=false
   // Giữ tối đa 300 mục trong bộ nhớ đệm để tiết kiệm bộ nhớ
   if (responseCache.size > 300) {
     const firstKey = responseCache.keys().next().value;

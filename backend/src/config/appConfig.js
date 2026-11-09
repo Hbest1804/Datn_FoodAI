@@ -41,6 +41,8 @@ export const env = {
     apiKey: process.env.GEMINI_API_KEY ?? '',
     model: normalizeGeminiModel(process.env.GEMINI_MODEL),
     embeddingModel: normalizeGeminiEmbeddingModel(process.env.GEMINI_EMBEDDING_MODEL),
+    // Đệm câu trả lời giống nhau 30 phút; đặt CHAT_RESPONSE_CACHE=false khi chạy bộ đánh giá (HLD mục 6.3)
+    responseCache: !['false', '0', 'off', 'no'].includes(String(process.env.CHAT_RESPONSE_CACHE ?? '').trim().toLowerCase()),
   },
 
   // Địa chỉ giao diện dùng cho liên kết trong email: địa chỉ đầu tiên trong CORS_ORIGIN

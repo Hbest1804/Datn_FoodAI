@@ -77,11 +77,9 @@ export const TasteProfileView: React.FC<TasteProfileViewProps> = ({
     budget_max: 100000,
     household_size: 1,
     diet_type_ids: [],
-    allergen_group_ids: [],
     disliked_ingredient_ids: [],
     preferred_region: null,
     diet_types: [],
-    allergen_groups: [],
     disliked_ingredients: [],
     completeness: 0,
   });
@@ -196,8 +194,7 @@ export const TasteProfileView: React.FC<TasteProfileViewProps> = ({
     }
 
     try {
-      // Hồ sơ không còn khai dị ứng: gửi danh sách rỗng để xóa dị ứng đã lưu trước đây
-      const updated = await apiService.me.updateTasteProfile({ ...profile, allergen_group_ids: [] });
+      const updated = await apiService.me.updateTasteProfile(profile);
       setProfile(prev => toForm(updated, prev));
       setSaveSuccessNotice(true);
       onUpdateUser({
@@ -239,7 +236,6 @@ export const TasteProfileView: React.FC<TasteProfileViewProps> = ({
       budget_max: 100000,
       household_size: 1,
       diet_type_ids: [],
-      allergen_group_ids: [],
       disliked_ingredient_ids: [],
       disliked_ingredients: [],
     }));

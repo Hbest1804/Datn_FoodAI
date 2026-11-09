@@ -34,8 +34,6 @@ export async function fetchTasteProfile(userId) {
   const profile = profileRes.data;
   const prefs = profile?.taste_prefs || {};
   const dietTypes = (dietsRes.data || []).map((r) => r.diet_types).filter(Boolean);
-  // Hồ sơ không còn khai dị ứng; giữ trường rỗng để API không đổi cấu trúc
-  const allergenGroups = [];
   const dislikedIngredients = (dislikesRes.data || []).map((r) => r.ingredients).filter(Boolean);
 
   const data = {
@@ -51,10 +49,8 @@ export async function fetchTasteProfile(userId) {
     budget_min: numOrNull(profile?.budget_min),
     budget_max: numOrNull(profile?.budget_max),
     diet_type_ids: dietTypes.map((d) => d.id),
-    allergen_group_ids: allergenGroups.map((a) => a.id),
     disliked_ingredient_ids: dislikedIngredients.map((i) => Number(i.id)),
     diet_types: dietTypes,
-    allergen_groups: allergenGroups,
     disliked_ingredients: dislikedIngredients,
     updated_at: profile?.updated_at ?? null,
   };

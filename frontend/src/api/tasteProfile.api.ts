@@ -25,7 +25,6 @@ export interface UpdateTasteProfilePayload {
   budget_max?: number | null;
   household_size?: number;
   diet_type_ids?: number[];
-  allergen_group_ids?: number[];
   disliked_ingredient_ids?: number[];
 }
 
@@ -61,7 +60,6 @@ export const tasteProfileApi = {
       budget_max: data.budget_max ?? null,
       household_size: data.household_size ?? 1,
       diet_type_ids: data.diet_type_ids ?? [],
-      allergen_group_ids: data.allergen_group_ids ?? [],
       disliked_ingredient_ids: data.disliked_ingredient_ids ?? [],
     };
 

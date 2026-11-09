@@ -7,9 +7,11 @@
 import { supabaseAdmin } from '../config/supabase.js';
 import { generateEmbedding } from './aiService.js';
 import { cosineSimilarity, getDishEmbeddings } from './embeddingService.js';
-import { getIngredientChildren, getIngredientIndex, getPublishedDishes } from './cacheService.js';
+import { cached, getIngredientChildren, getIngredientIndex, getPublishedDishes } from './cacheService.js';
 import { containsBannedWords } from '../utils/bannedWords.js';
-import { normalizeText, wordsRe } from '../utils/textUtils.js';
+import { normalizeText } from '../utils/textUtils.js';
+import { detectQuestionAllergenGroups, ingredientMatchesAllergen } from '../utils/allergenRules.js';
+import { looksLikePromptInjection } from '../utils/promptGuard.js';
 import { buildDietFilter, detectQuestionDietCodes } from './dietService.js';
 import { ApiError } from '../utils/http.js';
 
@@ -76,6 +78,10 @@ export async function checkTopic(content, settings) {
   if (await containsBannedWords(String(content).normalize('NFC').replace(FOOD_TERMS_LIKE_BANNED_RE, ' '))) {
     return { outOfScope: true, reply: OUT_OF_SCOPE_REPLY, questionVector: null };
   }
+  // Lớp 1: mẫu tấn công prompt ("bỏ qua mọi hướng dẫn", "ignore previous instructions"…) → từ chối, không gọi AI
+  if (looksLikePromptInjection(content)) {
+    return { outOfScope: true, reply: OUT_OF_SCOPE_REPLY, questionVector: null };
+  }
 
   let questionVector = null;
   try {
@@ -132,64 +138,29 @@ export async function getForbiddenIngredientIds({ allergenGroupIds = [], dislike
   return new Set((await withDescendants(forbidden)).keys());
 }
 
-// ── Dị ứng người dùng nêu ngay trong câu hỏi ("tôi dị ứng hải sản, …") ──────
-// Bảng nguyên liệu gần như chưa gắn nhóm dị ứng nên nhận diện theo tên (có dấu, khớp trọn từ),
-// gồm cả gia vị ẩn chứa chất gây dị ứng như nước mắm, mắm tôm, nước tương, dầu hào.
-const CRUSTACEAN = ['tôm', 'tép', 'cua', 'ghẹ', 'ruốc', 'riêu', 'giáp xác'];
-const FISH = ['cá', 'nước mắm', 'mắm cá', 'chả cá', 'khô cá'];
-const QUESTION_ALLERGENS = [
-  { code: 'crustacean', name: 'Tôm, cua và hải sản có vỏ (giáp xác)', detect: CRUSTACEAN, ingredients: CRUSTACEAN },
-  {
-    code: 'seafood', name: 'Hải sản (tôm, cua, cá, mực, nhuyễn thể)', detect: ['hải sản'],
-    ingredients: [...CRUSTACEAN, ...FISH, 'mực', 'bạch tuộc', 'ngao', 'nghêu', 'sò', 'hến', 'hàu', 'ốc', 'mắm', 'dầu hào'],
-    except: ['dầu hào chay'],
-  },
-  { code: 'fish', name: 'Cá (kể cả nước mắm)', detect: ['cá'], ingredients: FISH },
-  { code: 'peanut', name: 'Đậu phộng (lạc)', detect: ['đậu phộng', 'lạc'], ingredients: ['đậu phộng', 'lạc'] },
-  {
-    code: 'dairy', name: 'Sữa bò và chế phẩm từ sữa', detect: ['sữa', 'lactose'],
-    ingredients: ['sữa', 'bơ lạt', 'bơ', 'phô mai', 'kem', 'whey'],
-    except: ['sữa đậu nành', 'sữa hạt', 'sữa dừa', 'hàu sữa'],
-  },
-  { code: 'egg', name: 'Trứng', detect: ['trứng'], ingredients: ['trứng', 'mayonnaise'] },
-  {
-    code: 'gluten', name: 'Gluten (lúa mì)', detect: ['gluten', 'lúa mì', 'bột mì'],
-    ingredients: ['bột mì', 'bánh mì', 'mì tôm', 'mì gói', 'bánh bao', 'bột chiên giòn', 'bột chiên xù', 'nước tương', 'xì dầu', 'bia'],
-  },
-  {
-    code: 'soy', name: 'Đậu nành', detect: ['đậu nành', 'đậu tương'],
-    ingredients: ['đậu nành', 'đậu tương', 'đậu phụ', 'đậu hũ', 'tàu hũ', 'tào phớ', 'váng đậu', 'nước tương', 'xì dầu', 'tương đen', 'tương bần', 'miso', 'dầu hào'],
-  },
-  { code: 'sesame', name: 'Vừng (mè)', detect: ['mè', 'vừng'], ingredients: ['mè', 'vừng', 'tahini'] },
-  {
-    code: 'tree_nut', name: 'Các loại hạt cây (điều, óc chó, hạnh nhân…)',
-    detect: ['hạt điều', 'óc chó', 'hạnh nhân', 'macca', 'mắc ca', 'hồ đào', 'hạt dẻ', 'hạt cây'],
-    ingredients: ['hạt điều', 'óc chó', 'hạnh nhân', 'macca', 'mắc ca', 'hồ đào', 'hạt dẻ'],
-  },
-];
-// Cụm báo hiệu dị ứng; phần nêu chất gây dị ứng kéo dài tới dấu câu hoặc liên từ kế tiếp
-const ALLERGY_TRIGGER_RE = /(dị ứng|không ăn được|kiêng)\s+([^,.;:!?\n]*?)(?=[,.;:!?\n]|\s(?:thì|nên|nhưng|mà|muốn|có|ăn|làm|gợi|cho)\s|$)/gu;
-
-for (const a of QUESTION_ALLERGENS) {
-  a.detectRe = wordsRe(a.detect);
-  a.ingredientRe = wordsRe(a.ingredients);
-  a.exceptRe = a.except ? wordsRe(a.except) : null;
+/** Map id nhóm dị ứng → mã (allergen_groups.code), đệm 5 phút. Lỗi đọc bảng thì trả Map rỗng (vẫn lọc theo tên). */
+function getAllergenGroupCodes() {
+  return cached('catalog:allergen_group_codes', 5 * 60 * 1000, async () => {
+    const { data, error } = await supabaseAdmin.from('allergen_groups').select('id, code');
+    if (error) return new Map();
+    return new Map((data || []).map((g) => [Number(g.id), g.code]));
+  }, { stale: true });
 }
 
 /**
- * Nhận diện chất gây dị ứng người dùng nêu trong câu hỏi.
+ * Nhận diện chất gây dị ứng người dùng nêu trong câu hỏi (luật ở utils/allergenRules.js, bỏ qua câu phủ định).
  * Trả về các nhóm dị ứng { id, name } (để đưa vào câu lệnh gửi mô hình) và id nguyên liệu phải loại, kèm nguyên liệu con.
  */
 export async function detectQuestionAllergens(content) {
-  const text = (content || '').normalize('NFC').toLowerCase();
-  const mentioned = [...text.matchAll(ALLERGY_TRIGGER_RE)].map((m) => m[2]).join(' | ');
-  const allergens = mentioned ? QUESTION_ALLERGENS.filter((a) => a.detectRe.test(mentioned)) : [];
+  const allergens = detectQuestionAllergenGroups(content);
   if (allergens.length === 0) return { allergens: [], ingredientIds: new Set() };
 
+  // Nguyên liệu bị loại: tên khớp nhóm dị ứng, hoặc đã gắn allergen_group_id của nhóm cùng mã (allergen_groups.code)
+  const groupCodes = await getAllergenGroupCodes();
   const ids = new Set();
   for (const ing of await getIngredientIndex()) {
-    const name = (ing.name || '').normalize('NFC').toLowerCase();
-    if (allergens.some((a) => a.ingredientRe.test(name.replace(a.exceptRe || /$^/, '')))) ids.add(Number(ing.id));
+    const code = groupCodes.get(Number(ing.allergen_group_id));
+    if (allergens.some((a) => a.code === code || ingredientMatchesAllergen(ing.name, a))) ids.add(Number(ing.id));
   }
   return {
     allergens: allergens.map((a) => ({ id: `q:${a.code}`, name: a.name })),

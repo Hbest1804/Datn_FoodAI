@@ -102,7 +102,7 @@ export async function getPersonalizedRecommendations({ userId, limit = 12, categ
   const weights = { sim: 0.45, rating: 0.2, pop: 0.15, budget: 0.1, cal: 0.1, ...(settings.recommendation_weights || {}) };
 
   // 1. Dữ liệu người dùng
-  let profile = { completeness: 0, allergen_group_ids: [], disliked_ingredient_ids: [], diet_type_ids: [] };
+  let profile = { completeness: 0, disliked_ingredient_ids: [], diet_type_ids: [] };
   let tasteVector = null;
   let favSet = new Set();
   let lowRatedSet = new Set();
@@ -131,7 +131,7 @@ export async function getPersonalizedRecommendations({ userId, limit = 12, categ
   // 2. Món ứng viên đã loại nguyên liệu dị ứng / không thích và món không hợp chế độ ăn bắt buộc (chay, thuần chay)
   const [allDishes, forbidden, diet, embeddings] = await Promise.all([
     getPublishedDishes(),
-    // Hồ sơ không khai nhóm dị ứng riêng (user_allergies chỉ giữ để tương thích); nguyên liệu gây dị ứng
+    // Hồ sơ không khai nhóm dị ứng (FR-20); nguyên liệu gây dị ứng
     // nằm trong danh sách nguyên liệu kiêng, cùng cách lọc với chatbot và danh sách món
     getForbiddenIngredientIds({ dislikedIngredientIds: profile.disliked_ingredient_ids }),
     getDietConstraints({ dietTypeIds: profile.diet_type_ids || [] }),
