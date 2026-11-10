@@ -126,6 +126,8 @@ export const chatApi = {
     session_title?: string;
     user_message: ChatMessage;
     assistant_message: ChatMessage;
+    saved?: boolean;
+    warning?: string;
   }> {
     const fridge: { ingredient_ids: number[]; custom_ingredients: string[] } = {
       ingredient_ids: [],
@@ -143,6 +145,8 @@ export const chatApi = {
         session_title?: string;
         user_message: ChatMessage;
         assistant_message: ChatMessage;
+        saved?: boolean;
+        warning?: string;
       };
     }>(`/chat/sessions/${sessionId}/messages`, {
       method: 'POST',

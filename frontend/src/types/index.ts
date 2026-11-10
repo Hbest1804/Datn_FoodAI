@@ -144,11 +144,9 @@ export interface BackendTasteProfile {
   budget_max: number | null;
   household_size: number | null;
   diet_type_ids: number[];
-  allergen_group_ids: number[];
   disliked_ingredient_ids: number[];
   preferred_region?: { id: number; name: string } | null;
   diet_types: Array<{ id: number; name: string; code?: string }>;
-  allergen_groups: Array<{ id: number; name: string; code?: string }>;
   disliked_ingredients: Array<{ id: number; name: string }>;
   completeness: number;
   updated_at?: string | null;

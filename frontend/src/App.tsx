@@ -169,7 +169,7 @@ export default function App() {
                 householdSize: p.household_size ?? prev.householdSize,
                 budgetPerMeal: p.budget_max ?? prev.budgetPerMeal,
                 dietPreference: p.diet_types?.map((d: any) => d.name).join(', ') || '',
-                allergies: p.allergen_groups?.map((a: any) => a.name) || prev.allergies,
+                allergies: [],
               }));
             }
           } catch {

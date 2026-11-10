@@ -5,6 +5,8 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { invalidateRecommendationCache } from '../services/recommendationService.js';
 import { recomputeUserVectors } from '../services/embeddingService.js';
 import { fetchTasteProfile } from '../services/tasteProfileService.js';
+import { getDietTypes } from '../services/dietService.js';
+import { normalizeDietSelection } from '../utils/dietRules.js';
 import { sendError, sendOk } from '../utils/http.js';
 
 const LEVEL_KEYS = ['spicy_level', 'salty_level', 'sweet_level', 'sour_level'];
@@ -44,7 +46,7 @@ function validateProfileBody(body) {
   if (Number.isInteger(body.budget_min) && Number.isInteger(body.budget_max) && body.budget_min > body.budget_max) {
     add('budget_min', 'BUDGET_RANGE', 'budget_min không được lớn hơn budget_max.');
   }
-  for (const f of ['diet_type_ids', 'allergen_group_ids', 'disliked_ingredient_ids']) {
+  for (const f of ['diet_type_ids', 'disliked_ingredient_ids']) {
     if (body[f] !== undefined && !isIdArray(body[f])) add(f, 'INVALID_VALUE', 'Phải là mảng id.');
   }
   return details;
@@ -80,8 +82,8 @@ async function saveTasteProfile(req, res, body) {
 
   const prefs = body.taste_prefs ?? {};
   const likedIds = [...new Set((prefs.liked_ingredient_ids || []).map(Number))];
-  const dietIds = [...new Set((body.diet_type_ids || []).map(Number))];
-  const allergenIds = [...new Set((body.allergen_group_ids || []).map(Number))];
+  // Chuẩn hóa chế độ ăn loại trừ nhau ("Bình thường" đi một mình; Ăn chay / Thuần chay chỉ giữ một)
+  const dietIds = normalizeDietSelection(body.diet_type_ids || [], await getDietTypes());
   const dislikedIds = [...new Set((body.disliked_ingredient_ids || []).map(Number))];
 
   // Luồng 5a: nguyên liệu vừa thích vừa không thích
@@ -93,14 +95,12 @@ async function saveTasteProfile(req, res, body) {
     ]);
   }
 
-  const [missingDiets, missingAllergens, missingIngs] = await Promise.all([
+  const [missingDiets, missingIngs] = await Promise.all([
     findMissingIds('diet_types', dietIds),
-    findMissingIds('allergen_groups', allergenIds),
     findMissingIds('ingredients', [...new Set([...likedIds, ...dislikedIds])]),
   ]);
   const idErrors = [];
   if (missingDiets.length) idErrors.push({ field: 'diet_type_ids', code: 'NOT_FOUND', message: `Không tồn tại: ${missingDiets.join(', ')}` });
-  if (missingAllergens.length) idErrors.push({ field: 'allergen_group_ids', code: 'NOT_FOUND', message: `Không tồn tại: ${missingAllergens.join(', ')}` });
   if (missingIngs.length) idErrors.push({ field: 'ingredient_ids', code: 'NOT_FOUND', message: `Nguyên liệu không tồn tại: ${missingIngs.join(', ')}` });
   if (idErrors.length) return sendError(res, 422, 'VALIDATION_ERROR', 'Có id không tồn tại.', idErrors);
 
@@ -121,7 +121,6 @@ async function saveTasteProfile(req, res, body) {
 
     await Promise.all([
       replaceLinks('user_diets', 'diet_type_id', userId, dietIds),
-      replaceLinks('user_allergies', 'allergen_group_id', userId, allergenIds),
       replaceLinks('user_disliked_ingredients', 'ingredient_id', userId, dislikedIds),
     ]);
   } catch (err) {
@@ -161,7 +160,6 @@ export async function patchTasteProfile(req, res) {
     budget_min: pick('budget_min'),
     budget_max: pick('budget_max'),
     diet_type_ids: pick('diet_type_ids'),
-    allergen_group_ids: pick('allergen_group_ids'),
     disliked_ingredient_ids: pick('disliked_ingredient_ids'),
   });
 }

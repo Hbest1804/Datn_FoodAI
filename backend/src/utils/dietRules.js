@@ -14,11 +14,14 @@ const SEAFOOD = [
   'cá', 'tôm', 'tép', 'cua', 'ghẹ', 'ruốc', 'mực', 'bạch tuộc', 'ngao', 'nghêu', 'sò', 'hến', 'hàu', 'ốc', 'sứa',
   'mắm', 'nước mắm', 'mắm tôm', 'mắm ruốc', 'dầu hào', 'hải sản',
 ];
-const ANIMAL_PRODUCTS = ['trứng', 'sữa', 'sữa chua', 'bơ', 'bơ lạt', 'phô mai', 'kem', 'whey', 'mayonnaise', 'mật ong'];
+// Theo cách hiểu "ăn chay" ở Việt Nam: không ăn trứng (kể cả lòng đỏ, lòng trắng, trứng muối, trứng bắc thảo)
+const EGGS = ['trứng', 'lòng đỏ', 'lòng trắng', 'mayonnaise'];
+const ANIMAL_PRODUCTS = [...EGGS, 'sữa', 'sữa chua', 'bơ', 'bơ lạt', 'phô mai', 'kem', 'whey', 'mật ong'];
 
 // Cụm trùng mặt chữ nhưng là thực vật / được phép (bị gỡ khỏi tên trước khi so khớp)
 const PLANT_LOOKALIKES = ['nấm mỡ', 'khoai mỡ', 'thịt gấc', 'thịt quả', 'nấm đùi gà', 'nấm gan bò', 'đậu ngự', 'hạt nêm nấm', 'bột nêm nấm'];
-const DAIRY_EGG_OK = ['trứng gà', 'trứng vịt', 'trứng cút', 'trứng ngỗng', 'lòng đỏ', 'lòng trắng', 'sữa bò', 'bơ bò'];
+// Chay vẫn được dùng sữa, bơ (chữ "bò" trong tên không bị coi là thịt bò)
+const DAIRY_OK = ['sữa bò', 'bơ bò'];
 const VEGAN_OK = ['sữa đậu nành', 'sữa hạt', 'sữa dừa', 'sữa yến mạch', 'sữa hạnh nhân', 'sữa gạo', 'nước cốt dừa',
   'quả bơ', 'trái bơ', 'bơ thực vật', 'bơ đậu phộng', 'kem dừa'];
 
@@ -27,10 +30,10 @@ const VEGAN_OK = ['sữa đậu nành', 'sữa hạt', 'sữa dừa', 'sữa y�
  */
 export const DIET_RULES = {
   vegetarian: {
-    excludeRe: wordsRe([...MEAT, ...SEAFOOD]),
-    exceptRe: wordsRe([...PLANT_LOOKALIKES, ...DAIRY_EGG_OK]),
+    excludeRe: wordsRe([...MEAT, ...SEAFOOD, ...EGGS]),
+    exceptRe: wordsRe([...PLANT_LOOKALIKES, ...DAIRY_OK]),
     satisfiedBy: ['vegetarian', 'vegan'],
-    promptRule: 'không thịt, cá, hải sản, mỡ/nước dùng xương động vật, nước mắm, mắm, dầu hào (dùng nước tương, dầu hào chay, hạt nêm nấm thay thế); được dùng trứng, sữa',
+    promptRule: 'theo cách ăn chay ở Việt Nam: không thịt, cá, hải sản, trứng, mỡ/nước dùng xương động vật, nước mắm, mắm, dầu hào (dùng nước tương, dầu hào chay, hạt nêm nấm thay thế); được dùng sữa',
   },
   vegan: {
     excludeRe: wordsRe([...MEAT, ...SEAFOOD, ...ANIMAL_PRODUCTS]),
@@ -79,4 +82,38 @@ export function detectQuestionDietCodes(content) {
   if (mentionedWithoutNegation(text, wordsRe(VEGAN_Q)) || mentionedWithoutNegation(plain, wordsRe(VEGAN_Q_PLAIN))) return ['vegan'];
   if (mentionedWithoutNegation(text, wordsRe(VEGETARIAN_Q)) || mentionedWithoutNegation(plain, wordsRe(VEGETARIAN_Q_PLAIN))) return ['vegetarian'];
   return [];
+}
+
+// ── Chế độ ăn loại trừ nhau trong hồ sơ khẩu vị ──────────────────────────────
+// "Bình thường" không đi cùng chế độ nào khác; "Ăn chay" và "Thuần chay" chỉ chọn một (trùng thì giữ Thuần chay,
+// vì thuần chay đã bao gồm ăn chay). Nhận diện theo mã, thiếu mã thì theo tên (bỏ dấu).
+const NORMAL_CODES = ['normal', 'regular', 'standard', 'binh_thuong'];
+
+/** Nhóm loại trừ của một chế độ: 'normal' | 'vegetarian' | 'vegan' | null. */
+export function dietExclusiveKind(diet) {
+  const code = String(diet?.code || '').toLowerCase();
+  const name = normalizeText(diet?.name || '');
+  if (NORMAL_CODES.includes(code) || name === 'binh thuong') return 'normal';
+  if (code === 'vegan' || name === 'thuan chay') return 'vegan';
+  if (code === 'vegetarian' || name === 'an chay') return 'vegetarian';
+  return null;
+}
+
+/**
+ * Chuẩn hóa danh sách id chế độ ăn trước khi lưu: bỏ trùng, bỏ "Bình thường" khi có chế độ khác,
+ * bỏ "Ăn chay" khi đã chọn "Thuần chay". `dietTypes`: [{ id, code, name }]. Id không có trong danh mục được giữ nguyên.
+ */
+export function normalizeDietSelection(dietIds, dietTypes = []) {
+  const ids = [...new Set((dietIds || []).map(Number))];
+  const kindOf = new Map(dietTypes.map((d) => [Number(d.id), dietExclusiveKind(d)]));
+  const kinds = new Set(ids.map((id) => kindOf.get(id)));
+  // Chỉ tính id có trong danh mục; id lạ không được làm mất "Bình thường" (id lạ bị báo lỗi ở bước kiểm tra sau)
+  const hasOther = ids.some((id) => kindOf.has(id) && kindOf.get(id) !== 'normal');
+  const firstNormal = ids.find((id) => kindOf.get(id) === 'normal');
+  return ids.filter((id) => {
+    const kind = kindOf.get(id);
+    if (kind === 'normal') return !hasOther && id === firstNormal;
+    if (kind === 'vegetarian') return !kinds.has('vegan');
+    return true;
+  });
 }

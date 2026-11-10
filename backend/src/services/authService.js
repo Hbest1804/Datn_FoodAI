@@ -116,7 +116,13 @@ export async function registerUser({ email, password, displayName }) {
     await supabaseAdmin.auth.admin.deleteUser(created.user.id);
     throw insertErr;
   }
-  await supabaseAdmin.from('user_profiles').insert({ user_id: user.id });
+  // Không tạo được hồ sơ thì hoàn tác cả bản ghi users và tài khoản xác thực (luồng 6a)
+  const { error: profileErr } = await supabaseAdmin.from('user_profiles').insert({ user_id: user.id });
+  if (profileErr) {
+    await supabaseAdmin.from('users').delete().eq('id', user.id);
+    await supabaseAdmin.auth.admin.deleteUser(created.user.id);
+    throw profileErr;
+  }
 
   // Đăng nhập luôn để giao diện không phải gọi thêm /auth/login
   const session = await verifyPassword(normalizedEmail, password);
@@ -129,6 +135,8 @@ export async function loginUser({ email, password }) {
   const normalizedEmail = email.trim().toLowerCase();
   const user = await findUserByEmail(normalizedEmail);
 
+  // Đang tạm khóa 15 phút (luồng 4b). Tài khoản bị Admin khóa (luồng 4a) chỉ báo sau khi mật khẩu đúng,
+  // để người không biết mật khẩu không dò được email nào tồn tại / bị khóa
   if (user?.locked_until && new Date(user.locked_until) > new Date()) {
     const retryAfter = Math.ceil((new Date(user.locked_until) - Date.now()) / 1000);
     throw new ApiError(429, 'TOO_MANY_ATTEMPTS', `Bạn đã nhập sai quá ${MAX_FAILED_LOGINS} lần. Vui lòng thử lại sau ${Math.ceil(retryAfter / 60)} phút.`, { retry_after: retryAfter });

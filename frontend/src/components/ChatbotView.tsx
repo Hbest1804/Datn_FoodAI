@@ -460,8 +460,14 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
         const assistantMsgRaw = data.assistant_message;
         const normalizedDishes = (assistantMsgRaw.referenced_dishes || []).map(normalizeDish);
 
+        // Câu trả lời chưa lưu được (luồng 8a): gán mã tạm để không hiện nút đánh giá, báo người dùng
+        if (data.saved === false) {
+          toast.error(data.warning || 'Không lưu được lịch sử hội thoại cho câu trả lời này.');
+        }
+
         const assistantMsg: ChatMessage = {
           ...assistantMsgRaw,
+          id: assistantMsgRaw.id || `temp-unsaved-${Date.now()}`,
           sender: 'assistant',
           timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
           text: assistantMsgRaw.content,

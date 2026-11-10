@@ -130,13 +130,27 @@ export async function adminUpdateUserStatus(req, res) {
   if (!target) return userNotFound(res);
   if (await guardTarget(req, res, target, status === 'locked')) return undefined;
 
-  const { data, error } = await supabaseAdmin.from('users').update({ status }).eq('id', target.id).select('id, status').single();
-  if (error) throw error;
-
+  // Cấm / bỏ cấm ở dịch vụ xác thực trước; lỗi thì dừng, dữ liệu không đổi
   const { error: banErr } = await supabaseAdmin.auth.admin.updateUserById(target.id, {
     ban_duration: status === 'locked' ? BAN_FOREVER : 'none',
   });
-  if (banErr) console.warn('[Admin] Không cập nhật được trạng thái cấm trong Supabase Auth:', banErr.message);
+  // Tài khoản chỉ có trong bảng users (dữ liệu mẫu, xóa dở) thì không có gì để cấm bên xác thực → vẫn cập nhật CSDL
+  const authMissing = Boolean(banErr) && (banErr.status === 404 || banErr.code === 'user_not_found');
+  if (authMissing) {
+    console.warn('[Admin] Không có tài khoản Supabase Auth tương ứng, chỉ cập nhật CSDL:', target.id);
+  } else if (banErr) {
+    console.error('[Admin] Không cập nhật được trạng thái cấm trong Supabase Auth:', banErr.message);
+    return sendError(res, 502, 'AUTH_SERVICE_ERROR', 'Dịch vụ xác thực đang lỗi, chưa thay đổi trạng thái tài khoản. Vui lòng thử lại.');
+  }
+
+  const { data, error } = await supabaseAdmin.from('users').update({ status }).eq('id', target.id).select('id, status').single();
+  if (error) {
+    // Ghi CSDL lỗi thì trả lại trạng thái cấm cũ để hai nơi không lệch nhau
+    if (!authMissing) await supabaseAdmin.auth.admin.updateUserById(target.id, {
+      ban_duration: target.status === 'locked' ? BAN_FOREVER : 'none',
+    }).catch(() => { });
+    throw error;
+  }
 
   recordAuditLog(req.user, status === 'locked' ? 'user.lock' : 'user.unlock', 'user', target.id, {
     email: target.email,

@@ -15,7 +15,7 @@ import {
   sendOk,
 } from '../utils/http.js';
 import { toDishSummary } from '../services/recommendationService.js';
-import { getUserAvoidedIngredientIds } from '../services/chatContextService.js';
+import { getDietConstraints, getUserAvoidedIngredientIds } from '../services/chatContextService.js';
 import { recomputeUserVectorsInBackground } from '../services/embeddingService.js';
 import { cached, getIngredientIndex, getPublishedDishes } from '../services/cacheService.js';
 
@@ -32,6 +32,29 @@ function parseNonNegative(query, key) {
 function containsAny(dish, ids) {
   return ids.size > 0 && (dish.dish_ingredients || [])
     .some((di) => ids.has(Number(di.ingredient_id ?? di.ingredient?.id)));
+}
+
+/** Id các chế độ ăn trong hồ sơ khẩu vị (khách trả mảng rỗng). */
+async function getUserDietTypeIds(userId) {
+  if (!userId) return [];
+  const { data, error } = await supabaseAdmin.from('user_diets').select('diet_type_id').eq('user_id', userId);
+  if (error) throw error;
+  return (data || []).map((r) => Number(r.diet_type_id));
+}
+
+/**
+ * Bộ lọc theo chế độ ăn bắt buộc trong hồ sơ (Ăn chay, Thuần chay): null khi không có chế độ bắt buộc.
+ * Món bị loại khi thiếu thẻ chế độ hoặc chứa nguyên liệu động vật (kể cả nguyên liệu con).
+ */
+async function getUserDietFilter(userId) {
+  const dietTypeIds = await getUserDietTypeIds(userId);
+  if (dietTypeIds.length === 0) return null;
+  const diet = await getDietConstraints({ dietTypeIds });
+  if (diet.strict.length === 0) return null;
+  return {
+    diets: diet.strict.map((d) => ({ id: d.id, code: d.code, name: d.name })),
+    allows: (dish) => (!diet.dishFilter || diet.dishFilter(dish)) && !containsAny(dish, diet.forbiddenIngredientIds),
+  };
 }
 
 async function getUserFavoriteSet(userId, dishIds) {
@@ -72,7 +95,11 @@ export async function getDishes(req, res) {
 
   // 1. Lọc theo các cột trên danh sách món đã đệm (tránh truy vấn lại toàn bộ món mỗi lượt tìm)
   const categoryKey = typeof q.category === 'string' && q.category.trim() ? normalizeText(q.category) : '';
-  const [allDishes, avoidedIds] = await Promise.all([getPublishedDishes(), getUserAvoidedIngredientIds(req.user?.id)]);
+  const [allDishes, avoidedIds, dietFilter] = await Promise.all([
+    getPublishedDishes(),
+    getUserAvoidedIngredientIds(req.user?.id),
+    getUserDietFilter(req.user?.id),
+  ]);
   const rows = allDishes.filter((d) =>
     (!categoryKey || d.category_normalized === categoryKey)
     && (!q.difficulty || d.difficulty === q.difficulty)
@@ -85,7 +112,9 @@ export async function getDishes(req, res) {
   // 2. Lọc thẻ, nguyên liệu và từ khóa (bỏ dấu) trên kết quả.
   //    Chỉ lọc (không có từ khóa): ẩn món chứa nguyên liệu người dùng kiêng.
   //    Tìm theo từ khóa: vẫn trả món đó nhưng gắn nhãn contains_user_allergens.
+  //    Chế độ ăn bắt buộc trong hồ sơ (chay, thuần chay) là ràng buộc cứng: luôn ẩn món trái chế độ và đếm số món bị ẩn.
   const pantry = new Set(ingredientIds || []);
+  let dietHiddenCount = 0;
   let list = rows.filter((d) => {
     if (!keyword && containsAny(d, avoidedIds)) return false;
     const ings = d.dish_ingredients || [];
@@ -103,6 +132,10 @@ export async function getDishes(req, res) {
         matchesSearchKeyword(di.ingredient?.name, keyword)
         || (di.ingredient?.aliases || []).some((a) => matchesSearchKeyword(a, keyword)));
       if (!inText && !inIngredients) return false;
+    }
+    if (dietFilter && !dietFilter.allows(d)) {
+      dietHiddenCount += 1;
+      return false;
     }
     return true;
   });
@@ -159,6 +192,7 @@ export async function getDishes(req, res) {
   if (total === 0) {
     suggestions = ['Bỏ bớt bộ lọc', 'Thử từ khóa ngắn hơn hoặc không dấu'];
     if (ingredientIds) suggestions.push('Hỏi Chatbot AI với các nguyên liệu này');
+    if (dietHiddenCount > 0) suggestions.push('Đổi chế độ ăn trong Hồ sơ khẩu vị để xem thêm món');
   }
 
   if (keyword && pg.page === 1) {
@@ -167,7 +201,11 @@ export async function getDishes(req, res) {
 
   res.set('Cache-Control', req.user ? 'private, no-store' : 'public, max-age=30');
   return sendOk(res, data, {
-    meta: pageMeta(pg, total, { suggestions, suggest_ai: Boolean(ingredientIds) && total === 0 }),
+    meta: pageMeta(pg, total, {
+      suggestions,
+      suggest_ai: Boolean(ingredientIds) && total === 0,
+      diet_filter: dietFilter ? { diets: dietFilter.diets, hidden_count: dietHiddenCount } : null,
+    }),
   });
 }
 

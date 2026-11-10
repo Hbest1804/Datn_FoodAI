@@ -24,6 +24,11 @@ export interface GetDishesParams {
   limit?: number;
 }
 
+export interface DietFilterInfo {
+  diets: { id: number; code: string; name: string }[];
+  hiddenCount: number;
+}
+
 export interface GetDishesResponse {
   dishes: Recipe[];
   total: number;
@@ -31,6 +36,7 @@ export interface GetDishesResponse {
   page: number;
   suggestions?: string[];
   suggestAi?: boolean;
+  dietFilter?: DietFilterInfo | null;
 }
 
 export const dishesApi = {
@@ -46,6 +52,7 @@ export const dishesApi = {
           total_pages: number;
           suggestions?: string[];
           suggest_ai?: boolean;
+          diet_filter?: { diets: { id: number; code: string; name: string }[]; hidden_count: number } | null;
         };
       }>('/dishes', { params });
 
@@ -57,6 +64,9 @@ export const dishesApi = {
         page: res.meta?.page ?? 1,
         suggestions: res.meta?.suggestions || [],
         suggestAi: res.meta?.suggest_ai || false,
+        dietFilter: res.meta?.diet_filter
+          ? { diets: res.meta.diet_filter.diets || [], hiddenCount: res.meta.diet_filter.hidden_count || 0 }
+          : null,
       };
     } catch (err) {
       console.warn('[Dishes API] Error loading dishes from backend:', err);
@@ -67,6 +77,7 @@ export const dishesApi = {
         page: 1,
         suggestions: [],
         suggestAi: false,
+        dietFilter: null,
       };
     }
   },
@@ -80,11 +91,11 @@ export const dishesApi = {
     }
   },
 
-  async getRecommendations(limit = 12): Promise<Recipe[]> {
+  async getRecommendations(limit = 12, refresh = false): Promise<Recipe[]> {
     try {
       const token = getAuthToken();
       const endpoint = token ? '/me/recommendations' : '/dishes/recommendations';
-      const res = await apiClient<{ success: boolean; data: any[] }>(`${endpoint}?limit=${limit}`);
+      const res = await apiClient<{ success: boolean; data: any[] }>(`${endpoint}?limit=${limit}${refresh ? '&refresh=true' : ''}`);
       return (res.data || []).map(normalizeRecommendation);
     } catch {
       return [];

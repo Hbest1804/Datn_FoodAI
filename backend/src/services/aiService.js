@@ -25,6 +25,7 @@ function getCacheKey(prefix, content, fridge = {}, extra = '') {
 }
 
 function getFromCache(key) {
+  if (!env.gemini.responseCache) return null;
   const entry = responseCache.get(key);
   if (!entry) return null;
   if (Date.now() > entry.expiresAt) {
@@ -35,6 +36,7 @@ function getFromCache(key) {
 }
 
 function setToCache(key, data) {
+  if (!env.gemini.responseCache) return; // tắt bằng CHAT_RESPONSE_CACHE=false
   // Giữ tối đa 300 mục trong bộ nhớ đệm để tiết kiệm bộ nhớ
   if (responseCache.size > 300) {
     const firstKey = responseCache.keys().next().value;
@@ -274,7 +276,7 @@ async function callGeminiWithFailover({ prompt, maxOutputTokens = 900, temperatu
  * Sinh câu trả lời cho chatbot ở chế độ khách (mục 4.4).
  * Nhận nội dung câu hỏi, nguyên liệu có sẵn và các món liên quan đã truy hồi; trả về loại câu trả lời, nội dung và thẻ món.
  */
-export async function generateCulinaryReply({ content, fridge = {}, allergens = [], strictDiets = [], dishesContext = [], systemPrompt }) {
+export async function generateCulinaryReply({ content, fridge = {}, allergens = [], strictDiets = [], dishesContext = [], chatHistory = [], systemPrompt }) {
   const normKey = (content || '').toLowerCase().trim().replace(/[?!.,]/g, '').trim();
 
   // 1. Câu hỏi gợi ý nhanh có câu trả lời soạn sẵn (nội dung soạn sẵn không lọc theo dị ứng)
@@ -292,7 +294,7 @@ export async function generateCulinaryReply({ content, fridge = {}, allergens = 
   }
 
   // 2. Câu hỏi đã trả lời gần đây (lấy từ bộ nhớ đệm)
-  const cacheKey = getCacheKey('guest', content, fridge, `${systemPrompt}|${allergens.map((a) => a.id).join(',')}|${dishesContext.map((d) => d.id).join(',')}`);
+  const cacheKey = getCacheKey('guest', content, fridge, `${systemPrompt}|${allergens.map((a) => a.id).join(',')}|${dishesContext.map((d) => d.id).join(',')}|${chatHistory.map((m) => m.content).join('|')}`);
   const cached = getFromCache(cacheKey);
   if (cached) {
     return cached;
@@ -306,7 +308,7 @@ export async function generateCulinaryReply({ content, fridge = {}, allergens = 
   }
 
   // 4. Tạo câu lệnh gửi mô hình (rút gọn dữ liệu để phản hồi nhanh)
-  const prompt = buildGeminiPrompt({ content, fridge, allergens, strictDiets, dishesContext, systemPrompt });
+  const prompt = buildGeminiPrompt({ content, fridge, allergens, strictDiets, dishesContext, chatHistory, systemPrompt });
 
   // Dịch vụ AI lỗi hoặc quá thời gian chờ thì ném lỗi để API trả 502 AI_SERVICE_ERROR / 504 AI_TIMEOUT (luồng 3a)
   const { rawText, tokenCount } = await callGeminiWithFailover({
@@ -345,7 +347,12 @@ function dietRules(strictDiets = []) {
 `;
 }
 
-function buildGeminiPrompt({ content, fridge, allergens = [], strictDiets = [], dishesContext, systemPrompt }) {
+function buildGeminiPrompt({ content, fridge, allergens = [], strictDiets = [], dishesContext, chatHistory = [], systemPrompt }) {
+  // Lịch sử phiên khách (lưu tạm trong bộ nhớ backend) để hiểu câu hỏi nối tiếp
+  const historyText = chatHistory
+    .slice(-4)
+    .map((m) => `${m.role === 'user' ? 'Khách' : 'Bếp trưởng'}: ${String(m.content).slice(0, 80)}`)
+    .join('\n');
   // Chỉ gửi id, tên, thời gian nấu và độ khó; bỏ ảnh và mô tả dài
   const dishesSummary = dishesContext.map((d) => ({
     id: d.id,
@@ -371,7 +378,7 @@ ${JSON.stringify(dishesSummary)}
 
 NGUYÊN LIỆU TRONG TỦ LẠNH:
 ${fridgeInfo.length ? fridgeInfo.join('\n') : '(Không có)'}
-
+${historyText ? `\nLỊCH SỬ HỘI THOẠI:\n${historyText}\n` : ''}
 QUY TẮC HIỂN THỊ TÊN MÓN ĂN:
 - TUYỆT ĐỐI KHÔNG viết mã ID vào câu trả lời, KHÔNG viết liên kết dạng [Tên món](id:...) hay (id:...).
 - Chỉ viết tên món bằng chữ in đậm thông thường: ví dụ **Thịt Heo Kho Trứng Cút**, **Canh Ngao Nấu Chua**.
@@ -498,6 +505,7 @@ export async function generatePersonalizedReply({
   chatHistory = [],
   fridge = {},
   dishesContext = [],
+  retrievalStatus = 'ok',
   systemPrompt,
 }) {
   const normKey = (content || '').toLowerCase().trim().replace(/[?!.,]/g, '').trim();
@@ -521,7 +529,7 @@ export async function generatePersonalizedReply({
 
   // 2. Câu hỏi đã trả lời gần đây (lấy từ bộ nhớ đệm)
   const profileKey = `${userProfile.diet_types?.map((d) => d.id).join(',') || ''}_${userProfile.allergen_groups?.map((a) => a.id).join(',') || ''}`;
-  const cacheKey = getCacheKey('user', content, fridge, `${profileKey}|${systemPrompt}|${dishesContext.map((d) => d.id).join(',')}|${chatHistory.length}`);
+  const cacheKey = getCacheKey('user', content, fridge, `${profileKey}|${systemPrompt}|${dishesContext.map((d) => d.id).join(',')}|${chatHistory.length}|${retrievalStatus}|${isProfileEmpty(userProfile)}`);
   const cached = getFromCache(cacheKey);
   if (cached) {
     return cached;
@@ -547,6 +555,7 @@ export async function generatePersonalizedReply({
     chatHistory,
     fridge,
     dishesContext,
+    retrievalStatus,
     systemPrompt,
   });
 
@@ -562,6 +571,32 @@ export async function generatePersonalizedReply({
   return parsed;
 }
 
+/** Người dùng chưa khai gì trong hồ sơ khẩu vị (UC chatbot luồng 3a). */
+function isProfileEmpty(userProfile = {}) {
+  const prefs = userProfile.taste_prefs || {};
+  const hasPrefs = Object.entries(prefs).some(([, v]) => (Array.isArray(v) ? v.length > 0 : v !== null && v !== undefined));
+  return !hasPrefs
+    && !userProfile.diet_types?.length
+    && !userProfile.disliked_ingredients?.length
+    && !userProfile.calorie_goal
+    && userProfile.budget_min == null
+    && userProfile.budget_max == null;
+}
+
+/** Quy tắc bổ sung theo tình huống: chưa có hồ sơ (3a), không truy hồi được món (4a), món đều bị loại (5a). */
+function situationRules({ userProfile, retrievalStatus }) {
+  const rules = [];
+  if (isProfileEmpty(userProfile)) {
+    rules.push('- Người dùng CHƯA thiết lập hồ sơ khẩu vị: dùng thông tin có trong câu hỏi, cuối câu trả lời thêm một câu ngắn mời người dùng thiết lập "Hồ sơ khẩu vị" để nhận gợi ý sát hơn.');
+  }
+  if (retrievalStatus === 'none') {
+    rules.push('- Hệ thống KHÔNG có món nào phù hợp trong cơ sở dữ liệu: được phép đề xuất công thức tự soạn, nhưng phải ghi rõ ngay đầu phần công thức là "(Công thức do AI đề xuất, chưa có trong hệ thống)"; matched_dish_ids để rỗng; outcome="no_match".');
+  } else if (retrievalStatus === 'all_excluded') {
+    rules.push('- Các món trong hệ thống đều chứa nguyên liệu người dùng kiêng/dị ứng hoặc trái chế độ ăn bắt buộc nên đã bị loại: thông báo rõ điều này, KHÔNG nới lỏng dị ứng, nguyên liệu kiêng hay chế độ chay; chỉ đề xuất điều chỉnh các điều kiện không bắt buộc (thời gian nấu, độ khó, nguyên liệu có sẵn...); matched_dish_ids để rỗng; outcome="no_match".');
+  }
+  return rules.length ? `\nTÌNH HUỐNG ĐẶC BIỆT:\n${rules.join('\n')}\n` : '';
+}
+
 /**
  * Tạo câu lệnh gửi Gemini có kèm hồ sơ khẩu vị của người dùng
  */
@@ -572,6 +607,7 @@ function buildPersonalizedPrompt({
   chatHistory,
   fridge,
   dishesContext,
+  retrievalStatus = 'ok',
   systemPrompt,
 }) {
   const dishesSummary = dishesContext.map((d) => ({
@@ -629,7 +665,7 @@ QUY TẮC:
 1. Không liên quan ẩm thực -> outcome="out_of_scope", từ chối ngắn gọn.
 2. Không tìm thấy món phù hợp -> outcome="no_match", đề xuất nới lỏng điều kiện.
 3. Câu hỏi ẩm thực hợp lệ -> outcome="answered", trả lời chi tiết và điền id món vào matched_dish_ids.
-
+${situationRules({ userProfile, retrievalStatus })}
 QUY TẮC HIỂN THỊ TÊN MÓN ĂN:
 - TUYỆT ĐỐI KHÔNG viết mã ID vào câu trả lời, KHÔNG viết liên kết dạng [Tên món](id:...) hay (id:...).
 - Chỉ viết tên món bằng chữ in đậm thông thường: ví dụ **Thịt Heo Kho Trứng Cút**, **Canh Ngao Nấu Chua**.

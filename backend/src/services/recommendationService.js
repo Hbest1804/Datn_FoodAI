@@ -13,6 +13,23 @@ import { normalizeText } from '../utils/textUtils.js';
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const recommendationCache = new Map();
+// Các danh sách đã trả gần đây (theo khóa người dùng + danh mục); khi "Làm mới" (UC luồng 6a) món nằm trong
+// SERVED_HISTORY danh sách gần nhất bị nhân REFRESH_PENALTY khi xếp hạng, để không quay lại đúng danh sách cũ.
+// Hệ số chỉ dùng để xếp thứ tự, điểm trả về và lưu cache vẫn là điểm thật.
+const REFRESH_PENALTY = 0.7;
+const SERVED_HISTORY = 3;
+const MAX_LAST_SERVED = 5000;
+const lastServed = new Map();
+
+function rememberServed(key, items) {
+  const ids = new Set(items.map((it) => it.dish.id));
+  const history = lastServed.get(key) || [];
+  const last = history[history.length - 1];
+  // Tải lại từ cache trả đúng danh sách cũ → không ghi thêm
+  if (last && last.size === ids.size && [...ids].every((id) => last.has(id))) return;
+  if (lastServed.size >= MAX_LAST_SERVED && !lastServed.has(key)) lastServed.delete(lastServed.keys().next().value);
+  lastServed.set(key, [...history, ids].slice(-SERVED_HISTORY));
+}
 
 /** Xóa bộ nhớ đệm gợi ý khi hồ sơ, yêu thích hoặc đánh giá thay đổi (quy tắc 3). */
 export function invalidateRecommendationCache(userId) {
@@ -94,15 +111,18 @@ export async function getPersonalizedRecommendations({ userId, limit = 12, categ
   if (!refresh) {
     const cached = recommendationCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
-      return { data: cached.items.slice(0, safeLimit), meta: cached.meta };
+      const data = cached.items.slice(0, safeLimit);
+      rememberServed(cacheKey, data);
+      return { data, meta: cached.meta };
     }
   }
+  const previous = refresh ? new Set((lastServed.get(cacheKey) || []).flatMap((s) => [...s])) : null;
 
   const settings = await getSettings();
   const weights = { sim: 0.45, rating: 0.2, pop: 0.15, budget: 0.1, cal: 0.1, ...(settings.recommendation_weights || {}) };
 
   // 1. Dữ liệu người dùng
-  let profile = { completeness: 0, allergen_group_ids: [], disliked_ingredient_ids: [], diet_type_ids: [] };
+  let profile = { completeness: 0, disliked_ingredient_ids: [], diet_type_ids: [] };
   let tasteVector = null;
   let favSet = new Set();
   let lowRatedSet = new Set();
@@ -131,7 +151,7 @@ export async function getPersonalizedRecommendations({ userId, limit = 12, categ
   // 2. Món ứng viên đã loại nguyên liệu dị ứng / không thích và món không hợp chế độ ăn bắt buộc (chay, thuần chay)
   const [allDishes, forbidden, diet, embeddings] = await Promise.all([
     getPublishedDishes(),
-    // Hồ sơ không khai nhóm dị ứng riêng (user_allergies chỉ giữ để tương thích); nguyên liệu gây dị ứng
+    // Hồ sơ không khai nhóm dị ứng (FR-20); nguyên liệu gây dị ứng
     // nằm trong danh sách nguyên liệu kiêng, cùng cách lọc với chatbot và danh sách món
     getForbiddenIngredientIds({ dislikedIngredientIds: profile.disliked_ingredient_ids }),
     getDietConstraints({ dietTypeIds: profile.diet_type_ids || [] }),
@@ -163,6 +183,7 @@ export async function getPersonalizedRecommendations({ userId, limit = 12, categ
       score += weights[k] * v;
     }
     score = weightSum > 0 ? score / weightSum : 0;
+    const rank = previous?.has(d.id) ? score * REFRESH_PENALTY : score;
 
     const contributions = Object.entries(parts)
       .filter(([, v]) => v !== null && v > 0)
@@ -179,9 +200,11 @@ export async function getPersonalizedRecommendations({ userId, limit = 12, categ
       dish: toDishSummary(d, favSet.has(d.id)),
       score: Math.round(Math.min(1, Math.max(0, score)) * 10000) / 10000,
       reasons,
+      rank,
     };
   });
-  items.sort((a, b) => b.score - a.score);
+  items.sort((a, b) => b.rank - a.rank);
+  items.forEach((it) => { delete it.rank; });
 
   const meta = {
     strategy,
@@ -190,5 +213,7 @@ export async function getPersonalizedRecommendations({ userId, limit = 12, categ
     generated_at: new Date().toISOString(),
   };
   recommendationCache.set(cacheKey, { items, meta, expiresAt: Date.now() + CACHE_TTL_MS });
-  return { data: items.slice(0, safeLimit), meta };
+  const data = items.slice(0, safeLimit);
+  rememberServed(cacheKey, data);
+  return { data, meta };
 }
