@@ -60,13 +60,19 @@ async function findMissingIds(table, ids) {
   return ids.filter((id) => !found.has(id));
 }
 
+/** Ghi dòng mới trước rồi mới xóa dòng thừa: lỗi giữa chừng thì danh sách cũ (ràng buộc an toàn) vẫn còn. */
 async function replaceLinks(table, column, userId, ids) {
-  const { error: delErr } = await supabaseAdmin.from(table).delete().eq('user_id', userId);
-  if (delErr) throw delErr;
   if (ids.length > 0) {
-    const { error } = await supabaseAdmin.from(table).insert(ids.map((id) => ({ user_id: userId, [column]: id })));
+    const { error } = await supabaseAdmin.from(table).upsert(
+      ids.map((id) => ({ user_id: userId, [column]: id })),
+      { onConflict: `user_id,${column}`, ignoreDuplicates: true },
+    );
     if (error) throw error;
   }
+  let prune = supabaseAdmin.from(table).delete().eq('user_id', userId);
+  if (ids.length > 0) prune = prune.not(column, 'in', `(${ids.join(',')})`);
+  const { error: delErr } = await prune;
+  if (delErr) throw delErr;
 }
 
 /**

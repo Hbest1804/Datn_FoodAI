@@ -41,10 +41,10 @@ function appendGuestHistory(guestId, windowMs, ...messages) {
   if (record.messages.length > MAX_GUEST_HISTORY) record.messages.splice(0, record.messages.length - MAX_GUEST_HISTORY);
 }
 
+// req.ip đã tính theo "trust proxy" (địa chỉ do proxy tin cậy ghi nhận); không đọc thẳng X-Forwarded-For
+// vì phần đầu của header này do máy khách tự gửi, giả được để lách hạn mức theo IP
 function getClientIp(req) {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string' && forwarded) return forwarded.split(',')[0].trim();
-  return req.socket?.remoteAddress || req.ip || '127.0.0.1';
+  return req.ip || req.socket?.remoteAddress || '127.0.0.1';
 }
 
 setInterval(() => {
@@ -78,10 +78,11 @@ function readQuota(guestId, ip, settings) {
     remaining: Math.max(0, limit - used),
     resets_at: new Date(guest.resetsAt).toISOString(),
     _consume: () => { guest.used += 1; byIp.used += 1; },
+    _refund: () => { guest.used = Math.max(0, guest.used - 1); byIp.used = Math.max(0, byIp.used - 1); },
   };
 }
 
-function publicQuota({ _consume, ...quota }) {
+function publicQuota({ _consume, _refund, ...quota }) {
   return quota;
 }
 
@@ -149,7 +150,34 @@ export async function sendGuestMessage(req, res) {
   const question = content.trim();
   const pantry = await parsePantry(req.body);
 
+  // Giữ trước một lượt ngay khi câu hỏi hợp lệ: các yêu cầu gửi song song không cùng lọt qua bước kiểm tra hạn mức.
+  // Không trả lời được (AI lỗi) thì trả lại lượt.
+  quota._consume();
+
   // 3. Chặn câu hỏi ngoài chủ đề rồi truy hồi món liên quan theo véc-tơ
+  let reply;
+  try {
+    reply = await answerGuestQuestion({ question, pantry, settings, guestId });
+  } catch (err) {
+    quota._refund();
+    throw err;
+  }
+
+  // 4. Lưu lịch sử phiên khách trong bộ nhớ (không ghi CSDL) và cập nhật số liệu tổng hợp
+  const windowMs = Math.max(1, Number(settings.guest_window_hours) || 24) * HOUR_MS;
+  appendGuestHistory(guestId, windowMs, { role: 'user', content: question }, { role: 'assistant', content: reply.content });
+  const today = new Date().toISOString().slice(0, 10);
+  guestDailyCounts.set(today, (guestDailyCounts.get(today) || 0) + 1);
+
+  return sendOk(res, {
+    guest_id: guestId,
+    reply,
+    quota: publicQuota(readQuota(guestId, getClientIp(req), settings)),
+  });
+}
+
+/** Sinh câu trả lời cho khách: chặn ngoài chủ đề, truy hồi món an toàn rồi gọi AI. */
+async function answerGuestQuestion({ question, pantry, settings, guestId }) {
   const topic = await checkTopic(question, settings);
   let reply;
   if (topic.outOfScope) {
@@ -180,17 +208,5 @@ export async function sendGuestMessage(req, res) {
     const outcome = aiResult.type === 'out_of_scope' ? 'out_of_scope' : 'answered';
     reply = { type: aiResult.type, outcome, content: aiResult.content, dishes: aiResult.dishes.map(toDishCard) };
   }
-
-  // 4. Trừ một lượt hỏi, lưu lịch sử phiên khách trong bộ nhớ (không ghi CSDL) và cập nhật số liệu tổng hợp
-  quota._consume();
-  const windowMs = Math.max(1, Number(settings.guest_window_hours) || 24) * HOUR_MS;
-  appendGuestHistory(guestId, windowMs, { role: 'user', content: question }, { role: 'assistant', content: reply.content });
-  const today = new Date().toISOString().slice(0, 10);
-  guestDailyCounts.set(today, (guestDailyCounts.get(today) || 0) + 1);
-
-  return sendOk(res, {
-    guest_id: guestId,
-    reply,
-    quota: publicQuota(readQuota(guestId, getClientIp(req), settings)),
-  });
+  return reply;
 }

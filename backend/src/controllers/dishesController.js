@@ -218,10 +218,11 @@ export async function getPopularDishes(req, res) {
   if (!Number.isInteger(limit) || limit < 1) throw new ApiError(400, 'INVALID_QUERY', 'Tham số limit không hợp lệ.');
 
   const categoryKey = typeof req.query.category === 'string' && req.query.category.trim() ? normalizeText(req.query.category) : '';
-  const [allDishes, views, avoidedIds] = await Promise.all([
+  const [allDishes, views, avoidedIds, dietFilter] = await Promise.all([
     getPublishedDishes(),
     cached('catalog:views', 60 * 1000, async () => (await supabaseAdmin.from('view_history').select('dish_id, view_count')).data || [], { stale: true }),
     getUserAvoidedIngredientIds(req.user?.id),
+    getUserDietFilter(req.user?.id),
   ]);
   const dishes = categoryKey ? allDishes.filter((d) => d.category_normalized === categoryKey) : allDishes;
 
@@ -230,7 +231,8 @@ export async function getPopularDishes(req, res) {
   const score = (d) => Math.log1p(viewCount.get(d.id) || 0) + 2 * Math.log1p(d.favorite_count || 0)
     + Number(d.avg_rating || 0) * Math.log1p(d.rating_count || 0);
 
-  const top = dishes.filter((d) => !containsAny(d, avoidedIds)).sort((a, b) => score(b) - score(a)).slice(0, Math.min(limit, 50));
+  // Chế độ ăn bắt buộc (chay, thuần chay) là ràng buộc cứng như ở GET /dishes và gợi ý
+  const top = dishes.filter((d) => !containsAny(d, avoidedIds) && (!dietFilter || dietFilter.allows(d))).sort((a, b) => score(b) - score(a)).slice(0, Math.min(limit, 50));
   const favSet = await getUserFavoriteSet(req.user?.id, top.map((d) => d.id));
   return sendOk(res, top.map((d) => toDishSummary(d, favSet.has(d.id))));
 }
@@ -256,15 +258,16 @@ export async function getDishDetail(req, res) {
   if (!dish) return sendError(res, 404, 'DISH_NOT_FOUND', 'Món không tồn tại hoặc đã bị ẩn.');
 
   const userId = req.user?.id;
-  const [ratingsRes, relatedRes, favRes, avoidedIds, ingredientIndex] = await Promise.all([
+  const [ratingsRes, relatedRes, favRes, avoidedIds, ingredientIndex, dietFilter] = await Promise.all([
     supabaseAdmin.from('ratings').select('id, user_id, stars, comment').eq('dish_id', dish.id),
-    supabaseAdmin.from('dishes').select('id, name, slug, image_url, dish_ingredients(ingredient_id)')
+    supabaseAdmin.from('dishes').select('id, name, slug, image_url, dish_ingredients(ingredient_id), dish_tags(tag_id)')
       .eq('is_published', true).eq('category', dish.category).neq('id', dish.id).limit(12),
     userId
       ? supabaseAdmin.from('favorites').select('dish_id').eq('user_id', userId).eq('dish_id', dish.id).maybeSingle()
       : Promise.resolve({ data: null }),
     getUserAvoidedIngredientIds(userId),
     getIngredientIndex(),
+    getUserDietFilter(userId),
   ]);
   if (ratingsRes.error) throw ratingsRes.error;
 
@@ -277,9 +280,9 @@ export async function getDishDetail(req, res) {
 
   // Món vẫn xem được qua liên kết trực tiếp nhưng đánh dấu nguyên liệu người dùng kiêng; món liên quan thì loại hẳn
   const relatedDishes = (relatedRes.data || [])
-    .filter((d) => !containsAny(d, avoidedIds))
+    .filter((d) => !containsAny(d, avoidedIds) && (!dietFilter || dietFilter.allows(d)))
     .slice(0, 6)
-    .map(({ dish_ingredients, ...d }) => d);
+    .map(({ dish_ingredients, dish_tags, ...d }) => d);
 
   const distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
   (ratingsRes.data || []).forEach((r) => { distribution[r.stars] += 1; });

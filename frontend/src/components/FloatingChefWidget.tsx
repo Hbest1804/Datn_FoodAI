@@ -16,6 +16,7 @@ import { publishGuestQuota } from '../utils/guestQuota';
 import { ChefLogo3D } from './ChefLogo3D';
 import { apiService } from '../api';
 import { toast, showConfirm } from './NotificationModal';
+import { MarkdownText } from './MarkdownText';
 
 interface FloatingChefWidgetProps {
   currentUser: UserProfile;
@@ -284,7 +285,9 @@ export const FloatingChefWidget: React.FC<FloatingChefWidgetProps> = ({
                         : 'bg-white text-slate-800 rounded-tl-xs border border-slate-200/80 shadow-2xs'
                     }`}
                   >
-                    <div className="whitespace-pre-line">{msg.text}</div>
+                    {msg.sender === 'user'
+                      ? <div className="whitespace-pre-line">{msg.text}</div>
+                      : <MarkdownText text={msg.text} />}
                   </div>
                   {msg.dishes && msg.dishes.length > 0 && (
                     <div className="space-y-1.5 w-full">

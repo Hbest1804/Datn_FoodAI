@@ -30,6 +30,9 @@ export const env = {
   port: parseInt(process.env.PORT ?? '5000', 10),
   nodeEnv: process.env.NODE_ENV ?? 'development',
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:3000',
+  // Số lớp proxy đứng trước backend (để req.ip là IP thật của người dùng): 1 = chỉ Nginx trong container;
+  // 2 = thêm Nginx trên máy chủ chuyển 80 → 443. Đặt thiếu thì mọi người dùng bị tính chung một IP.
+  trustProxy: Math.max(0, parseInt(process.env.TRUST_PROXY ?? '1', 10) || 0),
 
   supabase: {
     url: process.env.SUPABASE_URL,

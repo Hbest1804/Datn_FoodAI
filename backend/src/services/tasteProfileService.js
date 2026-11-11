@@ -30,6 +30,10 @@ export async function fetchTasteProfile(userId) {
     supabaseAdmin.from('user_disliked_ingredients').select('ingredients(id, name)').eq('user_id', userId),
   ]);
   if (profileRes.error) throw profileRes.error;
+  // Chế độ ăn và nguyên liệu kiêng là ràng buộc an toàn: đọc lỗi thì dừng, không coi như người dùng không kiêng gì
+  // (gợi ý sẽ bỏ lọc, PATCH hồ sơ sẽ ghi đè danh sách rỗng)
+  if (dietsRes.error) throw dietsRes.error;
+  if (dislikesRes.error) throw dislikesRes.error;
 
   const profile = profileRes.data;
   const prefs = profile?.taste_prefs || {};

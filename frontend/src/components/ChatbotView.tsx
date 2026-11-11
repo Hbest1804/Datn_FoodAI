@@ -24,6 +24,7 @@ import { apiService } from '../api';
 import { normalizeDish, formatDifficulty } from '../utils/dishUtils';
 import { publishGuestQuota } from '../utils/guestQuota';
 import { toast, showConfirm } from './NotificationModal';
+import { MarkdownText } from './MarkdownText';
 
 interface ChatbotViewProps {
   currentUser: UserProfile;
@@ -34,6 +35,8 @@ interface ChatbotViewProps {
   onOpenRecipe: (recipe: Recipe) => void;
   onOpenRegisterModal: () => void;
   onGoToProfile: () => void;
+  /** Gọi khi câu hỏi chuyển từ trang khác đã được gửi, để trang cha xóa đi và không gửi lại lần sau */
+  onInitialPromptConsumed?: () => void;
 }
 
 function getAppetizingImageForDishName(name: string): string {
@@ -80,8 +83,11 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
   onOpenRecipe,
   onOpenRegisterModal,
   onGoToProfile,
+  onInitialPromptConsumed,
 }) => {
   const isGuest = currentUser.role === 'guest';
+  // Danh sách hội thoại và tin nhắn của phiên đang mở đã tải xong (người dùng đã đăng nhập)
+  const [sessionsReady, setSessionsReady] = useState(false);
 
   // Guest Quota State
   const [guestQuota, setGuestQuota] = useState<GuestQuota | null>(null);
@@ -102,52 +108,20 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
   const [showAttachFridge, setShowAttachFridge] = useState(false);
   const [newFridgeItem, setNewFridgeItem] = useState('');
 
-  // Tự động nhận diện và ghép ảnh món ăn trực quan từ câu trả lời của Chatbot
+  // Thẻ món chỉ lấy từ referenced_dishes do backend trả về: danh sách này đã qua bộ lọc dị ứng,
+  // nguyên liệu kiêng và chế độ ăn. Không tự ghép món theo tên trong câu trả lời vì sẽ bỏ qua bộ lọc đó.
   const getDishesForMessage = useCallback((msg: ChatMessage): Recipe[] => {
     const list: Recipe[] = [];
     const seenNames = new Set<string>();
-
-    // 1. Ưu tiên lấy từ referenced_dishes do backend trả về
-    if (Array.isArray(msg.referenced_dishes) && msg.referenced_dishes.length > 0) {
-      msg.referenced_dishes.forEach((d: any) => {
-        const norm = normalizeDish(d);
-        if (norm.title && !seenNames.has(norm.title.toLowerCase())) {
-          seenNames.add(norm.title.toLowerCase());
-          list.push(norm);
-        }
-      });
-    }
-
-    // 2. Tự động quét các món ăn dạng **Tên Món**: trong nội dung tư vấn của AI
-    const text = msg.content || msg.text || '';
-    if (msg.role === 'assistant' || msg.sender === 'assistant') {
-      const dishRegex = /(?:\*\s*)?\*\*([^*\n:]{3,60})\*\*(?:\s*:|\s*–|\s*-)?/g;
-      let match;
-      while ((match = dishRegex.exec(text)) !== null) {
-        const candidate = match[1].trim();
-        const lower = candidate.toLowerCase();
-        if (/^(lưu ý|mẹo|chú ý|cách làm|nguyên liệu|bước \d+|hướng dẫn|thành phần|giá trị|lời khuyên|chúc bạn|ưu điểm|cách sơ chế|bảo quản|phân tích|tổng kết)/i.test(lower)) {
-          continue;
-        }
-
-        if (!seenNames.has(lower)) {
-          seenNames.add(lower);
-
-          // Tìm món tương ứng trong hệ thống recipes
-          const systemMatch = (recipes || []).find(r => 
-            r.title?.toLowerCase().includes(lower) || 
-            lower.includes(r.title?.toLowerCase() || '')
-          );
-
-          if (systemMatch) {
-            list.push(systemMatch);
-          }
-        }
+    (Array.isArray(msg.referenced_dishes) ? msg.referenced_dishes : []).forEach((d: any) => {
+      const norm = normalizeDish(d);
+      if (norm.title && !seenNames.has(norm.title.toLowerCase())) {
+        seenNames.add(norm.title.toLowerCase());
+        list.push(norm);
       }
-    }
-
+    });
     return list.slice(0, 6);
-  }, [recipes]);
+  }, []);
 
   // Câu trả lời có dạng công thức (nguyên liệu / các bước) nhưng không kèm thẻ món nào trong CSDL
   // => công thức do AI tự đề xuất, phải gắn nhãn "Gợi ý tham khảo"
@@ -195,6 +169,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
 
   const loadUserSessions = useCallback(async () => {
     setIsSessionsLoading(true);
+    setSessionsReady(false);
     try {
       const res = await apiService.chat.getSessions(1, 20);
       setSessions(res.data || []);
@@ -202,7 +177,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
         const targetId = (initialSessionId && res.data.some(s => s.id === initialSessionId))
           ? initialSessionId
           : res.data[0].id;
-        loadSessionMessages(targetId);
+        await loadSessionMessages(targetId);
       } else {
         // Create initial session if none exists
         const newSess = await apiService.chat.createSession();
@@ -228,8 +203,10 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
       console.warn('Error loading sessions:', e);
     } finally {
       setIsSessionsLoading(false);
+      setSessionsReady(true);
     }
-  }, [currentUser, initialSessionId]);
+    // Chỉ tải lại khi đổi tài khoản; cập nhật hồ sơ (tên, khẩu vị) không được làm mất hội thoại đang mở
+  }, [currentUser.id, initialSessionId]);
 
   const loadSessionMessages = async (sessionId: string) => {
     setCurrentSessionId(sessionId);
@@ -280,10 +257,16 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
     if (initialFridge && initialFridge.length > 0) {
       setAttachedFridge(initialFridge);
     }
-    if (initialPrompt) {
-      sendMessage(initialPrompt);
-    }
-  }, [initialPrompt, initialFridge]);
+  }, [initialFridge]);
+
+  // Gửi đúng một lần, sau khi phiên hội thoại đã tải xong (tránh bị danh sách tin nhắn cũ ghi đè),
+  // rồi báo trang cha xóa câu hỏi để lần sau quay lại trang chat không gửi lại
+  useEffect(() => {
+    if (!initialPrompt) return;
+    if (!isGuest && !sessionsReady) return;
+    onInitialPromptConsumed?.();
+    sendMessage(initialPrompt, initialFridge);
+  }, [initialPrompt, isGuest, sessionsReady]);
 
   // 2. Create New Session
   const handleCreateNewSession = async () => {
@@ -384,7 +367,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
   };
 
   // 4. Send Message Handler
-  const sendMessage = async (textToSend?: string) => {
+  const sendMessage = async (textToSend?: string, fridgeOverride?: string[]) => {
     const text = textToSend || inputMessage;
     if (!text.trim() || isLoading) return;
 
@@ -406,8 +389,10 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
     setInputMessage('');
     setIsLoading(true);
 
-    const fridgePayload = attachedFridge.length > 0 ? {
-      custom_ingredients: attachedFridge,
+    // Câu hỏi chuyển từ trang khác kèm sẵn nguyên liệu (state attachedFridge lúc đó chưa kịp cập nhật)
+    const fridgeItems = fridgeOverride && fridgeOverride.length > 0 ? fridgeOverride : attachedFridge;
+    const fridgePayload = fridgeItems.length > 0 ? {
+      custom_ingredients: fridgeItems,
     } : undefined;
 
     try {
@@ -743,7 +728,9 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
                         : 'bg-slate-50 text-slate-800 rounded-tl-xs border border-slate-200/60'
                     }`}
                   >
-                    <div className="whitespace-pre-line">{msg.content || msg.text}</div>
+                    {(msg.sender === 'user' || msg.role === 'user')
+                      ? <div className="whitespace-pre-line">{msg.content || msg.text}</div>
+                      : <MarkdownText text={msg.content || msg.text || ''} />}
                   </div>
 
                   {/* Referenced Dishes Cards with rich appetizing food photos */}

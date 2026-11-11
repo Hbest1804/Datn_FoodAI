@@ -95,7 +95,7 @@ export const chatApi = {
   },
 
   async getSessionDetail(sessionId: string): Promise<{ session: ChatSession; messages: ChatMessage[] }> {
-    const res = await apiClient<{
+    type DetailResponse = {
       success: boolean;
       data: {
         id?: string;
@@ -104,9 +104,20 @@ export const chatApi = {
         updated_at?: string;
         messages: ChatMessage[];
       };
-    }>(`/chat/sessions/${sessionId}`);
+      meta?: { total_pages?: number };
+    };
+    // API trả tin nhắn từ cũ đến mới theo trang: tải hết các trang để hội thoại dài không mất tin mới nhất
+    const fetchPage = (page: number) =>
+      apiClient<DetailResponse>(`/chat/sessions/${sessionId}?page=${page}&limit=100`);
 
-    const rawData = res.data;
+    const res = await fetchPage(1);
+    const messages = [...(res.data.messages || [])];
+    const totalPages = res.meta?.total_pages || 1;
+    for (let page = 2; page <= totalPages; page++) {
+      messages.push(...((await fetchPage(page)).data.messages || []));
+    }
+
+    const rawData = { ...res.data, messages };
     return {
       session: {
         id: rawData.id || sessionId,
