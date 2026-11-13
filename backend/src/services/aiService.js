@@ -184,6 +184,10 @@ Mâm cơm này cung cấp đầy đủ đạm, chất xơ, vitamin và khoáng c
   },
 };
 
+// Câu hỏi và khóa của bảng soạn sẵn được chuẩn hóa cùng một cách (chữ thường, bỏ dấu câu) để khóa có "?" vẫn khớp
+const normQuickKey = (s) => (s || '').toLowerCase().trim().replace(/[?!.,]/g, '').trim();
+const QUICK_REPLIES = new Map(Object.entries(PRESEEDED_QUICK_REPLIES).map(([k, v]) => [normQuickKey(k), v]));
+
 // ── 3. Danh sách mô hình: mô hình cấu hình và các mô hình dự phòng ──────────
 function getCandidateModels() {
   // Mô hình theo tài liệu API (mục 4.4.1, 4.6.4): gemini-3.5-flash-lite; các mô hình sau chỉ dùng khi mô hình chính lỗi
@@ -264,7 +268,11 @@ async function callGeminiWithFailover({ prompt, maxOutputTokens = 900, temperatu
         lastError = new AIServiceError('AI_TIMEOUT', 'Dịch vụ AI quá thời gian chờ.', 504);
         continue;
       }
-      lastError = err;
+      // Lỗi mạng (DNS, rớt kết nối…) cũng là lỗi dịch vụ AI để API trả 502 và ghi nhận outcome = error
+      console.warn(`[AI Engine] Model ${model} lỗi kết nối: ${err.message}`);
+      lastError = err.name === 'AIServiceError'
+        ? err
+        : new AIServiceError('AI_SERVICE_ERROR', 'Không kết nối được dịch vụ AI.', 502);
     }
   }
 
@@ -277,12 +285,12 @@ async function callGeminiWithFailover({ prompt, maxOutputTokens = 900, temperatu
  * Nhận nội dung câu hỏi, nguyên liệu có sẵn và các món liên quan đã truy hồi; trả về loại câu trả lời, nội dung và thẻ món.
  */
 export async function generateCulinaryReply({ content, fridge = {}, allergens = [], strictDiets = [], dishesContext = [], chatHistory = [], systemPrompt }) {
-  const normKey = (content || '').toLowerCase().trim().replace(/[?!.,]/g, '').trim();
+  const normKey = normQuickKey(content);
 
   // 1. Câu hỏi gợi ý nhanh có câu trả lời soạn sẵn (nội dung soạn sẵn không lọc theo dị ứng)
   if (!allergens.length && !strictDiets.length && !fridge?.ingredient_names?.length && !fridge?.custom_ingredients?.length) {
-    if (PRESEEDED_QUICK_REPLIES[normKey]) {
-      const pre = PRESEEDED_QUICK_REPLIES[normKey];
+    if (QUICK_REPLIES.get(normKey)) {
+      const pre = QUICK_REPLIES.get(normKey);
       const matched = matchDishesFromContext(normKey, dishesContext);
       return {
         type: pre.type,
@@ -507,8 +515,9 @@ export async function generatePersonalizedReply({
   dishesContext = [],
   retrievalStatus = 'ok',
   systemPrompt,
+  userId = '',
 }) {
-  const normKey = (content || '').toLowerCase().trim().replace(/[?!.,]/g, '').trim();
+  const normKey = normQuickKey(content);
 
   // 1. Câu hỏi gợi ý nhanh có câu trả lời soạn sẵn (chỉ dùng khi hồ sơ không có ràng buộc nào,
   //    vì nội dung soạn sẵn không lọc theo dị ứng, nguyên liệu không thích hay chế độ ăn)
@@ -516,8 +525,8 @@ export async function generatePersonalizedReply({
     || userProfile?.disliked_ingredients?.length > 0
     || userProfile?.diet_types?.length > 0
     || userProfile?.strict_diets?.length > 0;
-  if (!hasConstraints && !fridge?.ingredient_names?.length && PRESEEDED_QUICK_REPLIES[normKey]) {
-    const pre = PRESEEDED_QUICK_REPLIES[normKey];
+  if (!hasConstraints && !fridge?.ingredient_names?.length && !fridge?.custom_ingredients?.length && QUICK_REPLIES.get(normKey)) {
+    const pre = QUICK_REPLIES.get(normKey);
     const matched = matchDishesFromContext(normKey, dishesContext);
     return {
       outcome: 'answered',
@@ -528,8 +537,15 @@ export async function generatePersonalizedReply({
   }
 
   // 2. Câu hỏi đã trả lời gần đây (lấy từ bộ nhớ đệm)
-  const profileKey = `${userProfile.diet_types?.map((d) => d.id).join(',') || ''}_${userProfile.allergen_groups?.map((a) => a.id).join(',') || ''}`;
-  const cacheKey = getCacheKey('user', content, fridge, `${profileKey}|${systemPrompt}|${dishesContext.map((d) => d.id).join(',')}|${chatHistory.length}|${retrievalStatus}|${isProfileEmpty(userProfile)}`);
+  //    Khóa gắn với từng người dùng, toàn bộ hồ sơ, món yêu thích và nội dung lịch sử:
+  //    câu trả lời cá nhân hóa không được dùng lại cho người khác hay cho ngữ cảnh hội thoại khác.
+  const personalKey = JSON.stringify([
+    userId,
+    userProfile,
+    favoriteDishes.map((f) => f.id),
+    chatHistory.map((m) => [m.role, m.content]),
+  ]);
+  const cacheKey = getCacheKey('user', content, fridge, `${personalKey}|${systemPrompt}|${dishesContext.map((d) => d.id).join(',')}|${retrievalStatus}`);
   const cached = getFromCache(cacheKey);
   if (cached) {
     return cached;

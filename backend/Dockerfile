@@ -4,6 +4,9 @@ FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 
+# Font có dấu tiếng Việt cho báo cáo PDF (GET /admin/stats/export?format=pdf)
+RUN apk add --no-cache ttf-dejavu
+
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 

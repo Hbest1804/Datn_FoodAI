@@ -229,7 +229,9 @@ async function buildProfileText(userId, profile) {
  *   yêu thích 1.0; đánh giá: (sao − 3) · 0.5 (âm khi chấm 1–2 sao); xem: 0.1 · min(lượt xem, 5).
  */
 export async function recomputeUserVectors(userId, { refreshProfile = true } = {}) {
-  const { data: profile } = await supabaseAdmin.from('user_profiles').select('*').eq('user_id', userId).maybeSingle();
+  // Đọc lỗi thì dừng: nếu tính tiếp trên dữ liệu thiếu, véc-tơ đang lưu sẽ bị ghi đè bằng null hoặc bản sai
+  const { data: profile, error: profileErr } = await supabaseAdmin.from('user_profiles').select('*').eq('user_id', userId).maybeSingle();
+  if (profileErr) throw profileErr;
 
   // Chỉ tạo lại véc-tơ hồ sơ khi hồ sơ thay đổi; tương tác (xem, yêu thích, đánh giá) dùng lại profile_vector đã lưu
   let profileVector = refreshProfile ? null : parseVector(profile?.profile_vector);
@@ -244,6 +246,7 @@ export async function recomputeUserVectors(userId, { refreshProfile = true } = {
     supabaseAdmin.from('view_history').select('dish_id, view_count').eq('user_id', userId),
     getDishEmbeddings(),
   ]);
+  for (const r of [favs, ratings, views]) if (r.error) throw r.error;
 
   const weights = new Map();
   const add = (dishId, w) => weights.set(dishId, (weights.get(dishId) || 0) + w);

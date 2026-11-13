@@ -99,10 +99,11 @@ export async function getChatSessionById(req, res) {
   const dishIds = [...new Set((messages || []).flatMap((m) => m.referenced_dish_ids || []))];
   const dishMap = new Map();
   if (dishIds.length > 0) {
-    const { data: dishes } = await supabaseAdmin
+    const { data: dishes, error: dishErr } = await supabaseAdmin
       .from('dishes')
       .select('id, name, slug, description, image_url, category, cook_time_minutes, difficulty')
       .in('id', dishIds);
+    if (dishErr) throw dishErr;
     (dishes || []).forEach((d) => dishMap.set(d.id, toDishCard(d)));
   }
 
@@ -136,6 +137,9 @@ async function loadUserContext(userId, sessionId, excludeMessageId) {
     supabaseAdmin.from('chat_messages').select('role, content').eq('session_id', sessionId).neq('id', excludeMessageId)
       .order('created_at', { ascending: false }).limit(8),
   ]);
+  // Chế độ ăn và nguyên liệu kiêng là ràng buộc an toàn: đọc lỗi thì dừng, không trả lời như thể người dùng không kiêng gì
+  if (dietsRes.error) throw dietsRes.error;
+  if (dislikesRes.error) throw dislikesRes.error;
 
   const profile = profileRes.data || {};
   // Hồ sơ không còn khai dị ứng: chỉ lọc theo nguyên liệu không thích
@@ -243,6 +247,7 @@ export async function sendChatMessage(req, res) {
         dishesContext,
         retrievalStatus,
         systemPrompt: settings.system_prompt,
+        userId,
       });
       if (result.outcome === 'answered' && dishesContext.length === 0) result.outcome = 'no_match';
     }

@@ -23,7 +23,7 @@ import adminRoutes from './routes/admin.js';
 
 const app = express();
 
-app.set('trust proxy', 1);
+app.set('trust proxy', env.trustProxy);
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cors({
   origin: env.corsOrigin.split(',').map((o) => o.trim()),

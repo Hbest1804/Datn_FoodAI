@@ -304,6 +304,9 @@ function findPdfFont() {
   const candidates = [
     'C:/Windows/Fonts/arial.ttf',
     '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+    // Alpine (image Docker của backend, gói ttf-dejavu)
+    '/usr/share/fonts/dejavu/DejaVuSans.ttf',
+    '/usr/share/fonts/ttf-dejavu/DejaVuSans.ttf',
     '/Library/Fonts/Arial Unicode.ttf',
   ].filter(Boolean);
   return candidates.find((p) => fs.existsSync(p)) || null;

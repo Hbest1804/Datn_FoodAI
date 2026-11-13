@@ -176,10 +176,36 @@ export default function App() {
             // Profile may be empty initially, which is fine
           }
         }
-      } catch (err) {
-        console.warn('Session expired or invalid:', err);
-        localStorage.removeItem('culina_token');
-        localStorage.removeItem('culina_user');
+      } catch (err: any) {
+        // Chỉ đăng xuất khi máy chủ khẳng định phiên không còn hợp lệ. Mất mạng, 429 hay 5xx là lỗi tạm thời:
+        // giữ token và hiển thị theo thông tin tài khoản đã lưu, lượt gọi sau sẽ xác thực lại.
+        if (err?.status === 401 || err?.status === 403) {
+          console.warn('Session expired or invalid:', err);
+          localStorage.removeItem('culina_token');
+          localStorage.removeItem('culina_refresh_token');
+          localStorage.removeItem('culina_user');
+        } else {
+          console.warn('Không kiểm tra được phiên đăng nhập, giữ nguyên phiên:', err);
+          try {
+            const u = JSON.parse(localStorage.getItem('culina_user') || 'null');
+            if (isMounted && u?.id) {
+              const isAdmin = u.role === 'admin';
+              setCurrentUser(prev => ({
+                ...prev,
+                id: u.id,
+                name: u.display_name || u.name || (u.email ? u.email.split('@')[0] : 'Thành viên'),
+                email: u.email || '',
+                avatar: u.avatar_url || prev.avatar,
+                role: isAdmin ? 'admin' : 'user',
+                roleLabel: isAdmin ? 'Quản trị viên' : 'Đầu bếp tại gia',
+                isLoggedIn: true,
+                isPro: true,
+              }));
+            }
+          } catch {
+            // Thông tin đã lưu hỏng: hiển thị như khách, token vẫn được giữ
+          }
+        }
       } finally {
         if (isMounted) setSessionChecked(true);
       }
@@ -432,6 +458,7 @@ export default function App() {
                 initialPrompt={initialChatPrompt}
                 initialFridge={initialChatFridge}
                 initialSessionId={initialChatSessionId}
+                onInitialPromptConsumed={() => setInitialChatPrompt('')}
                 onOpenRecipe={openRecipe}
                 onOpenRegisterModal={openRegisterModal}
                 onGoToProfile={() => setCurrentTab('profile')}

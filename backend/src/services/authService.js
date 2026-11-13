@@ -246,7 +246,9 @@ export async function logoutUser(accessToken) {
 }
 
 export async function refreshSession(refreshToken) {
-  const { data, error } = await supabase.auth.refreshSession({ refresh_token: refreshToken });
+  // Client riêng cho mỗi lần làm mới: client dùng chung gộp các lượt refresh đang chạy đồng thời
+  // nên người gọi sau có thể nhận phiên của người gọi trước
+  const { data, error } = await freshClient().auth.refreshSession({ refresh_token: refreshToken });
   if (error || !data.session) {
     throw new ApiError(401, 'INVALID_REFRESH_TOKEN', 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
   }
