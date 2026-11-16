@@ -189,6 +189,22 @@ export function googleAuthorizeUrl() {
 }
 
 /**
+ * Đăng nhập bằng ID token do nút Google (Google Identity Services) cấp ngay trên domain của web.
+ * Google khi đó hiện "Tiếp tục tới <domain của web>" thay vì domain xxx.supabase.co của luồng chuyển hướng.
+ */
+export async function loginWithGoogleIdToken(idToken) {
+  const { data, error } = await freshClient().auth.signInWithIdToken({ provider: 'google', token: idToken });
+  if (error || !data?.session) {
+    throw new ApiError(401, 'UNAUTHORIZED', 'Đăng nhập Google không thành công. Vui lòng thử lại.');
+  }
+  return completeGoogleLogin({
+    accessToken: data.session.access_token,
+    refreshToken: data.session.refresh_token,
+    expiresIn: data.session.expires_in,
+  });
+}
+
+/**
  * Hoàn tất đăng nhập Google: kiểm tra mã truy cập Supabase vừa cấp, lần đầu thì tạo hồ sơ trong bảng users.
  * Google đã xác minh email nên không cần bước đăng ký riêng; email đã đăng ký bằng mật khẩu được Supabase gộp chung tài khoản.
  */

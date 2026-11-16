@@ -10,6 +10,9 @@ COPY . .
 # Để trống: frontend gọi '/api' cùng origin, nginx sẽ chuyển tiếp sang backend
 ARG VITE_API_URL=
 ENV VITE_API_URL=$VITE_API_URL
+# Client ID Google OAuth (công khai) cho nút đăng nhập Google; để trống thì dùng luồng chuyển hướng qua Supabase
+ARG VITE_GOOGLE_CLIENT_ID=
+ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
 RUN npm run build
 
 FROM nginx:1.27-alpine
