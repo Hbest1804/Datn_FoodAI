@@ -7,6 +7,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 const DEFAULT_SETTINGS = {
   guest_message_limit: 10,
   guest_window_hours: 24,
+  user_daily_message_limit: 30,
   system_prompt: 'Bạn là "Trợ lý ẩm thực" của website gợi ý món ăn Việt Nam.',
   max_context_dishes: 8,
   recommendation_weights: { sim: 0.45, rating: 0.2, pop: 0.15, budget: 0.1, cal: 0.1 },

@@ -29,6 +29,32 @@ function sessionNotFound(res) {
   return sendError(res, 404, 'CHAT_SESSION_NOT_FOUND', 'Hội thoại không tồn tại hoặc không thuộc người dùng.');
 }
 
+// Ngày tính theo giờ Việt Nam (UTC+7): hạn mức làm mới lúc 0 giờ
+const VN_OFFSET_MS = 7 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function vnDayBounds(now = Date.now()) {
+  const start = Math.floor((now + VN_OFFSET_MS) / DAY_MS) * DAY_MS - VN_OFFSET_MS;
+  return { start: new Date(start), end: new Date(start + DAY_MS) };
+}
+
+/** Đếm số câu hỏi người dùng đã gửi hôm nay (mọi hội thoại) để giữ hạn mức gọi Gemini */
+async function readUserDailyQuota(userId, settings) {
+  const limit = Math.max(0, Number(settings.user_daily_message_limit) || 0);
+  const { start, end } = vnDayBounds();
+  // 0 = tắt chatbot cho người dùng (không được hỏi lượt nào), giống guest_message_limit = 0
+  if (limit === 0) return { limit: 0, used: 0, remaining: 0, resets_at: end.toISOString(), disabled: true };
+  const { count, error } = await supabaseAdmin
+    .from('chat_messages')
+    .select('id, chat_sessions!inner(user_id)', { count: 'exact', head: true })
+    .eq('chat_sessions.user_id', userId)
+    .eq('role', 'user')
+    .gte('created_at', start.toISOString());
+  if (error) throw error;
+  const used = count || 0;
+  return { limit, used: Math.min(used, limit), remaining: Math.max(0, limit - used), resets_at: end.toISOString() };
+}
+
 async function findOwnSession(sessionId, userId) {
   const { data, error } = await supabaseAdmin
     .from('chat_sessions')
@@ -193,6 +219,22 @@ export async function sendChatMessage(req, res) {
     ]);
   }
   const question = content.trim();
+
+  // Hạn mức câu hỏi mỗi ngày của người dùng (Admin chỉnh ở cấu hình chatbot); chặn trước khi lưu tin nhắn
+  const settings = await getSettings();
+  const quota = await readUserDailyQuota(userId, settings);
+  if (quota.remaining <= 0) {
+    // FR-55: lỗi 429 kèm Retry-After (số giây đến lúc làm mới hạn mức)
+    res.setHeader('Retry-After', String(Math.max(1, Math.ceil((Date.parse(quota.resets_at) - Date.now()) / 1000))));
+    if (quota.disabled) {
+      return sendError(res, 429, 'USER_DAILY_LIMIT_EXCEEDED', 'Chatbot tạm thời không khả dụng. Vui lòng quay lại sau.',
+        { limit: 0, used: 0, remaining: 0, resets_at: quota.resets_at, disabled: true });
+    }
+    return sendError(res, 429, 'USER_DAILY_LIMIT_EXCEEDED',
+      `Bạn đã dùng hết ${quota.limit} lượt hỏi hôm nay. Lượt hỏi sẽ được làm mới lúc 0 giờ.`,
+      { limit: quota.limit, used: quota.used, remaining: 0, resets_at: quota.resets_at });
+  }
+
   const pantry = await parsePantry(req.body);
   const startedAt = Date.now();
 
@@ -211,7 +253,6 @@ export async function sendChatMessage(req, res) {
     await supabaseAdmin.from('chat_sessions').update({ title: sessionTitle }).eq('id', session.id);
   }
 
-  const settings = await getSettings();
   const ctx = await loadUserContext(userId, session.id, userMsg.id);
 
   // 2. Chặn ngoài chủ đề, truy hồi món an toàn rồi gọi AI

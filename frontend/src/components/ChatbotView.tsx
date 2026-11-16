@@ -477,6 +477,15 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
           content: `⚠️ ${err.message || 'Bạn đã dùng hết lượt hỏi ở chế độ khách. Vui lòng đăng ký hoặc đăng nhập để tiếp tục.'}`,
         };
         setMessages(prev => [...prev, errorMsg]);
+      } else if (err.code === 'USER_DAILY_LIMIT_EXCEEDED') {
+        const errorMsg: ChatMessage = {
+          id: `limit-${Date.now()}`,
+          role: 'assistant',
+          sender: 'assistant',
+          timestamp: 'Vừa xong',
+          content: `⚠️ ${err.message || 'Bạn đã dùng hết lượt hỏi hôm nay. Vui lòng quay lại vào ngày mai.'}`,
+        };
+        setMessages(prev => [...prev, errorMsg]);
       } else {
         const errorMsg: ChatMessage = {
           id: `err-${Date.now()}`,
