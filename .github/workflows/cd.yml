@@ -1,0 +1,71 @@
+name: CD
+
+# Tự động deploy lên VPS sau khi workflow CI chạy thành công trên nhánh main.
+# Có thể chạy tay trong tab Actions (workflow_dispatch).
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# Không cho 2 lần deploy chạy chồng lên nhau; lần mới nhất được giữ lại
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    # Chỉ deploy khi CI xanh và là lần push (không deploy từ pull request)
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    environment:
+      name: production
+      url: https://chefai.hbest.net
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          # Commit đã qua CI (chạy tay thì lấy đầu nhánh main)
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/chefai' }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: DEPLOY_SHA,DEPLOY_PATH
+          command_timeout: 20m
+          script: |
+            set -euo pipefail
+            cd "$DEPLOY_PATH"
+
+            echo "==> Lấy mã nguồn $DEPLOY_SHA"
+            git fetch --prune origin main
+            git reset --hard "$DEPLOY_SHA"
+
+            echo "==> Build và khởi động lại container"
+            docker compose up -d --build --remove-orphans
+
+            echo "==> Kiểm tra sức khỏe"
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:8080/api/health > /dev/null; then
+                echo "OK sau ${i} lần thử"
+                break
+              fi
+              if [ "$i" -eq 30 ]; then
+                echo "Health check thất bại"
+                docker compose ps
+                docker compose logs --tail=100 backend
+                exit 1
+              fi
+              sleep 3
+            done
+
+            echo "==> Dọn image cũ"
+            docker image prune -f
+            docker compose ps
