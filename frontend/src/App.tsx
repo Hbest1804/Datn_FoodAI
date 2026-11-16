@@ -564,16 +564,18 @@ export default function App() {
         initialResetToken={resetTokenFromLink}
       />
 
-      {/* Floating AI Chef Assistant Widget (Luôn hiển thị ở góc dưới phải) */}
-      <FloatingChefWidget
-        currentUser={currentUser}
-        onOpenFullChat={(prompt, sessionId) => {
-          if (prompt) setInitialChatPrompt(prompt);
-          if (sessionId) setInitialChatSessionId(sessionId);
-          setCurrentTab('chat');
-        }}
-        onOpenRecipe={openRecipe}
-      />
+      {/* Floating AI Chef Assistant Widget (góc dưới phải; ẩn ở trang chat trên điện thoại vì che ô nhập) */}
+      <div className={currentTab === 'chat' ? 'hidden lg:block' : undefined}>
+        <FloatingChefWidget
+          currentUser={currentUser}
+          onOpenFullChat={(prompt, sessionId) => {
+            if (prompt) setInitialChatPrompt(prompt);
+            if (sessionId) setInitialChatSessionId(sessionId);
+            setCurrentTab('chat');
+          }}
+          onOpenRecipe={openRecipe}
+        />
+      </div>
 
       {/* Global Notification & Dialog Frame */}
       <NotificationContainer />

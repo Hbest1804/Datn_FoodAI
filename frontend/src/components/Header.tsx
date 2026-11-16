@@ -68,28 +68,34 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="sticky top-0 z-50 bg-canvas/85 backdrop-blur-md shadow-[0_1px_8px_rgba(0,0,0,0.04)]">
       {/* Top micro banner for guest users */}
       {currentUser.role === 'guest' && !isAdminMode && (
-        <div className="bg-orange-50 text-orange-900 px-4 py-1.5 text-xs font-medium flex items-center justify-between">
-          <div className="flex items-center gap-2 mx-auto">
-            <span className="bg-orange-500 text-white px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider text-[10px]">
+        <div className="bg-orange-50 text-orange-900 px-4 py-1.5 text-[11px] sm:text-xs font-medium flex items-center justify-between">
+          <div className="flex items-center gap-2 mx-auto min-w-0">
+            <span className="hidden sm:inline bg-orange-500 text-white px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider text-[10px] shrink-0">
               Chế Độ Khách
             </span>
-            <span>
+            <span className="hidden sm:inline">
               {guestQuota
                 ? `Bạn đang dùng thử miễn phí (Còn ${guestQuota.remaining}/${guestQuota.limit} lượt hỏi AI trong 24 giờ).`
                 : 'Bạn đang dùng thử miễn phí với số lượt hỏi AI giới hạn trong 24 giờ.'}
             </span>
+            <span className="sm:hidden truncate">
+              {guestQuota
+                ? `Dùng thử: còn ${guestQuota.remaining}/${guestQuota.limit} lượt hỏi AI hôm nay.`
+                : 'Bạn đang dùng thử miễn phí.'}
+            </span>
             <button
               onClick={onOpenRegisterModal}
-              className="underline font-bold text-orange-600 hover:text-orange-700 transition-colors ml-1 cursor-pointer"
+              className="underline font-bold text-orange-600 hover:text-orange-700 transition-colors ml-1 cursor-pointer shrink-0"
             >
-              Đăng ký ngay để mở khóa trọn đời & lưu thực đơn!
+              <span className="hidden sm:inline">Đăng ký ngay để mở khóa trọn đời & lưu thực đơn!</span>
+              <span className="sm:hidden">Đăng ký</span>
             </button>
           </div>
         </div>
       )}
 
       <div className="w-full px-4 sm:px-6 lg:px-10 2xl:px-16">
-        <div className="flex items-center justify-between h-16 sm:h-[72px] gap-4">
+        <div className="flex items-center justify-between h-16 sm:h-[72px] gap-2 sm:gap-4">
           {/* Logo & Brand */}
           <div className="flex items-center gap-3 shrink-0">
             <button 
@@ -113,7 +119,7 @@ export const Header: React.FC<HeaderProps> = ({
                     </span>
                   )}
                 </div>
-                <p className="text-xs font-semibold text-slate-500 mt-0.5">
+                <p className="hidden sm:block text-xs font-semibold text-slate-500 mt-0.5">
                   {isAdminMode ? 'CỔNG QUẢN TRỊ HỆ THỐNG' : 'Trợ lý ẩm thực & Dinh dưỡng'}
                 </p>
               </div>
@@ -188,16 +194,16 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
             {!currentUser.isLoggedIn ? (
               /* When not logged in: ONLY show Login & Register buttons */
-              <div className="flex items-center gap-2 shrink-0 whitespace-nowrap">
+              <div className="flex items-center gap-1 sm:gap-2 shrink-0 whitespace-nowrap">
                 <button
                   onClick={onOpenLoginModal}
-                  className="px-4 py-2 text-xs sm:text-sm font-semibold text-slate-700 hover:text-orange-600 hover:bg-orange-50 rounded-xl transition-all cursor-pointer whitespace-nowrap"
+                  className="px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold text-slate-700 hover:text-orange-600 hover:bg-orange-50 rounded-xl transition-all cursor-pointer whitespace-nowrap"
                 >
                   Đăng nhập
                 </button>
                 <button
                   onClick={onOpenRegisterModal}
-                  className="px-4 py-2 text-xs sm:text-sm font-semibold text-white bg-orange-500 hover:bg-orange-600 rounded-xl shadow-md shadow-orange-500/20 transition-all cursor-pointer whitespace-nowrap"
+                  className="px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold text-white bg-orange-500 hover:bg-orange-600 rounded-xl shadow-md shadow-orange-500/20 transition-all cursor-pointer whitespace-nowrap"
                 >
                   Đăng ký
                 </button>

@@ -183,7 +183,7 @@ export const FloatingChefWidget: React.FC<FloatingChefWidgetProps> = ({
     <>
       {/* Floating Trigger Pill / Bubble */}
       {!isOpen && (
-        <div className="fixed bottom-6 right-6 z-40 flex items-center gap-3 animate-in fade-in slide-in-from-bottom-3 duration-300">
+        <div className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] right-4 sm:bottom-6 sm:right-6 z-40 flex items-center gap-3 animate-in fade-in slide-in-from-bottom-3 duration-300">
           {/* Quick Prompt Tooltip Pill */}
           <button
             onClick={() => setIsOpen(true)}
@@ -203,7 +203,7 @@ export const FloatingChefWidget: React.FC<FloatingChefWidgetProps> = ({
 
       {/* Floating Interactive AI Widget Popup Window */}
       {isOpen && (
-        <div className="fixed bottom-6 right-4 sm:right-6 z-50 w-[92vw] sm:w-[400px] h-[560px] bg-white rounded-3xl shadow-2xl border border-orange-200 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        <div className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] right-4 sm:bottom-6 sm:right-6 z-50 w-[calc(100vw-2rem)] sm:w-[400px] h-[min(560px,calc(100dvh-6rem))] bg-white rounded-3xl shadow-2xl border border-orange-200 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
           {/* Widget Header */}
           <div className="p-4 bg-gradient-to-r from-orange-500 via-amber-500 to-orange-600 text-white flex items-center justify-between shadow-xs">
             <div className="flex items-center gap-2.5">

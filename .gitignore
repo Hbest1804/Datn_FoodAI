@@ -14,6 +14,7 @@ backend/schema_chatbot_am_thuc.sql
 diagram.png
 htdb*.png
 *.png
+!frontend/public/*.png
 *.jpg
 *.jpeg
 *.dbml
