@@ -205,3 +205,21 @@ input, select, textarea, button {
   border-radius: 1.25rem !important;
 }
 
+
+/* ── Điện thoại ── */
+/* Ẩn thanh cuộn ngang cho các dải tab/chip cuộn được (vd. menu mobile ở Header) */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* iOS Safari tự phóng to trang khi chạm vào ô nhập có cỡ chữ < 16px */
+@media (max-width: 639px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}

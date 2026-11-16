@@ -241,15 +241,15 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/70 backdrop-blur-xs flex justify-center p-2 sm:p-6 animate-in fade-in duration-200">
       <div className="relative w-full max-w-5xl bg-white rounded-3xl shadow-2xl overflow-hidden my-auto border border-slate-200/80">
         {/* Sticky Top Action Bar */}
-        <div className="sticky top-0 z-30 bg-white/95 backdrop-blur-md px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-xs text-slate-500">
+        <div className="sticky top-0 z-30 bg-white/95 backdrop-blur-md px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-100 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-xs text-slate-500 min-w-0 whitespace-nowrap">
             <button onClick={onClose} className="font-bold text-slate-700 hover:text-orange-600 cursor-pointer">
               ← Quay lại
             </button>
+            <span className="hidden sm:inline">/</span>
+            <span className="hidden sm:inline">Khám phá món ăn</span>
             <span>/</span>
-            <span>Khám phá món ăn</span>
-            <span>/</span>
-            <span className="font-semibold text-orange-600">{recipe.category}</span>
+            <span className="font-semibold text-orange-600 truncate">{recipe.category}</span>
             {loadingDetail && (
               <span className="flex items-center gap-1 text-[11px] text-orange-500 font-medium">
                 <Loader2 className="w-3 h-3 animate-spin" /> Đang cập nhật...

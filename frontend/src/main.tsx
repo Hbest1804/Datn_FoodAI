@@ -8,3 +8,10 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </BrowserRouter>
 );
+
+// PWA: chỉ đăng ký service worker ở bản build, tránh cache khi chạy dev
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}

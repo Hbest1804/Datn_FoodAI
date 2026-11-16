@@ -168,7 +168,7 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab, onOpenLoginModal })
             © 2026 ChefAI. Bảo lưu mọi quyền. ·
             <span className="text-[11px] font-bold text-orange-600">Trợ lý ẩm thực & dinh dưỡng thông minh</span>
           </div>
-          <div className="flex items-center gap-6 text-[11px] font-bold text-slate-600">
+          <div className="flex flex-wrap justify-center items-center gap-x-6 gap-y-2 pb-16 sm:pb-0 text-[11px] font-bold text-slate-600">
             <span className="hover:text-slate-600 cursor-pointer">An toàn thực phẩm</span>
             <span className="hover:text-slate-600 cursor-pointer">Bảo vệ dữ liệu</span>
             <span className="hover:text-slate-600 cursor-pointer">Điều khoản dịch vụ</span>

@@ -377,7 +377,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
         {type === 'login' && (
           <>
             {/* Left Column: Brand Hero */}
-            <div className="md:w-5/12 bg-gradient-to-br from-orange-50/80 via-amber-50/50 to-orange-100/50 p-8 flex flex-col justify-between border-r border-orange-100/60">
+            <div className="hidden md:flex md:w-5/12 bg-gradient-to-br from-orange-50/80 via-amber-50/50 to-orange-100/50 p-8 flex-col justify-between border-r border-orange-100/60">
               <div className="space-y-6">
                 <div className="flex items-center gap-3">
                   <ChefLogo3D size="md" />
@@ -436,7 +436,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
             </div>
 
             {/* Right Column: Form */}
-            <div className="md:w-7/12 p-8 sm:p-10 flex flex-col justify-center">
+            <div className="md:w-7/12 p-6 sm:p-10 flex flex-col justify-center">
               <div className="flex items-center justify-between pb-6">
                 <div>
                   <h3 className="text-xl font-black text-slate-900">Đăng nhập tài khoản</h3>
@@ -591,7 +591,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
         {type === 'register' && (
           <>
             {/* Left Column: Benefits */}
-            <div className="md:w-5/12 bg-gradient-to-br from-orange-50/80 via-amber-50/50 to-orange-100/50 p-8 flex flex-col justify-between border-r border-orange-100/60">
+            <div className="hidden md:flex md:w-5/12 bg-gradient-to-br from-orange-50/80 via-amber-50/50 to-orange-100/50 p-8 flex-col justify-between border-r border-orange-100/60">
               <div className="space-y-6">
                 <div className="flex items-center gap-3">
                   <ChefLogo3D size="md" />
@@ -647,7 +647,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
             </div>
 
             {/* Right Column: Register Form with Initial Taste Profile Step 1/2 */}
-            <div className="md:w-7/12 p-8 sm:p-10 max-h-[90vh] overflow-y-auto">
+            <div className="md:w-7/12 p-6 sm:p-10 max-h-[90vh] overflow-y-auto">
               <div className="flex items-center justify-between pb-4">
                 <div>
                   <h3 className="text-xl font-black text-slate-900">Đăng ký tài khoản mới</h3>
@@ -819,7 +819,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
         {type === 'forgot-password' && (
           <>
             {/* Left Column: Security Benefits */}
-            <div className="md:w-5/12 bg-gradient-to-br from-orange-50/80 via-amber-50/50 to-orange-100/50 p-8 flex flex-col justify-between border-r border-orange-100/60">
+            <div className="hidden md:flex md:w-5/12 bg-gradient-to-br from-orange-50/80 via-amber-50/50 to-orange-100/50 p-8 flex-col justify-between border-r border-orange-100/60">
               <div className="space-y-6">
                 <div className="flex items-center gap-3">
                   <ChefLogo3D size="md" />
@@ -867,7 +867,7 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
             </div>
 
             {/* Right Column: 3 Steps Recovery Wizard */}
-            <div className="md:w-7/12 p-8 sm:p-10 flex flex-col justify-center">
+            <div className="md:w-7/12 p-6 sm:p-10 flex flex-col justify-center">
               <div className="flex items-center justify-between pb-6">
                 <button
                   onClick={() => onSwitchType('login')}
