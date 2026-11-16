@@ -49,3 +49,6 @@ web-html/
 
 # Bản thiết kế HTML tĩnh, không đưa lên git
 mobile-html/
+
+# Hướng dẫn triển khai nội bộ (chứa IP máy chủ), không đưa lên GitHub
+DEPLOY.md
