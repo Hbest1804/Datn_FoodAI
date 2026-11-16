@@ -234,6 +234,8 @@ async function callGeminiWithFailover({ prompt, maxOutputTokens = 900, temperatu
           generationConfig: {
             temperature,
             maxOutputTokens,
+            // Bắt mô hình trả JSON thuần (không rào ```json, không chữ thừa trước/sau)
+            responseMimeType: 'application/json',
           },
         }),
       });
@@ -255,7 +257,12 @@ async function callGeminiWithFailover({ prompt, maxOutputTokens = 900, temperatu
       }
 
       const data = await response.json();
-      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      const candidate = data.candidates?.[0];
+      // Ghép mọi phần văn bản (bỏ phần "thought" của mô hình có suy luận)
+      const rawText = (candidate?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || '').join('');
+      if (candidate?.finishReason === 'MAX_TOKENS') {
+        console.warn(`[AI Engine] Model ${model} bị cắt do chạm maxOutputTokens=${maxOutputTokens}`);
+      }
 
       if (rawText) {
         const tokenCount = data.usageMetadata?.totalTokenCount || Math.ceil((prompt.length + rawText.length) / 4);
@@ -443,31 +450,48 @@ function sanitizeDishIdsFromContent(rawContent) {
  * Tách lại từng trường bằng biểu thức chính quy; không tách được thì trả null.
  */
 function salvageJsonReply(text) {
-  const m = text.match(/"content"\s*:\s*"([\s\S]*?)"\s*(?:,\s*"(?:matched_dish_ids|outcome|type)"|\}\s*$)/);
-  if (!m) return null;
+  // Chuỗi content kết thúc trước trường kế tiếp hoặc dấu }; bị cắt giữa chừng (chạm giới hạn token) thì lấy tới hết
+  let raw = text.match(/"content"\s*:\s*"([\s\S]*?)"\s*(?:,\s*"(?:matched_dish_ids|outcome|type)"|\}\s*$)/)?.[1];
+  if (raw === undefined) {
+    raw = text.match(/"content"\s*:\s*"([\s\S]*)$/)?.[1];
+    if (raw === undefined) return null;
+    raw = raw.replace(/\\$/, '') + '…'; // bị cắt giữa chừng: bỏ ký tự thoát dở dang, đánh dấu còn tiếp
+  }
   const idsBlock = text.match(/"matched_dish_ids"\s*:\s*\[([\s\S]*?)\]/)?.[1] || '';
+  const content = raw
+    .replace(/\\n/g, '\n').replace(/\\t/g, ' ').replace(/\\"/g, '"').replace(/\\\\/g, '\\')
+    .trim();
+  if (!content) return null;
   return {
     outcome: text.match(/"outcome"\s*:\s*"(\w+)"/)?.[1],
     type: text.match(/"type"\s*:\s*"(\w+)"/)?.[1],
-    content: m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\'),
+    content,
     matched_dish_ids: [...idsBlock.matchAll(/"([^"]+)"/g)].map((x) => x[1]),
   };
 }
 
-function parseGeminiResponse(rawText, dishesContext) {
-  let cleaned = (rawText || '').trim();
-  if (cleaned.startsWith('```json')) {
-    cleaned = cleaned.replace(/^```json\s*/i, '').replace(/\s*```$/, '');
-  } else if (cleaned.startsWith('```')) {
-    cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '');
+/**
+ * Đọc JSON mô hình trả về: bỏ rào ```json, cắt chữ thừa trước dấu { đầu / sau dấu } cuối,
+ * JSON hỏng hoặc bị cắt thì tách lại từng trường. Trả { parsed, cleaned }; parsed = null nếu không phải JSON.
+ */
+function readJsonReply(rawText) {
+  let cleaned = (rawText || '').trim()
+    .replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '');
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  const candidates = [cleaned];
+  if (start > 0 || (end !== -1 && end < cleaned.length - 1)) candidates.push(cleaned.slice(start, end + 1));
+  for (const c of candidates) {
+    try {
+      const parsed = JSON.parse(c);
+      if (parsed && typeof parsed === 'object') return { parsed, cleaned };
+    } catch { /* thử cách khác */ }
   }
+  return { parsed: salvageJsonReply(start >= 0 ? cleaned.slice(start) : cleaned), cleaned };
+}
 
-  let parsed = null;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
-    parsed = salvageJsonReply(cleaned);
-  }
+function parseGeminiResponse(rawText, dishesContext) {
+  const { parsed, cleaned } = readJsonReply(rawText);
   if (!parsed) {
     const isOut = /(không|chưa) liên quan.*ẩm thực|chỉ hỗ trợ.*nấu ăn/i.test(cleaned);
     const { cleanedContent } = sanitizeDishIdsFromContent(cleaned);
@@ -699,19 +723,7 @@ QUY TẮC HIỂN THỊ TÊN MÓN ĂN:
  * Đọc kết quả Gemini trả về cho câu trả lời cá nhân hóa
  */
 function parsePersonalizedResponse(rawText, dishesContext, tokenCount = 150) {
-  let cleaned = (rawText || '').trim();
-  if (cleaned.startsWith('```json')) {
-    cleaned = cleaned.replace(/^```json\s*/i, '').replace(/\s*```$/, '');
-  } else if (cleaned.startsWith('```')) {
-    cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '');
-  }
-
-  let parsed = null;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
-    parsed = salvageJsonReply(cleaned);
-  }
+  const { parsed, cleaned } = readJsonReply(rawText);
   if (!parsed) {
     const isOut = /(không|chưa) liên quan.*ẩm thực|chỉ hỗ trợ.*nấu ăn/i.test(cleaned);
     const isNoMatch = /(không tìm thấy|không có món nào phù hợp|nới lỏng điều kiện)/i.test(cleaned);
@@ -994,5 +1006,5 @@ export async function generateEmbedding(text, outputDimensionality = 768) {
     : new AIServiceError('AI_SERVICE_ERROR', `Không tạo được embedding: ${lastError?.message || 'lỗi không xác định'}`, 502);
 }
 
-export { AIServiceError };
+export { AIServiceError, readJsonReply };
 

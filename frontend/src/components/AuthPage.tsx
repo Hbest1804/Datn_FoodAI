@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  X,
+  ArrowLeft,
   UtensilsCrossed,
   Check,
   ShieldCheck,
@@ -18,20 +18,41 @@ import {
   Phone
 } from 'lucide-react';
 import { UserProfile } from '../types';
-import { ChefLogo3D } from './ChefLogo3D';
+import { AuthScene3D, SceneDish } from './AuthScene3D';
 import { GoogleSignInButton, GOOGLE_CLIENT_ID } from './GoogleSignInButton';
 import { apiService } from '../api';
 import type { ResetCredentials } from '../api/auth.api';
 
-interface AuthModalsProps {
-  isOpen: boolean;
-  type: 'login' | 'register' | 'forgot-password';
+export type AuthPageType = 'login' | 'register' | 'forgot-password';
+
+interface AuthPageProps {
+  type: AuthPageType;
+  /** Rời trang xác thực (quay lại trang trước đó hoặc trang chủ) */
   onClose: () => void;
-  onSwitchType: (type: 'login' | 'register' | 'forgot-password') => void;
+  onSwitchType: (type: AuthPageType) => void;
+  /** Đăng nhập / đăng ký thành công; App lo việc chuyển trang tiếp theo */
   onLoginSuccess: (user: Partial<UserProfile>) => void;
+  /** Món ăn hiển thị trên vòng 3D ở panel trái */
+  dishes?: SceneDish[];
   /** Token lấy từ liên kết /reset-password?token=... trong email → mở thẳng bước nhập mật khẩu mới */
   initialResetToken?: string;
 }
+
+// Lời giới thiệu trên panel 3D, mỗi trang một câu
+const HERO_COPY: Record<AuthPageType, { title: string; body: string }> = {
+  login: {
+    title: 'Hôm nay nấu món gì?',
+    body: 'Đăng nhập để ChefAI gợi ý món theo khẩu vị, nguyên liệu bạn đang có và những thứ bạn cần tránh.',
+  },
+  register: {
+    title: 'Trăm món Việt, chọn theo khẩu vị của bạn.',
+    body: 'Lưu khẩu vị và dị ứng một lần. Từ đó mỗi lần hỏi, ChefAI đều gợi ý đúng món bạn ăn được.',
+  },
+  'forgot-password': {
+    title: 'Lấy lại tài khoản trong vài bước.',
+    body: 'ChefAI gửi mã 6 số tới email của bạn. Mã dùng được trong 15 phút và chỉ một lần.',
+  },
+};
 
 // Chỉ ghi nhớ email; mật khẩu do trình quản lý mật khẩu của trình duyệt lưu (không tự lưu mật khẩu vào localStorage)
 const REMEMBER_EMAIL_KEY = 'culina_remember_email';
@@ -97,13 +118,13 @@ const FieldError: React.FC<{ id: string; message?: string }> = ({ id, message })
     </p>
   ) : null;
 
-export const AuthModals: React.FC<AuthModalsProps> = ({
-  isOpen,
+export const AuthPage: React.FC<AuthPageProps> = ({
   type,
   onClose,
   onSwitchType,
   onLoginSuccess,
   initialResetToken,
+  dishes = [],
 }) => {
   // Common states
   const [showPassword, setShowPassword] = useState(false);
@@ -172,8 +193,6 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
     verifyCode({ token });
   }, [initialResetToken]);
 
-  if (!isOpen) return null;
-
   const handleGoogleLogin = () => {
     setErrorMessage('');
     setLoading(true);
@@ -194,7 +213,6 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
         role: user.role,
         joinedDate: user.created_at ? new Date(user.created_at).toLocaleDateString('vi-VN') : '',
       } as Partial<UserProfile>);
-      onClose();
     } catch (err: any) {
       setErrorMessage(err.message || 'Đăng nhập Google không thành công. Vui lòng thử lại.');
     } finally {
@@ -226,7 +244,6 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
         roleLabel: user.role === 'admin' ? 'Quản trị viên' : 'Đầu bếp tại gia',
         isPro: true,
       });
-      onClose();
     } catch (err: any) {
       console.error('Login error:', err);
       const apiFieldErrors = fieldErrorsFromApi(err);
@@ -271,7 +288,6 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
         dietPreference: selectedDiet,
         allergiesHardLock: [],
       });
-      onClose();
     } catch (err: any) {
       console.error('Register error:', err);
       const apiFieldErrors = fieldErrorsFromApi(err);
@@ -386,88 +402,66 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200">
-      <div className="relative w-full max-w-4xl bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100 flex flex-col md:flex-row">
-        {/* Close Button */}
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 z-20 p-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 transition-colors cursor-pointer"
-        >
-          <X className="w-5 h-5" />
-        </button>
+    <div className="relative min-h-screen w-full bg-white flex flex-col md:flex-row">
+      {/* Điện thoại: dải cam phía trên có vòng món 3D thu nhỏ */}
+      <div className="md:hidden relative h-[230px] overflow-hidden bg-[#F25C05] auth-hero-bg">
+        <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between px-5 py-4">
+          <span className="font-display font-extrabold text-white text-lg">Chef AI</span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex items-center gap-1 rounded-full bg-white/15 px-3 py-1.5 text-xs font-bold text-white hover:bg-white/25 cursor-pointer"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Quay lại
+          </button>
+        </div>
+        <div className="absolute inset-0 top-8">
+          <AuthScene3D dishes={dishes} compact />
+        </div>
+      </div>
 
-        {/* ===================== LOGIN MODAL ===================== */}
+      {/* Máy tính: panel cam bên trái với vòng món 3D */}
+      <aside className="hidden md:flex md:w-5/12 xl:w-1/2 md:sticky md:top-0 md:h-screen flex-col overflow-hidden bg-[#F25C05] auth-hero-bg text-white">
+        <div className="px-10 lg:px-14 pt-10 flex items-center gap-2.5">
+          <span className="font-display font-extrabold text-xl tracking-tight">Chef AI</span>
+          <span className="text-sm text-white/70">Trợ lý ẩm thực Việt</span>
+        </div>
+        <div className="flex-1 min-h-0">
+          <AuthScene3D dishes={dishes} />
+        </div>
+        <div key={type} className="auth-hero-in px-10 lg:px-14 pb-12 max-w-xl">
+          <h2 className="font-display font-extrabold text-4xl lg:text-5xl leading-[1.05] tracking-tight text-white text-balance">
+            {HERO_COPY[type].title}
+          </h2>
+          <p className="mt-4 text-[15px] leading-relaxed text-white/80 max-w-md">{HERO_COPY[type].body}</p>
+        </div>
+      </aside>
+
+      {/* Máy tính: nút quay lại ở góc trên bên phải */}
+      <button
+        type="button"
+        onClick={onClose}
+        className="hidden md:inline-flex absolute top-6 right-8 z-10 items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold text-slate-600 hover:text-orange-600 hover:bg-orange-50 transition-colors cursor-pointer"
+      >
+        <ArrowLeft className="w-4 h-4" />
+        Quay lại
+      </button>
+
+        {/* ===================== LOGIN PAGE ===================== */}
         {type === 'login' && (
           <>
-            {/* Left Column: Brand Hero */}
-            <div className="hidden md:flex md:w-5/12 bg-gradient-to-br from-orange-50/80 via-amber-50/50 to-orange-100/50 p-8 flex-col justify-between border-r border-orange-100/60">
-              <div className="space-y-6">
-                <div className="flex items-center gap-3">
-                  <ChefLogo3D size="md" />
-                  <div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-bold text-slate-900 text-lg">Chef AI</span>
-                    </div>
-                    <p className="text-xs text-slate-500">Bếp trưởng AI thông minh</p>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <span className="text-[11px] font-bold text-orange-600 tracking-wide uppercase flex items-center gap-1">
-                    <Sparkles className="w-3.5 h-3.5" />
-                    Khởi tạo lối sống ẩm thực thế hệ mới
-                  </span>
-                  <h3 className="text-2xl font-black text-slate-900 tracking-tight leading-snug">
-                    Khám phá ẩm thực thông minh, cá nhân hóa <span className="text-orange-500">từng bữa ăn</span>
-                  </h3>
-                  <p className="text-xs text-slate-600 leading-relaxed pt-1">
-                    Tối ưu dinh dưỡng và khơi gợi cảm hứng nấu nướng với trợ lý AI phân tích khẩu vị, dị ứng và nguyên liệu sẵn có của bạn.
-                  </p>
-                </div>
-
-                {/* Preview Meal Card */}
-                <div className="p-3.5 bg-white/90 backdrop-blur-xs rounded-2xl border border-orange-200/60 shadow-xs space-y-2">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-emerald-700 font-bold flex items-center gap-1">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                      Gợi ý bữa trưa
-                    </span>
-                    <span className="text-orange-600 font-bold">Hợp khẩu vị</span>
-                  </div>
-                  <div className="flex gap-3 items-center">
-                    <img
-                      src="https://images.unsplash.com/photo-1467003909585-2f8a72700288?auto=format&fit=crop&w=150&q=80"
-                      alt="Cá hồi"
-                      className="w-12 h-12 rounded-xl object-cover shrink-0"
-                    />
-                    <div>
-                      <h5 className="text-xs font-bold text-slate-800">Cá hồi áp chảo sốt bơ chanh</h5>
-                      <p className="text-[11px] text-slate-500">15p • 420 kcal • Protein 36g • Low Carb</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-3 bg-orange-100/50 rounded-xl border border-orange-200/40 text-xs text-orange-800 flex items-start gap-2">
-                  <Sparkles className="w-4 h-4 text-orange-600 shrink-0 mt-0.5" />
-                  <span>Tự cân bằng calo, hạn chế dị ứng & cá nhân hóa dinh dưỡng theo từng ngày.</span>
-                </div>
-              </div>
-
-              <div className="pt-6 text-[11px] text-slate-400">
-                © 2026 ChefAI Platform • Trợ lý ẩm thực thông minh
-              </div>
-            </div>
-
             {/* Right Column: Form */}
-            <div className="md:w-7/12 p-6 sm:p-10 flex flex-col justify-center">
-              <div className="flex items-center justify-between pb-6">
+            <div className="flex-1 md:min-h-screen flex flex-col md:justify-center px-5 py-8 sm:px-10 md:py-16 lg:px-16">
+              <div className="w-full max-w-xl mx-auto auth-form-in">
+              <div className="flex items-start justify-between gap-3 pb-6">
                 <div>
                   <h3 className="text-xl font-black text-slate-900">Đăng nhập tài khoản</h3>
                   <p className="text-xs text-slate-500 mt-1">
                     Tiếp tục hành trình nấu ngon và lành cùng Bếp trưởng Chef AI.
                   </p>
                 </div>
-                <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+                <div className="flex shrink-0 whitespace-nowrap bg-slate-100 p-1 rounded-xl text-xs font-semibold">
                   <button className="px-3 py-1.5 rounded-lg bg-white shadow-xs text-orange-600">
                     Đăng nhập
                   </button>
@@ -610,71 +604,17 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                   Tạo tài khoản mới ngay
                 </button>
               </div>
+              </div>
             </div>
           </>
         )}
 
-        {/* ===================== REGISTER MODAL ===================== */}
+        {/* ===================== REGISTER PAGE ===================== */}
         {type === 'register' && (
           <>
-            {/* Left Column: Benefits */}
-            <div className="hidden md:flex md:w-5/12 bg-gradient-to-br from-orange-50/80 via-amber-50/50 to-orange-100/50 p-8 flex-col justify-between border-r border-orange-100/60">
-              <div className="space-y-6">
-                <div className="flex items-center gap-3">
-                  <ChefLogo3D size="md" />
-                  <div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-bold text-slate-900 text-lg">Chef AI</span>
-                    </div>
-                    <p className="text-xs text-slate-500">Trợ lý dinh dưỡng & Bếp trưởng số</p>
-                  </div>
-                </div>
-
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-100 text-emerald-800 rounded-full text-xs font-bold">
-                  <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                  HỆ SINH THÁI ẨM THỰC THÔNG MINH
-                </div>
-
-                <div className="space-y-3.5 pt-2">
-                  <div className="p-3 bg-white/80 rounded-xl border border-orange-200/50 space-y-1">
-                    <h5 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-orange-500" />
-                      Hỏi đáp AI không giới hạn
-                    </h5>
-                    <p className="text-[11px] text-slate-500">
-                      Kể nguyên liệu đang có, ChefAI tức thì gợi ý món ăn phù hợp.
-                    </p>
-                  </div>
-
-                  <div className="p-3 bg-white/80 rounded-xl border border-orange-200/50 space-y-1">
-                    <h5 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                      Phân tích chuyên sâu Vi chất & Macro
-                    </h5>
-                    <p className="text-[11px] text-slate-500">
-                      Kiểm soát chính xác Calo, Đạm tinh khiết, Xơ và Tinh bột cân bằng theo mục tiêu thể hình.
-                    </p>
-                  </div>
-
-                  <div className="p-3 bg-white/80 rounded-xl border border-orange-200/50 space-y-1">
-                    <h5 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                      <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
-                      Lọc dị ứng & Hoán đổi gia vị chuẩn xác
-                    </h5>
-                    <p className="text-[11px] text-slate-500">
-                      Tự động loại bỏ hải sản, gluten, đậu phộng hoặc đường sữa; gợi ý gia vị thay thế an toàn.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-6 text-[11px] text-slate-400">
-                © 2026 ChefAI Platform • Hoàn tất trong 1 phút
-              </div>
-            </div>
-
             {/* Right Column: Register Form with Initial Taste Profile Step 1/2 */}
-            <div className="md:w-7/12 p-6 sm:p-10 max-h-[90vh] overflow-y-auto">
+            <div className="flex-1 md:min-h-screen flex flex-col md:justify-center px-5 py-8 sm:px-10 md:py-16 lg:px-16">
+              <div className="w-full max-w-xl mx-auto auth-form-in">
               <div className="flex items-center justify-between pb-4">
                 <div>
                   <h3 className="text-xl font-black text-slate-900">Đăng ký tài khoản mới</h3>
@@ -838,63 +778,17 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                   <ArrowRight className="w-4 h-4" />
                 </button>
               </form>
+              </div>
             </div>
           </>
         )}
 
-        {/* ===================== FORGOT PASSWORD MODAL ===================== */}
+        {/* ===================== FORGOT PASSWORD PAGE ===================== */}
         {type === 'forgot-password' && (
           <>
-            {/* Left Column: Security Benefits */}
-            <div className="hidden md:flex md:w-5/12 bg-gradient-to-br from-orange-50/80 via-amber-50/50 to-orange-100/50 p-8 flex-col justify-between border-r border-orange-100/60">
-              <div className="space-y-6">
-                <div className="flex items-center gap-3">
-                  <ChefLogo3D size="md" />
-                  <div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-bold text-slate-900 text-lg">Chef AI</span>
-                    </div>
-                    <p className="text-xs text-slate-500">Trợ lý công thức & Dinh dưỡng thông minh</p>
-                  </div>
-                </div>
-
-                <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-200 space-y-1">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-800">
-                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                    BẢO MẬT HỒ SƠ ẨM THỰC
-                  </div>
-                  <p className="text-[11px] text-emerald-700">
-                    Bảo vệ trọn vẹn <span className="font-bold">hồ sơ khẩu vị</span> & thực đơn độc bản. Dữ liệu cá nhân của bạn đều được bảo vệ an toàn.
-                  </p>
-                </div>
-
-                <div className="space-y-3 pt-2 text-xs text-slate-600">
-                  <div className="flex items-start gap-2.5">
-                    <span className="w-6 h-6 rounded-lg bg-orange-100 text-orange-600 flex items-center justify-center font-bold text-[11px] shrink-0">123</span>
-                    <div>
-                      <h5 className="font-bold text-slate-800">Mã xác thực một lần qua email</h5>
-                      <p className="text-[11px] text-slate-500">Mã 6 số gửi qua email, hiệu lực 15 phút và chỉ dùng một lần.</p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-2.5">
-                    <span className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold text-[11px] shrink-0">AI</span>
-                    <div>
-                      <h5 className="font-bold text-slate-800">Bảo toàn dữ liệu cá nhân</h5>
-                      <p className="text-[11px] text-slate-500">Giữ nguyên lịch sử học hỏi vị giác, danh sách dị ứng và công thức đã ghim.</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-6 text-[11px] text-slate-500 flex items-center justify-between">
-                <span>Cần trợ giúp khẩn cấp?</span>
-                <span className="font-bold text-orange-600">1900 6868 (Miễn phí)</span>
-              </div>
-            </div>
-
             {/* Right Column: 3 Steps Recovery Wizard */}
-            <div className="md:w-7/12 p-6 sm:p-10 flex flex-col justify-center">
+            <div className="flex-1 md:min-h-screen flex flex-col md:justify-center px-5 py-8 sm:px-10 md:py-16 lg:px-16">
+              <div className="w-full max-w-xl mx-auto auth-form-in">
               <div className="flex items-center justify-between pb-6">
                 <button
                   onClick={() => onSwitchType('login')}
@@ -1120,10 +1014,10 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                   </button>
                 </div>
               )}
+              </div>
             </div>
           </>
         )}
-      </div>
     </div>
   );
 };

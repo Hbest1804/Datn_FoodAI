@@ -14,7 +14,7 @@ const SEAFOOD = [
   'cá', 'tôm', 'tép', 'cua', 'ghẹ', 'ruốc', 'mực', 'bạch tuộc', 'ngao', 'nghêu', 'sò', 'hến', 'hàu', 'ốc', 'sứa',
   'mắm', 'nước mắm', 'mắm tôm', 'mắm ruốc', 'dầu hào', 'hải sản',
 ];
-// Theo cách hiểu "ăn chay" ở Việt Nam: không ăn trứng (kể cả lòng đỏ, lòng trắng, trứng muối, trứng bắc thảo)
+// Theo SRS: Ăn chay được dùng trứng, sữa; Thuần chay mới loại trứng (kể cả lòng đỏ, lòng trắng, trứng muối, mayonnaise)
 const EGGS = ['trứng', 'lòng đỏ', 'lòng trắng', 'mayonnaise'];
 const ANIMAL_PRODUCTS = [...EGGS, 'sữa', 'sữa chua', 'bơ', 'bơ lạt', 'phô mai', 'kem', 'whey', 'mật ong'];
 
@@ -22,6 +22,11 @@ const ANIMAL_PRODUCTS = [...EGGS, 'sữa', 'sữa chua', 'bơ', 'bơ lạt', 'ph
 const PLANT_LOOKALIKES = ['nấm mỡ', 'khoai mỡ', 'thịt gấc', 'thịt quả', 'nấm đùi gà', 'nấm gan bò', 'đậu ngự', 'hạt nêm nấm', 'bột nêm nấm'];
 // Chay vẫn được dùng sữa, bơ (chữ "bò" trong tên không bị coi là thịt bò)
 const DAIRY_OK = ['sữa bò', 'bơ bò'];
+// Chay được dùng trứng: chữ "gà", "vịt", "cút", "ngỗng" trong tên trứng không bị coi là thịt
+const EGG_OK = ['trứng gà', 'hột gà', 'trứng vịt', 'hột vịt', 'trứng cút', 'trứng chim cút', 'hột cút', 'trứng ngỗng',
+  'lòng đỏ', 'lòng trắng'];
+// Trứng có phôi (hột vịt lộn) vẫn là thịt: so trước khi gỡ cụm được phép
+const BALUT = ['trứng vịt lộn', 'hột vịt lộn', 'trứng gà lộn', 'hột gà lộn', 'trứng cút lộn', 'hột cút lộn'];
 const VEGAN_OK = ['sữa đậu nành', 'sữa hạt', 'sữa dừa', 'sữa yến mạch', 'sữa hạnh nhân', 'sữa gạo', 'nước cốt dừa',
   'quả bơ', 'trái bơ', 'bơ thực vật', 'bơ đậu phộng', 'kem dừa'];
 
@@ -30,10 +35,11 @@ const VEGAN_OK = ['sữa đậu nành', 'sữa hạt', 'sữa dừa', 'sữa y�
  */
 export const DIET_RULES = {
   vegetarian: {
-    excludeRe: wordsRe([...MEAT, ...SEAFOOD, ...EGGS]),
-    exceptRe: wordsRe([...PLANT_LOOKALIKES, ...DAIRY_OK]),
+    alwaysRe: wordsRe(BALUT),
+    excludeRe: wordsRe([...MEAT, ...SEAFOOD]),
+    exceptRe: wordsRe([...PLANT_LOOKALIKES, ...DAIRY_OK, ...EGG_OK]),
     satisfiedBy: ['vegetarian', 'vegan'],
-    promptRule: 'theo cách ăn chay ở Việt Nam: không thịt, cá, hải sản, trứng, mỡ/nước dùng xương động vật, nước mắm, mắm, dầu hào (dùng nước tương, dầu hào chay, hạt nêm nấm thay thế); được dùng sữa',
+    promptRule: 'không thịt, cá, hải sản, mỡ/nước dùng xương động vật, nước mắm, mắm, dầu hào (dùng nước tương, dầu hào chay, hạt nêm nấm thay thế); được dùng trứng và sữa',
   },
   vegan: {
     excludeRe: wordsRe([...MEAT, ...SEAFOOD, ...ANIMAL_PRODUCTS]),
@@ -51,6 +57,7 @@ export function violatesDiet(ingredientName, code) {
   if (!rule) return false;
   let name = String(ingredientName || '').normalize('NFC').toLowerCase();
   if (wordsRe(['chay']).test(name)) return false;
+  if (rule.alwaysRe?.test(name)) return true;
   // Gỡ các cụm được phép (thay bằng dấu cách để không dính chữ hai bên) rồi mới so khớp
   for (let prev = null; prev !== name;) { prev = name; name = name.replace(rule.exceptRe, ' '); }
   return rule.excludeRe.test(name);

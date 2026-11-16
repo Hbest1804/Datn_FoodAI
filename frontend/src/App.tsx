@@ -5,7 +5,7 @@ import { Header } from './components/Header';
 import { Footer } from './components/Footer';
 import { DiscoveryView } from './components/DiscoveryView';
 import { RecipeDetailModal } from './components/RecipeDetailModal';
-import { AuthModals } from './components/AuthModals';
+import { AuthPage, AuthPageType } from './components/AuthPage';
 import { FloatingChefWidget } from './components/FloatingChefWidget';
 import { UserProfile, UserRole, Recipe } from './types';
 import { apiService } from './api';
@@ -69,6 +69,19 @@ const TAB_PATHS: Record<string, string> = {
   admin: '/admin',
 };
 
+// Các trang xác thực hiển thị toàn màn hình, không có Header/Footer
+const AUTH_PATHS: Record<string, AuthPageType> = {
+  '/login': 'login',
+  '/register': 'register',
+  '/forgot-password': 'forgot-password',
+  '/reset-password': 'forgot-password',
+};
+const AUTH_ROUTES: Record<AuthPageType, string> = {
+  login: '/login',
+  register: '/register',
+  'forgot-password': '/forgot-password',
+};
+
 const pathToTab = (pathname: string): string => {
   const match = Object.entries(TAB_PATHS).find(([, path]) => path !== '/' && pathname.startsWith(path));
   return match ? match[0] : 'discovery';
@@ -89,7 +102,6 @@ export default function App() {
   // Tổng số món đang công khai trong CSDL (meta.total), dùng cho số liệu trên trang chủ
   const [totalRecipes, setTotalRecipes] = useState<number>(0);
   const [selectedRecipeForModal, setSelectedRecipeForModal] = useState<Recipe | null>(null);
-  const [resetTokenFromLink, setResetTokenFromLink] = useState<string>('');
 
   // Cross-view shortcuts
   const [initialChatPrompt, setInitialChatPrompt] = useState<string>('');
@@ -98,9 +110,16 @@ export default function App() {
   const searchQueryParam = currentTab === 'search' ? (searchParams.get('q') ?? '') : '';
   const dishParam = searchParams.get('dish');
 
-  // Auth modal states
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
-  const [authModalType, setAuthModalType] = useState<'login' | 'register' | 'forgot-password'>('login');
+  // Trang xác thực đang mở (nếu có) và trang người dùng đang xem trước khi vào đó
+  const authPageType = AUTH_PATHS[location.pathname];
+  const authReturnTo: string = (location.state as { from?: string } | null)?.from || '/';
+
+  // Mở trang đăng nhập / đăng ký, ghi nhớ trang hiện tại để quay lại sau khi xong
+  const openAuthPage = (type: AuthPageType, from?: string) => {
+    navigate(AUTH_ROUTES[type], {
+      state: { from: from ?? `${location.pathname}${location.search}` },
+    });
+  };
 
   // Load initial live recipes & restore login session from backend
   useEffect(() => {
@@ -270,21 +289,20 @@ export default function App() {
   useEffect(() => {
     if (!isAdminMode || !sessionChecked || currentUser.role === 'admin') return;
     toast.warning('Bạn cần đăng nhập bằng tài khoản Quản trị viên để truy cập trang này.');
-    navigate('/', { replace: true });
     if (!currentUser.isLoggedIn) {
-      setAuthModalType('login');
-      setIsAuthModalOpen(true);
+      navigate('/login', { replace: true, state: { from: '/admin' } });
+    } else {
+      navigate('/', { replace: true });
     }
   }, [isAdminMode, sessionChecked, currentUser.role, currentUser.isLoggedIn]);
 
-  // Liên kết đặt lại mật khẩu trong email: /reset-password?token=...
+  // Đã đăng nhập mà mở /login hoặc /register thì quay về trang trước đó
   useEffect(() => {
-    if (location.pathname !== '/reset-password') return;
-    setResetTokenFromLink(searchParams.get('token') ?? '');
-    setAuthModalType('forgot-password');
-    setIsAuthModalOpen(true);
-    navigate('/', { replace: true });
-  }, [location.pathname]);
+    if (!currentUser.isLoggedIn) return;
+    if (authPageType === 'login' || authPageType === 'register') {
+      navigate(currentUser.role === 'admin' ? '/admin' : authReturnTo, { replace: true });
+    }
+  }, [authPageType, currentUser.isLoggedIn]);
 
   // Google chuyển về /auth/callback#access_token=...&refresh_token=... sau khi chọn tài khoản
   useEffect(() => {
@@ -293,14 +311,12 @@ export default function App() {
     const accessToken = hash.get('access_token');
     const refreshToken = hash.get('refresh_token');
     const oauthError = hash.get('error_description') || searchParams.get('error_description');
-    navigate('/', { replace: true });
-
     if (!accessToken || !refreshToken) {
+      navigate('/login', { replace: true });
       toast.error(oauthError || 'Đăng nhập Google không thành công. Vui lòng thử lại.');
-      setAuthModalType('login');
-      setIsAuthModalOpen(true);
       return;
     }
+    navigate('/', { replace: true });
     apiService.auth.completeGoogleLogin(accessToken, refreshToken, Number(hash.get('expires_in')) || undefined)
       .then(({ user }) => {
         handleLoginSuccess({
@@ -317,8 +333,7 @@ export default function App() {
         localStorage.removeItem('culina_token');
         localStorage.removeItem('culina_refresh_token');
         toast.error(err.message || 'Đăng nhập Google không thành công. Vui lòng thử lại.');
-        setAuthModalType('login');
-        setIsAuthModalOpen(true);
+        navigate('/login', { replace: true });
       });
   }, [location.pathname]);
 
@@ -360,7 +375,7 @@ export default function App() {
     setCurrentUser(prev => ({ ...prev, ...updated }));
   };
 
-  const handleLoginSuccess = (userPartial: Partial<UserProfile>) => {
+  const handleLoginSuccess = (userPartial: Partial<UserProfile>, returnTo = '/') => {
     const isAdmin = userPartial.role === 'admin';
     setCurrentUser(prev => ({
       ...prev,
@@ -370,9 +385,8 @@ export default function App() {
       isLoggedIn: true,
       isPro: true,
     }));
-    if (isAdmin) {
-      setCurrentTab('admin');
-    }
+    // Quản trị viên vào thẳng trang Quản trị; người dùng quay lại trang đang xem trước khi đăng nhập
+    navigate(isAdmin ? '/admin' : returnTo, { replace: true });
   };
 
   const handleLogout = async () => {
@@ -385,10 +399,26 @@ export default function App() {
     setCurrentTab('discovery');
   };
 
-  const openRegisterModal = () => {
-    setAuthModalType('register');
-    setIsAuthModalOpen(true);
-  };
+  const openRegisterModal = () => openAuthPage('register');
+  const openLoginPage = () => openAuthPage('login');
+
+  // Trang Đăng nhập / Đăng ký / Quên mật khẩu: trang riêng, toàn màn hình
+  if (authPageType) {
+    return (
+      <>
+        <AuthPage
+          type={authPageType}
+          onClose={() => navigate(authReturnTo, { replace: true })}
+          // Chuyển qua lại giữa các trang xác thực không chồng thêm lịch sử, giữ nguyên trang cần quay lại
+          onSwitchType={(t) => navigate(AUTH_ROUTES[t], { replace: true, state: location.state })}
+          onLoginSuccess={(user) => handleLoginSuccess(user, authReturnTo)}
+          initialResetToken={location.pathname === '/reset-password' ? (searchParams.get('token') ?? '') : ''}
+          dishes={recipes.map((r) => ({ title: r.title || r.name || '', image: r.image || r.image_url }))}
+        />
+        <NotificationContainer />
+      </>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-800 flex flex-col font-sans">
@@ -400,10 +430,7 @@ export default function App() {
         onSwitchUserRole={handleSwitchUserRole}
         isAdminMode={isAdminMode}
         onToggleAdminMode={handleToggleAdminMode}
-        onOpenLoginModal={() => {
-          setAuthModalType('login');
-          setIsAuthModalOpen(true);
-        }}
+        onOpenLoginModal={openLoginPage}
         onOpenRegisterModal={openRegisterModal}
         onSearchSubmit={handleSearchSubmit}
         onLogout={handleLogout}
@@ -517,8 +544,6 @@ export default function App() {
             }
           />
 
-          {/* /reset-password được xử lý bằng effect phía trên rồi chuyển về trang chủ */}
-          <Route path="/reset-password" element={null} />
           <Route path="/auth/callback" element={null} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
@@ -528,10 +553,7 @@ export default function App() {
       {/* Footer */}
       <Footer
         onSelectTab={setCurrentTab}
-        onOpenLoginModal={() => {
-          setAuthModalType('login');
-          setIsAuthModalOpen(true);
-        }}
+        onOpenLoginModal={openLoginPage}
       />
 
       {/* Recipe Detail Modal */}
@@ -540,29 +562,13 @@ export default function App() {
           recipe={selectedRecipeForModal}
           onClose={closeRecipe}
           currentUser={currentUser}
-          onOpenAuth={() => {
-            setAuthModalType('login');
-            setIsAuthModalOpen(true);
-          }}
+          onOpenAuth={openLoginPage}
           onOpenChatWithPrompt={(prompt, fridgeContext) => {
             setSelectedRecipeForModal(null);
             handleOpenChatWithPrompt(prompt, fridgeContext);
           }}
         />
       )}
-
-      {/* Authentication Modals */}
-      <AuthModals
-        isOpen={isAuthModalOpen}
-        type={authModalType}
-        onClose={() => {
-          setIsAuthModalOpen(false);
-          setResetTokenFromLink('');
-        }}
-        onSwitchType={(t) => setAuthModalType(t)}
-        onLoginSuccess={handleLoginSuccess}
-        initialResetToken={resetTokenFromLink}
-      />
 
       {/* Floating AI Chef Assistant Widget (góc dưới phải; ẩn ở trang chat trên điện thoại vì che ô nhập) */}
       <div className={currentTab === 'chat' ? 'hidden lg:block' : undefined}>
