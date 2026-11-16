@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { ChefLogo3D } from './ChefLogo3D';
+import { GoogleSignInButton, GOOGLE_CLIENT_ID } from './GoogleSignInButton';
 import { apiService } from '../api';
 import type { ResetCredentials } from '../api/auth.api';
 
@@ -177,6 +178,28 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
     setErrorMessage('');
     setLoading(true);
     apiService.auth.startGoogleLogin();
+  };
+
+  // Nút Google (GIS) trả ID token → máy chủ đổi lấy phiên Supabase
+  const handleGoogleCredential = async (idToken: string) => {
+    setErrorMessage('');
+    setLoading(true);
+    try {
+      const { user } = await apiService.auth.loginWithGoogleIdToken(idToken);
+      onLoginSuccess({
+        id: user.id,
+        name: user.display_name || user.email.split('@')[0],
+        email: user.email,
+        ...(user.avatar_url ? { avatar: user.avatar_url, avatar_url: user.avatar_url } : {}),
+        role: user.role,
+        joinedDate: user.created_at ? new Date(user.created_at).toLocaleDateString('vi-VN') : '',
+      } as Partial<UserProfile>);
+      onClose();
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Đăng nhập Google không thành công. Vui lòng thử lại.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
@@ -564,15 +587,19 @@ export const AuthModals: React.FC<AuthModalsProps> = ({
                 hoặc
                 <div className="flex-1 h-px bg-slate-200" />
               </div>
-              <button
-                type="button"
-                onClick={handleGoogleLogin}
-                disabled={loading}
-                className="w-full py-2.5 bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-60 text-slate-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <GoogleIcon />
-                Đăng nhập bằng Google
-              </button>
+              {GOOGLE_CLIENT_ID ? (
+                <GoogleSignInButton onCredential={handleGoogleCredential} onError={setErrorMessage} />
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleGoogleLogin}
+                  disabled={loading}
+                  className="w-full py-2.5 bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-60 text-slate-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <GoogleIcon />
+                  Đăng nhập bằng Google
+                </button>
+              )}
 
               <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-xs">
                 <span className="text-slate-500">Chưa có tài khoản?</span>

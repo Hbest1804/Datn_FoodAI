@@ -111,6 +111,20 @@ export const authApi = {
     return { accessToken: res.data?.access_token || accessToken, refreshToken: res.data?.refresh_token || refreshToken, user };
   },
 
+  /** Gửi ID token từ nút Google (Google Identity Services) lên máy chủ để lấy (hoặc tạo) tài khoản */
+  async loginWithGoogleIdToken(idToken: string): Promise<LoginResult> {
+    const res = await apiClient<any>('/auth/google', {
+      method: 'POST',
+      body: JSON.stringify({ id_token: idToken }),
+    });
+    const { access_token: accessToken, refresh_token: refreshToken, user } = res.data || {};
+    setAuthToken(accessToken, refreshToken);
+    if (user) {
+      localStorage.setItem('culina_user', JSON.stringify(user));
+    }
+    return { accessToken, refreshToken, user };
+  },
+
   async getMe(): Promise<{ user: AuthUser }> {
     const res = await apiClient<any>('/auth/me');
     const user = res.user || res.data?.user || res.data;

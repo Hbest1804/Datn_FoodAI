@@ -5,6 +5,7 @@ import {
   completeGoogleLogin,
   googleAuthorizeUrl,
   loginUser,
+  loginWithGoogleIdToken,
   logoutUser,
   refreshSession,
   registerUser,
@@ -82,6 +83,14 @@ export function googleRedirect(_req, res) {
  */
 export async function googleLogin(req, res) {
   const body = req.body || {};
+  // Nút Google trên trang gửi ID token (credential) thay cho mã Supabase
+  const idToken = body.id_token ?? body.credential;
+  if (idToken !== undefined) {
+    if (typeof idToken !== 'string' || !idToken) {
+      return sendError(res, 422, 'VALIDATION_ERROR', 'Thiếu mã đăng nhập Google.');
+    }
+    return sendOk(res, await loginWithGoogleIdToken(idToken));
+  }
   const accessToken = body.access_token ?? body.accessToken;
   const refreshToken = body.refresh_token ?? body.refreshToken;
   if (typeof accessToken !== 'string' || !accessToken || typeof refreshToken !== 'string' || !refreshToken) {
