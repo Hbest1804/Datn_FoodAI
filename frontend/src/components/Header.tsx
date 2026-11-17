@@ -10,9 +10,7 @@ import {
   User,
   ChefHat,
   CalendarDays,
-  Compass,
-  SlidersHorizontal,
-  MessageCircle
+  House
 } from 'lucide-react';
 import { UserProfile, UserRole, GuestQuota } from '../types';
 import { apiService } from '../api';
@@ -69,6 +67,7 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
+    <>
     <header className="sticky top-0 z-50 bg-canvas/85 backdrop-blur-md shadow-[0_1px_8px_rgba(0,0,0,0.04)]">
       {/* Top micro banner for guest users */}
       {currentUser.role === 'guest' && !isAdminMode && (
@@ -352,49 +351,59 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Mobile Navigation bar */}
-        {!isAdminMode && (
-          <nav
-            className={`grid lg:hidden border-t border-line py-1.5 gap-1 ${
-              currentUser.isLoggedIn ? 'grid-cols-4' : 'grid-cols-3'
-            }`}
-            aria-label="Điều hướng chính"
-          >
-            {[
-              { id: 'discovery', label: 'Khám phá', Icon: Compass },
-              { id: 'search', label: 'Tìm kiếm', Icon: SlidersHorizontal },
-              { id: 'chat', label: 'Hỏi AI', Icon: MessageCircle },
-              ...(currentUser.isLoggedIn
-                ? [{ id: 'mealPlan', label: 'Thực đơn', Icon: CalendarDays }]
-                : []),
-            ].map(({ id, label, Icon }) => {
-              const active = currentTab === id;
-              return (
-                <button
-                  key={id}
-                  onClick={() => onTabChange(id)}
-                  aria-label={label}
-                  aria-current={active ? 'page' : undefined}
-                  className={`flex flex-col items-center justify-center gap-0.5 py-1 rounded-xl transition-colors cursor-pointer select-none active:scale-95 ${
-                    active ? 'text-orange-600' : 'text-slate-500 hover:text-ink'
-                  }`}
-                >
-                  <span
-                    className={`flex items-center justify-center w-12 h-7 rounded-full transition-colors ${
-                      active ? 'bg-orange-100' : ''
-                    }`}
-                  >
-                    <Icon className="w-5 h-5" strokeWidth={active ? 2.4 : 2} />
-                  </span>
-                  <span className={`text-[11px] leading-tight ${active ? 'font-bold' : 'font-medium'}`}>
-                    {label}
-                  </span>
-                </button>
-              );
-            })}
-          </nav>
-        )}
       </div>
     </header>
+
+      {/* Thanh tab dưới đáy màn hình (điện thoại / máy tính bảng) – đặt ngoài <header> vì backdrop-blur
+          của header làm position: fixed bị neo theo header thay vì màn hình */}
+      {!isAdminMode && (
+        <nav
+          className="fixed inset-x-0 bottom-0 z-40 flex lg:hidden items-end px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] bg-white border-t border-slate-200"
+          aria-label="Điều hướng chính"
+        >
+          {([
+            { id: 'discovery', label: 'Khám phá', Icon: House },
+            { id: 'search', label: 'Tìm kiếm', Icon: Search },
+            { id: 'chat', label: 'Chef AI', Icon: ChefHat, fab: true },
+            { id: 'account', label: 'Hồ sơ', Icon: User },
+          ] as const).map((tab) => {
+            const { id, label, Icon } = tab;
+            const isFab = 'fab' in tab;
+            // Hồ sơ gồm cả trang tài khoản lẫn hồ sơ khẩu vị; khách bấm vào thì mở trang đăng nhập
+            const active = id === 'account' ? currentTab === 'account' || currentTab === 'profile' : currentTab === id;
+            return (
+              <button
+                key={id}
+                onClick={() => (id === 'account' && !currentUser.isLoggedIn ? onOpenLoginModal() : onTabChange(id))}
+                aria-label={label}
+                aria-current={active ? 'page' : undefined}
+                className="flex-1 min-w-0 flex flex-col items-center gap-1 cursor-pointer select-none transition-transform active:scale-95"
+              >
+                {isFab ? (
+                  <span className="flex items-center justify-center size-[52px] rounded-full bg-orange-600 text-white shadow-[0_10px_15px_-3px_rgba(249,115,22,0.25),0_4px_6px_-4px_rgba(249,115,22,0.25)]">
+                    <Icon className="size-6" strokeWidth={2} />
+                  </span>
+                ) : (
+                  <span
+                    className={`flex items-center px-4 py-1 rounded-full transition-colors ${
+                      active ? 'bg-orange-50 text-orange-600' : 'text-slate-500'
+                    }`}
+                  >
+                    <Icon className="size-[22px]" strokeWidth={2} />
+                  </span>
+                )}
+                <span
+                  className={`text-[11.6px] leading-[14px] font-semibold whitespace-nowrap ${
+                    active ? 'text-orange-600' : 'text-slate-500'
+                  }`}
+                >
+                  {label}
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+      )}
+    </>
   );
 };

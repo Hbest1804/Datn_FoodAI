@@ -982,7 +982,7 @@ export const TasteProfileView: React.FC<TasteProfileViewProps> = ({
         </section>
 
         {/* ── UNIFIED FORM BOTTOM ACTION BAR ─────────────────────────────────── */}
-        <div className="sticky bottom-24 sm:bottom-4 z-20 bg-white/95 backdrop-blur-md rounded-2xl p-4 border border-slate-200 shadow-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div className="sticky bottom-28 lg:bottom-4 z-20 bg-white/95 backdrop-blur-md rounded-2xl p-4 border border-slate-200 shadow-xl flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2 text-xs text-slate-500 text-center sm:text-left">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>Mọi thay đổi sẽ được lưu đồng bộ ngay vào hồ sơ cá nhân của bạn.</span>
