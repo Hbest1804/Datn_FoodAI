@@ -439,7 +439,9 @@ export default function App() {
       />
 
       {/* Main Content View Container */}
-      <main className="flex-1 w-full px-4 sm:px-6 lg:px-10 2xl:px-16 py-6 sm:py-8">
+      <main className={`flex-1 w-full px-4 sm:px-6 lg:px-10 2xl:px-16 py-6 sm:py-8 ${
+        isAdminMode ? '' : 'pb-[calc(7rem+env(safe-area-inset-bottom))] sm:pb-[calc(7rem+env(safe-area-inset-bottom))] lg:pb-8'
+      }`}>
         <Suspense
           fallback={
             <div className="py-24 flex justify-center">
@@ -584,8 +586,8 @@ export default function App() {
         />
       )}
 
-      {/* Floating AI Chef Assistant Widget (góc dưới phải; ẩn ở trang chat trên điện thoại vì che ô nhập) */}
-      <div className={currentTab === 'chat' ? 'hidden lg:block' : undefined}>
+      {/* Floating AI Chef Assistant Widget (góc dưới phải; trên điện thoại đã có nút Chef AI ở thanh tab dưới đáy nên ẩn) */}
+      <div className={isAdminMode ? undefined : 'hidden lg:block'}>
         <FloatingChefWidget
           currentUser={currentUser}
           onOpenFullChat={(prompt, sessionId) => {
