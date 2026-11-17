@@ -10,7 +10,7 @@ doc_api.txt
 api_extracted.txt
 use_case_extracted.txt
 *.sql
-backend/schema_chatbot_am_thuc.sql
+!backend/schema_chatbot_am_thuc.sql
 diagram.png
 htdb*.png
 *.png

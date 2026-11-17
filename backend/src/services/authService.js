@@ -329,7 +329,7 @@ export async function requestPasswordReset(email) {
   if (error) throw error;
 
   try {
-    await sendPasswordResetEmail(user.email, code, `${env.frontendUrl}/reset-password?token=${linkToken}`);
+    await sendPasswordResetEmail(user.email, code, `${env.frontendUrl}/reset-password?token=${linkToken}`, user.display_name);
   } catch (err) {
     console.error('[Auth] Gửi email đặt lại mật khẩu thất bại:', err.message);
     throw new ApiError(502, 'EMAIL_SEND_FAILED', 'Không gửi được email. Vui lòng thử lại.');
