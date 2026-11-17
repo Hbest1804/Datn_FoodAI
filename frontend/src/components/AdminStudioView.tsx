@@ -198,6 +198,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
   const [chatbotConfig, setChatbotConfig] = useState({
     guest_message_limit: 10,
     guest_window_hours: 24,
+    user_daily_message_limit: 30,
     system_prompt: '',
     max_context_dishes: 8,
   });
@@ -798,6 +799,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
         setChatbotConfig({
           guest_message_limit: d.guest_message_limit ?? d.guest_daily_limit ?? 10,
           guest_window_hours: d.guest_window_hours ?? 24,
+          user_daily_message_limit: d.user_daily_message_limit ?? 30,
           system_prompt: d.system_prompt || '',
           max_context_dishes: d.max_context_dishes ?? 8,
         });
@@ -2440,6 +2442,23 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                           className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-orange-500 font-bold"
                         />
                       </div>
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">
+                        Lượt hỏi mỗi người dùng / ngày (0 = tắt chatbot người dùng):
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="1000"
+                        value={chatbotConfig.user_daily_message_limit}
+                        onChange={(e) => setChatbotConfig({
+                          ...chatbotConfig,
+                          user_daily_message_limit: parseInt(e.target.value, 10) || 0
+                        })}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-orange-500 font-bold"
+                      />
                     </div>
 
                     <div>

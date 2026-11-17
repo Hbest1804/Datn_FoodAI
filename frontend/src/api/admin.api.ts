@@ -351,6 +351,7 @@ export const adminApi = {
       return {
         guest_message_limit: 10,
         guest_window_hours: 24,
+        user_daily_message_limit: 30,
         system_prompt: '',
         max_context_dishes: 8,
       };
@@ -360,6 +361,7 @@ export const adminApi = {
   async updateChatbotConfig(config: {
     guest_message_limit?: number;
     guest_window_hours?: number;
+    user_daily_message_limit?: number;
     system_prompt?: string;
     max_context_dishes?: number;
   }) {

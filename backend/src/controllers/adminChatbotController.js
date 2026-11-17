@@ -164,6 +164,7 @@ function publicSettings(s) {
   return {
     guest_message_limit: Number(s.guest_message_limit),
     guest_window_hours: Number(s.guest_window_hours),
+    user_daily_message_limit: Number(s.user_daily_message_limit),
     system_prompt: s.system_prompt,
     max_context_dishes: Number(s.max_context_dishes),
     updated_by: latest?.updated_by ?? null,
@@ -189,6 +190,10 @@ export async function adminUpdateChatbotSettings(req, res) {
 
   if (!isInt(body.guest_message_limit) || body.guest_message_limit < 0) add('guest_message_limit', 'Số nguyên ≥ 0 (0 = tắt chatbot cho khách).');
   if (!isInt(body.guest_window_hours) || body.guest_window_hours < 1 || body.guest_window_hours > 168) add('guest_window_hours', 'Số nguyên từ 1 đến 168.');
+  // Không gửi thì giữ giá trị cũ (tương thích giao diện cũ)
+  if (body.user_daily_message_limit !== undefined && (!isInt(body.user_daily_message_limit) || body.user_daily_message_limit < 0 || body.user_daily_message_limit > 1000)) {
+    add('user_daily_message_limit', 'Số nguyên từ 0 đến 1000 (0 = tắt chatbot cho người dùng).');
+  }
   if (typeof body.system_prompt !== 'string' || !body.system_prompt.trim() || body.system_prompt.length > 4000) {
     add('system_prompt', 'Không rỗng, tối đa 4000 ký tự.');
   }
@@ -200,6 +205,7 @@ export async function adminUpdateChatbotSettings(req, res) {
     guest_window_hours: body.guest_window_hours,
     system_prompt: body.system_prompt.trim(),
     max_context_dishes: body.max_context_dishes,
+    ...(body.user_daily_message_limit !== undefined ? { user_daily_message_limit: body.user_daily_message_limit } : {}),
   };
   const settings = await updateSettings(patch, req.user.id);
   recordAuditLog(req.user, 'chatbot.settings_update', 'app_settings', null, patch);

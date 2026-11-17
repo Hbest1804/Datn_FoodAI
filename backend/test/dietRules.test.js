@@ -13,8 +13,11 @@ describe('violatesDiet', () => {
     }
   });
 
-  it('chay (cách hiểu ở Việt Nam): loại trứng', () => {
+  it('chay (theo SRS): được dùng trứng', () => {
     for (const n of ['Trứng gà', 'Trứng cút', 'Trứng vịt muối', 'Lòng đỏ trứng', 'Lòng trắng trứng', 'Mayonnaise']) {
+      assert.equal(violatesDiet(n, 'vegetarian'), false, n);
+    }
+    for (const n of ['Hột vịt lộn', 'Trứng vịt lộn', 'Thịt gà, trứng gà']) {
       assert.equal(violatesDiet(n, 'vegetarian'), true, n);
     }
   });
