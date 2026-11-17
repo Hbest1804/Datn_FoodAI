@@ -8,7 +8,7 @@ import { tasteProfileApi } from './tasteProfile.api';
 import { ingredientsApi } from './ingredients.api';
 import { metaApi } from './meta.api';
 import { adminApi } from './admin.api';
-import { shoppingListApi } from './shoppingList.api';
+import { mealPlanApi } from './mealPlan.api';
 import { apiClient, BASE_API_URL, ApiError } from './client';
 
 // Health check endpoint
@@ -34,7 +34,7 @@ export const api = {
   ingredients: ingredientsApi,
   meta: metaApi,
   admin: adminApi,
-  shoppingList: shoppingListApi,
+  mealPlan: mealPlanApi,
 };
 
 // Aliases for compatibility
@@ -50,4 +50,4 @@ export * from './tasteProfile.api';
 export * from './ingredients.api';
 export * from './meta.api';
 export * from './admin.api';
-export * from './shoppingList.api';
+export * from './mealPlan.api';

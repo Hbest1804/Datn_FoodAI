@@ -102,8 +102,10 @@ const REASON_TEMPLATES = {
 
 /**
  * Danh sách gợi ý cho người dùng (hoặc món phổ biến khi chưa đủ dữ liệu).
+ * all = true: trả mọi món ứng viên đã chấm điểm (không cắt theo limit, không ghi lịch sử "Làm mới"),
+ * dùng cho Gợi ý thực đơn tuần.
  */
-export async function getPersonalizedRecommendations({ userId, limit = 12, category, refresh = false }) {
+export async function getPersonalizedRecommendations({ userId, limit = 12, category, refresh = false, all = false }) {
   const safeLimit = Math.min(50, Math.max(1, Number(limit) || 12));
   const categoryKey = category ? normalizeText(category) : '';
   const cacheKey = `${userId || 'guest'}|${categoryKey}`;
@@ -111,6 +113,7 @@ export async function getPersonalizedRecommendations({ userId, limit = 12, categ
   if (!refresh) {
     const cached = recommendationCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
+      if (all) return { data: cached.items, meta: cached.meta };
       const data = cached.items.slice(0, safeLimit);
       rememberServed(cacheKey, data);
       return { data, meta: cached.meta };
@@ -213,6 +216,7 @@ export async function getPersonalizedRecommendations({ userId, limit = 12, categ
     generated_at: new Date().toISOString(),
   };
   recommendationCache.set(cacheKey, { items, meta, expiresAt: Date.now() + CACHE_TTL_MS });
+  if (all) return { data: items, meta };
   const data = items.slice(0, safeLimit);
   rememberServed(cacheKey, data);
   return { data, meta };

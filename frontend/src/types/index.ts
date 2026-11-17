@@ -288,40 +288,39 @@ export interface AdminStats {
   dietDistribution: Array<{ id: number; name: string; users: number }>;
 }
 
-// Danh sách đi chợ (UC17) – GET /me/shopping-list
-export interface ShoppingListDish {
-  dish_id: string;
-  name: string;
-  slug: string;
-  image_url: string | null;
-  servings: number;
-  recipe_servings: number;
-  /** false khi món đã bị ẩn: không tính nguyên liệu, người dùng nên gỡ khỏi danh sách */
-  is_available: boolean;
-}
+// Gợi ý thực đơn tuần (UC17) – GET /me/meal-plan
+export type MealKey = 'breakfast' | 'lunch' | 'dinner';
 
-export interface ShoppingListItem {
+export interface MealPlanItem {
   id: number;
-  is_manual: boolean;
-  ingredient_id: number | null;
-  name: string;
-  quantity: number | null;
-  unit: string | null;
-  is_optional: boolean;
-  used_by: Array<{ dish_id: string; name: string }>;
-  have_at_home: boolean;
-  purchased: boolean;
+  role: 'breakfast_main' | 'breakfast_side' | 'soup' | 'main' | 'vegetable';
+  role_label: string;
+  position: number;
+  dish: {
+    id: string;
+    name: string;
+    slug: string;
+    image_url: string | null;
+    category: string;
+    cook_time_minutes: number | null;
+    calories: number | null;
+    /** false khi món đã bị ẩn: người dùng nên đổi món khác */
+    is_available: boolean;
+  };
 }
 
-export interface ShoppingListSummary {
-  dish_count: number;
-  to_buy: number;
-  have_at_home: number;
-  purchased: number;
+export interface MealPlanDay {
+  day_index: number;
+  date: string;
+  label: string;
+  meals: Array<{ meal: MealKey; label: string; items: MealPlanItem[] }>;
 }
 
-export interface ShoppingList {
-  dishes: ShoppingListDish[];
-  items: ShoppingListItem[];
-  summary: ShoppingListSummary;
+export interface MealPlan {
+  week_start: string | null;
+  week_end: string | null;
+  days: MealPlanDay[];
+  summary: { dish_count: number; item_count: number; unavailable_count: number };
+  personalized?: boolean;
+  warnings: string[];
 }
