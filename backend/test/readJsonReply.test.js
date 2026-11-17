@@ -3,7 +3,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readJsonReply } from '../src/services/aiService.js';
+import { readJsonReply } from '../src/utils/jsonReply.js';
 
 const full = '{"outcome":"answered","content":"Chào bạn!\\n\\nGợi ý **Cơm tấm**.","matched_dish_ids":["a1"]}';
 
