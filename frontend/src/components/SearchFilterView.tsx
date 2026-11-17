@@ -1,18 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { 
-  Search, 
-  SlidersHorizontal, 
-  RotateCcw, 
-  Clock, 
-  Bookmark, 
-  Flame, 
-  ChevronRight, 
-  Sparkles, 
-  LayoutGrid, 
-  List, 
-  ArrowUpDown, 
-  Check, 
-  X, 
+import {
+  Search,
+  SlidersHorizontal,
+  RotateCcw,
+  Clock,
+  Bookmark,
+  Flame,
+  ChevronRight,
+  Sparkles,
+  LayoutGrid,
+  List,
+  ArrowUpDown,
+  Check,
+  X,
   ChefHat,
   Refrigerator,
   Layers,
@@ -71,14 +71,14 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
           return parsed.filter((item: any) => typeof item?.id === 'number' && item.name);
         }
       }
-    } catch {}
+    } catch { }
     return [];
   });
 
   useEffect(() => {
     try {
       localStorage.setItem('culina_search_fridge', JSON.stringify(fridgeIngredients));
-    } catch {}
+    } catch { }
   }, [fridgeIngredients]);
   const [ingredientSearchInput, setIngredientSearchInput] = useState('');
   const [ingredientSuggestions, setIngredientSuggestions] = useState<Array<{ id: number; name: string }>>([]);
@@ -471,11 +471,10 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
                   setSelectedCategory(undefined);
                   setPage(1);
                 }}
-                className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition-all cursor-pointer ${
-                  selectedCategory === undefined
+                className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition-all cursor-pointer ${selectedCategory === undefined
                     ? 'bg-orange-500 text-white border-orange-500 shadow-xs'
                     : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
-                }`}
+                  }`}
               >
                 Tất cả
               </button>
@@ -486,11 +485,10 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
                     setSelectedCategory(cat === selectedCategory ? undefined : cat);
                     setPage(1);
                   }}
-                  className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition-all cursor-pointer ${
-                    selectedCategory === cat
+                  className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition-all cursor-pointer ${selectedCategory === cat
                       ? 'bg-orange-500 text-white border-orange-500 shadow-xs'
                       : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
-                  }`}
+                    }`}
                 >
                   {selectedCategory === cat && '✓ '}
                   {cat}
@@ -516,11 +514,10 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
                     setSelectedDifficulty(selectedDifficulty === d.key ? undefined : (d.key as any));
                     setPage(1);
                   }}
-                  className={`py-1.5 rounded-lg border text-center font-medium transition-all cursor-pointer ${
-                    selectedDifficulty === d.key
+                  className={`py-1.5 rounded-lg border text-center font-medium transition-all cursor-pointer ${selectedDifficulty === d.key
                       ? 'bg-orange-50 border-orange-300 text-orange-700 font-bold'
                       : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                  }`}
+                    }`}
                 >
                   {d.label}
                 </button>
@@ -566,11 +563,10 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
                   <button
                     key={t.id}
                     onClick={() => toggleTagFilter(t.id)}
-                    className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition-all cursor-pointer ${
-                      active
+                    className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition-all cursor-pointer ${active
                         ? 'bg-orange-50 border-orange-300 text-orange-700 font-bold'
                         : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                    }`}
+                      }`}
                   >
                     {active ? '✓ ' : '+ '}
                     {t.name}
@@ -704,13 +700,12 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
                         loading="lazy" decoding="async"
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                       />
-                      
+
                       {/* Smart Fridge Match Badge */}
                       {/* Tỉ lệ nguyên liệu có sẵn khi tìm theo nguyên liệu (FR-06); không hiện điểm "% phù hợp" */}
                       {recipe.match && (
-                        <div className={`absolute top-3 left-3 px-2.5 py-1 rounded-full text-xs font-bold shadow-xs flex items-center gap-1 text-white ${
-                          recipe.match.ratio === 1 ? 'bg-emerald-600' : 'bg-orange-500'
-                        }`}>
+                        <div className={`absolute top-3 left-3 px-2.5 py-1 rounded-full text-xs font-bold shadow-xs flex items-center gap-1 text-white ${recipe.match.ratio === 1 ? 'bg-emerald-600' : 'bg-orange-500'
+                          }`}>
                           <Sparkles className="w-3 h-3" />
                           {recipe.match.ratio === 1 ? 'Nấu được ngay 100%' : `Khớp ${Math.round(recipe.match.ratio * 100)}%`}
                         </div>
@@ -719,7 +714,7 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
                       <div className="absolute top-3 right-3 p-2 rounded-full bg-white/90 backdrop-blur-xs text-slate-600 hover:text-orange-600 transition-colors">
                         <Bookmark className="w-4 h-4" />
                       </div>
-                      
+
                       <div className="absolute bottom-3 left-3 px-2.5 py-0.5 rounded-full bg-slate-900/80 backdrop-blur-xs text-white text-[11px] font-semibold flex items-center gap-1">
                         <Clock className="w-3 h-3 text-orange-400" />
                         {formatMetric(recipe.cookingTime)} phút
@@ -813,11 +808,10 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
                 <button
                   key={pNum}
                   onClick={() => setPage(pNum)}
-                  className={`w-8 h-8 rounded-xl font-bold text-xs flex items-center justify-center cursor-pointer ${
-                    page === pNum
+                  className={`w-8 h-8 rounded-xl font-bold text-xs flex items-center justify-center cursor-pointer ${page === pNum
                       ? 'bg-orange-500 text-white shadow-xs'
                       : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
-                  }`}
+                    }`}
                 >
                   {pNum}
                 </button>
