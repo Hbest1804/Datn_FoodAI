@@ -17,6 +17,7 @@ const ChatbotView = lazy(() => import('./components/ChatbotView').then((m) => ({
 const SearchFilterView = lazy(() => import('./components/SearchFilterView').then((m) => ({ default: m.SearchFilterView })));
 const TasteProfileView = lazy(() => import('./components/TasteProfileView').then((m) => ({ default: m.TasteProfileView })));
 const UserProfileView = lazy(() => import('./components/UserProfileView').then((m) => ({ default: m.UserProfileView })));
+const MealPlanView = lazy(() => import('./components/MealPlanView').then((m) => ({ default: m.MealPlanView })));
 const AdminStudioView = lazy(() => import('./components/AdminStudioView').then((m) => ({ default: m.AdminStudioView })));
 
 const DEFAULT_GUEST: UserProfile = {
@@ -66,6 +67,7 @@ const TAB_PATHS: Record<string, string> = {
   chat: '/chat',
   profile: '/taste-profile',
   account: '/account',
+  mealPlan: '/thuc-don-tuan',
   admin: '/admin',
 };
 
@@ -514,6 +516,18 @@ export default function App() {
                   if (prompt) setInitialChatPrompt(prompt);
                   setCurrentTab('chat');
                 }}
+                onGoToTasteProfile={() => setCurrentTab('profile')}
+              />
+            }
+          />
+
+          <Route
+            path="/thuc-don-tuan"
+            element={
+              <MealPlanView
+                currentUser={currentUser}
+                sessionChecked={sessionChecked}
+                onOpenLogin={openLoginPage}
                 onGoToTasteProfile={() => setCurrentTab('profile')}
               />
             }

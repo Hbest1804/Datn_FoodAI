@@ -287,3 +287,40 @@ export interface AdminStats {
   /** Số người dùng theo chế độ ăn trong hồ sơ khẩu vị */
   dietDistribution: Array<{ id: number; name: string; users: number }>;
 }
+
+// Gợi ý thực đơn tuần (UC17) – GET /me/meal-plan
+export type MealKey = 'breakfast' | 'lunch' | 'dinner';
+
+export interface MealPlanItem {
+  id: number;
+  role: 'breakfast_main' | 'breakfast_side' | 'soup' | 'main' | 'vegetable';
+  role_label: string;
+  position: number;
+  dish: {
+    id: string;
+    name: string;
+    slug: string;
+    image_url: string | null;
+    category: string;
+    cook_time_minutes: number | null;
+    calories: number | null;
+    /** false khi món đã bị ẩn: người dùng nên đổi món khác */
+    is_available: boolean;
+  };
+}
+
+export interface MealPlanDay {
+  day_index: number;
+  date: string;
+  label: string;
+  meals: Array<{ meal: MealKey; label: string; items: MealPlanItem[] }>;
+}
+
+export interface MealPlan {
+  week_start: string | null;
+  week_end: string | null;
+  days: MealPlanDay[];
+  summary: { dish_count: number; item_count: number; unavailable_count: number };
+  personalized?: boolean;
+  warnings: string[];
+}
