@@ -365,31 +365,50 @@ export const Header: React.FC<HeaderProps> = ({
             { id: 'discovery', label: 'Khám phá', Icon: House },
             { id: 'search', label: 'Tìm kiếm', Icon: Search },
             { id: 'chat', label: 'Chef AI', Icon: ChefHat, fab: true },
+            { id: 'mealPlan', label: 'Thực đơn', Icon: CalendarDays },
             { id: 'account', label: 'Hồ sơ', Icon: User },
           ] as const).map((tab) => {
             const { id, label, Icon } = tab;
             const isFab = 'fab' in tab;
-            // Hồ sơ gồm cả trang tài khoản lẫn hồ sơ khẩu vị; khách bấm vào thì mở trang đăng nhập
+            // Hồ sơ gồm cả trang tài khoản lẫn hồ sơ khẩu vị; Thực đơn và Hồ sơ cần đăng nhập nên khách bấm vào thì mở trang đăng nhập
             const active = id === 'account' ? currentTab === 'account' || currentTab === 'profile' : currentTab === id;
+            const needsLogin = id === 'account' || id === 'mealPlan';
             return (
               <button
                 key={id}
-                onClick={() => (id === 'account' && !currentUser.isLoggedIn ? onOpenLoginModal() : onTabChange(id))}
+                onClick={() => (needsLogin && !currentUser.isLoggedIn ? onOpenLoginModal() : onTabChange(id))}
                 aria-label={label}
                 aria-current={active ? 'page' : undefined}
-                className="flex-1 min-w-0 flex flex-col items-center gap-1 cursor-pointer select-none transition-transform active:scale-95"
+                className={`tabbar-btn flex-1 min-w-0 flex flex-col items-center gap-1 cursor-pointer select-none [-webkit-tap-highlight-color:transparent] ${
+                  isFab ? '' : 'transition-transform active:scale-90'
+                }`}
               >
                 {isFab ? (
-                  <span className="flex items-center justify-center size-[52px] rounded-full bg-orange-600 text-white shadow-[0_10px_15px_-3px_rgba(249,115,22,0.25),0_4px_6px_-4px_rgba(249,115,22,0.25)]">
-                    <Icon className="size-6" strokeWidth={2} />
+                  /* Nút Chef AI: khối 3D nhô lên khỏi mép thanh, bồng bềnh nghiêng nhẹ, có vệt sáng quét qua */
+                  <span className="tabbar-fab-float -mt-6 mb-0.5">
+                    <span className="tabbar-fab relative flex items-center justify-center size-[52px] rounded-full text-white ring-4 ring-white">
+                      <span className="absolute inset-0 rounded-full overflow-hidden pointer-events-none">
+                        <span className="tabbar-sheen absolute -inset-y-2 left-0 w-1/2 bg-gradient-to-r from-transparent via-white/45 to-transparent" />
+                      </span>
+                      <span
+                        key={active ? 'on' : 'off'}
+                        className={`relative drop-shadow-[0_2px_2px_rgba(110,24,0,0.45)] ${active ? 'tabbar-flip' : ''}`}
+                      >
+                        <Icon className="size-6" strokeWidth={2.2} />
+                      </span>
+                    </span>
                   </span>
                 ) : (
                   <span
-                    className={`flex items-center px-4 py-1 rounded-full transition-colors ${
-                      active ? 'bg-orange-50 text-orange-600' : 'text-slate-500'
+                    className={`relative flex items-center px-4 py-1 rounded-full transition-colors duration-300 ${
+                      active ? 'text-orange-600' : 'text-slate-500'
                     }`}
                   >
-                    <Icon className="size-[22px]" strokeWidth={2} />
+                    {active && <span className="tabbar-pill tabbar-pill-in absolute inset-0 rounded-full bg-orange-50" />}
+                    {/* key đổi khi được chọn để chạy lại hiệu ứng lật 3D */}
+                    <span key={active ? 'on' : 'off'} className={`relative ${active ? 'tabbar-flip' : ''}`}>
+                      <Icon className="size-[22px]" strokeWidth={active ? 2.3 : 2} />
+                    </span>
                   </span>
                 )}
                 <span
