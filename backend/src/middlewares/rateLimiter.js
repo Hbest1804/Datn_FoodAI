@@ -4,6 +4,7 @@
 
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { sendError } from '../utils/http.js';
+import { getClientIp } from '../utils/clientIp.js';
 
 const MINUTE = 60 * 1000;
 
@@ -13,7 +14,7 @@ function limiter({ windowMs, max, byUser = false, keyPrefix, message }) {
     limit: max,
     standardHeaders: false,
     legacyHeaders: true,
-    keyGenerator: (req) => `${keyPrefix}:${byUser && req.user?.id ? req.user.id : ipKeyGenerator(req.ip)}`,
+    keyGenerator: (req) => `${keyPrefix}:${byUser && req.user?.id ? req.user.id : ipKeyGenerator(getClientIp(req))}`,
     handler: (req, res) => {
       const resetMs = req.rateLimit?.resetTime ? req.rateLimit.resetTime.getTime() - Date.now() : windowMs;
       const retryAfter = Math.max(1, Math.ceil(resetMs / 1000));

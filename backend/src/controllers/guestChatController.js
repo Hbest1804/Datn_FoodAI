@@ -7,6 +7,7 @@ import { generateCulinaryReply } from '../services/aiService.js';
 import { getSettings } from '../services/settingsService.js';
 import { checkTopic, detectQuestionAllergens, getDietConstraints, parsePantry, retrieveDishes, toDishCard } from '../services/chatContextService.js';
 import { sendError, sendOk } from '../utils/http.js';
+import { getClientIp } from '../utils/clientIp.js';
 
 const MAX_CONTENT_LENGTH = 1000;
 const HOUR_MS = 60 * 60 * 1000;
@@ -41,11 +42,6 @@ function appendGuestHistory(guestId, windowMs, ...messages) {
   if (record.messages.length > MAX_GUEST_HISTORY) record.messages.splice(0, record.messages.length - MAX_GUEST_HISTORY);
 }
 
-// req.ip đã tính theo "trust proxy" (địa chỉ do proxy tin cậy ghi nhận); không đọc thẳng X-Forwarded-For
-// vì phần đầu của header này do máy khách tự gửi, giả được để lách hạn mức theo IP
-function getClientIp(req) {
-  return req.ip || req.socket?.remoteAddress || '127.0.0.1';
-}
 
 setInterval(() => {
   const now = Date.now();
