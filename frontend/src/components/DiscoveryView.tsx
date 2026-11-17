@@ -21,6 +21,7 @@ import {
 import { UserProfile, Recipe } from '../types';
 import { apiService } from '../api';
 import { formatMetric, hasNutrition, NO_NUTRITION_TEXT } from '../utils/dishUtils';
+import { DishOrbitBanner } from './DishOrbitBanner';
 
 interface DiscoveryViewProps {
   currentUser: UserProfile;
@@ -861,6 +862,9 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
           </button>
         </section>
       )}
+
+      {/* Banner trang trí: tô cơm ở giữa, 10 món bay quanh */}
+      <DishOrbitBanner recipes={allRecipes} totalRecipes={totalRecipes} />
 
       {/* Lối tắt cuối trang */}
       <section className="grid grid-cols-1 gap-5">

@@ -17,7 +17,8 @@ import {
   Heart,
   Loader2,
   AlertCircle,
-  MessageSquare
+  MessageSquare,
+  ShoppingBasket
 } from 'lucide-react';
 import { Recipe, UserProfile } from '../types';
 import { apiService } from '../api';
@@ -62,6 +63,11 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
   const [favLoading, setFavLoading] = useState(false);
   // Nguyên liệu người dùng đánh dấu là đang có sẵn (theo tên)
   const [haveIngredients, setHaveIngredients] = useState<Set<string>>(new Set());
+
+  // Thêm vào thực đơn / danh sách đi chợ (UC17): null = đóng, 'pick' = chọn khẩu phần, số = món đã có với số khẩu phần hiện tại
+  const [shopPanel, setShopPanel] = useState<null | 'pick' | number>(null);
+  const [shopServings, setShopServings] = useState(initialRecipe.servings || 2);
+  const [shopSaving, setShopSaving] = useState(false);
 
   // Review state
   const [reviewRating, setReviewRating] = useState(5);
@@ -164,6 +170,40 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
     let prompt = `Mình muốn nấu món "${recipe.title}" nhưng đang thiếu: ${missingIngredients.join(', ')}. Có thể dùng nguyên liệu nào để thay thế?`;
     if (have.length > 0) prompt += ` Mình đang có sẵn: ${have.join(', ')}.`;
     onOpenChatWithPrompt(prompt, have);
+  };
+
+  // Chỉ món có đủ nguyên liệu và các bước mới thêm được vào thực đơn (luồng 1c)
+  const canAddToShopping = !loadingDetail && (recipe.ingredients?.length || 0) > 0 && (recipe.steps?.length || 0) > 0;
+
+  const openShopPanel = () => {
+    if (!currentUser.isLoggedIn) {
+      // Đăng nhập xong quay lại đúng trang chi tiết món (luồng 1b)
+      if (onOpenAuth) onOpenAuth();
+      else toast.warning('Vui lòng đăng nhập để lên thực đơn!');
+      return;
+    }
+    setShopServings(Math.min(100, Math.max(1, recipe.servings || 2)));
+    setShopPanel('pick');
+  };
+
+  const handleAddToShopping = async (onExisting?: 'add' | 'replace') => {
+    try {
+      setShopSaving(true);
+      const res = await apiService.shoppingList.addDish(String(recipe.id), shopServings, onExisting);
+      setShopPanel(null);
+      toast.success(
+        `Đã thêm "${res.dish.name}" (${res.dish.servings} khẩu phần) vào thực đơn. Danh sách đi chợ cần mua ${res.summary.to_buy} nguyên liệu.`,
+        'Thực đơn'
+      );
+    } catch (err: any) {
+      if (err?.code === 'SHOPPING_DISH_EXISTS') {
+        setShopPanel(Number(err.details?.current_servings) || 0);
+      } else {
+        toast.error(err.message || 'Không thêm được món vào thực đơn.');
+      }
+    } finally {
+      setShopSaving(false);
+    }
   };
 
   const handleStartTimer = (durationMinutes: number) => {
@@ -430,7 +470,91 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
                   <Clock className="w-4 h-4" />
                   Bắt đầu nấu
                 </button>
+                {canAddToShopping && (
+                  <button
+                    onClick={openShopPanel}
+                    className="px-5 py-3 bg-white border border-orange-300 hover:bg-orange-50 text-orange-700 font-bold text-xs sm:text-sm rounded-2xl transition-all flex items-center gap-2 cursor-pointer"
+                  >
+                    <ShoppingBasket className="w-4 h-4" />
+                    Thêm vào thực đơn
+                  </button>
+                )}
               </div>
+
+              {shopPanel === 'pick' && (
+                <div className="p-4 bg-white rounded-2xl border border-orange-200 flex flex-wrap items-center gap-3">
+                  <span className="text-xs font-bold text-slate-700">Số khẩu phần định nấu:</span>
+                  <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
+                    <button
+                      onClick={() => setShopServings(Math.max(1, shopServings - 1))}
+                      className="w-7 h-7 rounded-lg bg-white flex items-center justify-center text-slate-700 hover:text-orange-600 cursor-pointer"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={shopServings}
+                      onChange={(e) => setShopServings(Math.min(100, Math.max(1, Math.round(Number(e.target.value) || 1))))}
+                      className="w-12 text-center text-xs font-bold text-slate-900 bg-transparent outline-none"
+                    />
+                    <button
+                      onClick={() => setShopServings(Math.min(100, shopServings + 1))}
+                      className="w-7 h-7 rounded-lg bg-white flex items-center justify-center text-slate-700 hover:text-orange-600 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 ml-auto">
+                    <button
+                      onClick={() => setShopPanel(null)}
+                      className="px-3 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-xl cursor-pointer"
+                    >
+                      Hủy
+                    </button>
+                    <button
+                      onClick={() => handleAddToShopping()}
+                      disabled={shopSaving}
+                      className="px-4 py-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer"
+                    >
+                      {shopSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                      Thêm
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {typeof shopPanel === 'number' && (
+                <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 space-y-3">
+                  <p className="text-xs text-amber-900">
+                    Món này đã có trong thực đơn với <strong>{shopPanel} khẩu phần</strong>. Bạn muốn làm gì với{' '}
+                    <strong>{shopServings} khẩu phần</strong> vừa chọn?
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => handleAddToShopping('add')}
+                      disabled={shopSaving}
+                      className="px-4 py-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-xs font-bold rounded-xl cursor-pointer"
+                    >
+                      Cộng thêm (thành {Math.min(100, shopPanel + shopServings)})
+                    </button>
+                    <button
+                      onClick={() => handleAddToShopping('replace')}
+                      disabled={shopSaving}
+                      className="px-4 py-2 bg-white border border-amber-300 hover:bg-amber-100 disabled:opacity-50 text-amber-900 text-xs font-bold rounded-xl cursor-pointer"
+                    >
+                      Thay bằng {shopServings} khẩu phần
+                    </button>
+                    <button
+                      onClick={() => setShopPanel(null)}
+                      className="px-3 py-2 text-xs font-bold text-slate-500 hover:bg-white rounded-xl cursor-pointer"
+                    >
+                      Hủy
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

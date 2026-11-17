@@ -11,6 +11,10 @@ interface AuthScene3DProps {
   dishes: SceneDish[];
   /** Thu nhỏ cả cảnh (dùng cho đầu trang trên điện thoại) */
   compact?: boolean;
+  /** Vật ở tâm vòng (mặc định là logo đầu bếp) */
+  center?: React.ReactNode;
+  /** Số món tối đa bay quanh (mặc định 8) */
+  maxItems?: number;
 }
 
 // Món dự phòng khi chưa tải được món từ máy chủ: chỉ hiện tên trên nền màu
@@ -33,22 +37,26 @@ const FALLBACK_ICONS = [Soup, Wheat, Salad, Fish, Drumstick, Egg, Beef, Carrot];
  * Mỗi khung hình tính lại vị trí bằng requestAnimationFrame và ghi thẳng vào style (không render lại React).
  * Cả cảnh nghiêng theo vị trí chuột; người dùng bật "giảm chuyển động" thì vòng đứng yên.
  */
-export const AuthScene3D: React.FC<AuthScene3DProps> = ({ dishes, compact = false }) => {
+export const AuthScene3D: React.FC<AuthScene3DProps> = ({ dishes, compact = false, center, maxItems = 8 }) => {
   const stageRef = useRef<HTMLDivElement>(null);
   const tiltRef = useRef<HTMLDivElement>(null);
   const cardRefs = useRef<Array<HTMLDivElement | null>>([]);
 
-  const items = (dishes.filter((d) => d.image).length >= 5 ? dishes.filter((d) => d.image) : FALLBACK_DISHES).slice(0, 8);
+  const items = (dishes.filter((d) => d.image).length >= 5 ? dishes.filter((d) => d.image) : FALLBACK_DISHES).slice(0, maxItems);
 
   useEffect(() => {
     const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     const count = items.length;
-    const radiusX = compact ? 165 : 250;
-    const radiusZ = compact ? 90 : 160;
+    // Nhiều hơn 8 món thì nới quỹ đạo cho thưa (chỉ bản máy tính; bản điện thoại giữ nguyên để vừa màn hình)
+    const spread = !compact && count > 8 ? 1.12 : 1;
+    const radiusX = (compact ? 165 : 250) * spread;
+    const radiusZ = (compact ? 90 : 160) * spread;
     const lift = compact ? 48 : 96; // độ nghiêng quỹ đạo: món phía trước thấp hơn logo, món phía sau cao hơn
     let angle = 0;
     let last = performance.now();
     let frame = 0;
+    // Chỉ chạy hoạt ảnh khi cảnh đang nằm trong màn hình (trang chủ dài, cuộn qua thì dừng)
+    let visible = true;
 
     const place = () => {
       for (let i = 0; i < count; i++) {
@@ -72,12 +80,29 @@ export const AuthScene3D: React.FC<AuthScene3DProps> = ({ dishes, compact = fals
       last = now;
       angle += dt * 0.00022;
       place();
-      frame = requestAnimationFrame(tick);
+      frame = visible ? requestAnimationFrame(tick) : 0;
     };
 
     place();
-    if (!reduceMotion) frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
+    let observer: IntersectionObserver | null = null;
+    if (!reduceMotion) {
+      frame = requestAnimationFrame(tick);
+      const stage = stageRef.current;
+      if (stage && 'IntersectionObserver' in window) {
+        observer = new IntersectionObserver(([entry]) => {
+          visible = entry.isIntersecting;
+          if (visible && !frame) {
+            last = performance.now();
+            frame = requestAnimationFrame(tick);
+          }
+        });
+        observer.observe(stage);
+      }
+    }
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
   }, [items.length, compact]);
 
   // Nghiêng cả cảnh theo chuột (chỉ máy tính)
@@ -135,7 +160,7 @@ export const AuthScene3D: React.FC<AuthScene3DProps> = ({ dishes, compact = fals
                 <span key={i} className="auth-steam block w-1.5 h-8 rounded-full bg-white/50" style={{ animationDelay: `${i * 0.6}s` }} />
               ))}
             </div>
-            <ChefLogo3D size={compact ? 'lg' : 'hero'} interactive={false} />
+            {center ?? <ChefLogo3D size={compact ? 'lg' : 'hero'} interactive={false} />}
           </div>
           <div className={`mx-auto mt-4 rounded-[50%] bg-black/25 blur-md ${compact ? 'w-14 h-2' : 'w-24 h-3'}`} />
         </div>

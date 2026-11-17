@@ -8,7 +8,8 @@ import {
   UserPlus,
   Flame,
   User,
-  ChefHat
+  ChefHat,
+  ShoppingBasket
 } from 'lucide-react';
 import { UserProfile, UserRole, GuestQuota } from '../types';
 import { apiService } from '../api';
@@ -187,6 +188,18 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 Trò chuyện AI
               </button>
+              {currentUser.isLoggedIn && (
+                <button
+                  onClick={() => onTabChange('shopping')}
+                  className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer ${
+                    currentTab === 'shopping'
+                      ? 'text-orange-600 bg-orange-50 font-bold'
+                      : 'text-slate-600 hover:text-ink hover:bg-surface-2'
+                  }`}
+                >
+                  Thực đơn
+                </button>
+              )}
             </nav>
           ) : null}
 
@@ -290,6 +303,16 @@ export const Header: React.FC<HeaderProps> = ({
                           <ChefHat className="w-4 h-4 text-orange-500" />
                           Hồ sơ khẩu vị & Dinh dưỡng
                         </button>
+                        <button
+                          onClick={() => {
+                            setShowUserDropdown(false);
+                            onTabChange('shopping');
+                          }}
+                          className="w-full text-left px-3 py-2 text-xs font-semibold rounded-lg hover:bg-orange-50 hover:text-orange-600 text-slate-700 flex items-center gap-2 cursor-pointer"
+                        >
+                          <ShoppingBasket className="w-4 h-4 text-orange-500" />
+                          Thực đơn & đi chợ
+                        </button>
                         {currentUser.role === 'admin' && (
                           <button
                             onClick={() => {
@@ -353,6 +376,16 @@ export const Header: React.FC<HeaderProps> = ({
             >
               Trò chuyện AI
             </button>
+            {currentUser.isLoggedIn && (
+              <button
+                onClick={() => onTabChange('shopping')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg shrink-0 ${
+                  currentTab === 'shopping' ? 'bg-orange-500 text-white' : 'bg-surface-2 text-slate-700'
+                }`}
+              >
+                Thực đơn
+              </button>
+            )}
           </div>
         )}
       </div>
