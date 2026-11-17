@@ -9,7 +9,10 @@ import {
   Flame,
   User,
   ChefHat,
-  CalendarDays
+  CalendarDays,
+  Compass,
+  SlidersHorizontal,
+  MessageCircle
 } from 'lucide-react';
 import { UserProfile, UserRole, GuestQuota } from '../types';
 import { apiService } from '../api';
@@ -351,42 +354,45 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Mobile Navigation bar */}
         {!isAdminMode && (
-          <div className="flex lg:hidden overflow-x-auto py-2 gap-2 border-t border-line no-scrollbar">
-            <button
-              onClick={() => onTabChange('discovery')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg shrink-0 ${
-                currentTab === 'discovery' ? 'bg-orange-500 text-white' : 'bg-surface-2 text-slate-700'
-              }`}
-            >
-              Khám phá
-            </button>
-            <button
-              onClick={() => onTabChange('search')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg shrink-0 ${
-                currentTab === 'search' ? 'bg-orange-500 text-white' : 'bg-surface-2 text-slate-700'
-              }`}
-            >
-              Tìm kiếm & Lọc
-            </button>
-            <button
-              onClick={() => onTabChange('chat')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg shrink-0 ${
-                currentTab === 'chat' ? 'bg-orange-500 text-white' : 'bg-surface-2 text-slate-700'
-              }`}
-            >
-              Trò chuyện AI
-            </button>
-            {currentUser.isLoggedIn && (
-              <button
-                onClick={() => onTabChange('mealPlan')}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg shrink-0 ${
-                  currentTab === 'mealPlan' ? 'bg-orange-500 text-white' : 'bg-surface-2 text-slate-700'
-                }`}
-              >
-                Thực đơn tuần
-              </button>
-            )}
-          </div>
+          <nav
+            className={`grid lg:hidden border-t border-line py-1.5 gap-1 ${
+              currentUser.isLoggedIn ? 'grid-cols-4' : 'grid-cols-3'
+            }`}
+            aria-label="Điều hướng chính"
+          >
+            {[
+              { id: 'discovery', label: 'Khám phá', Icon: Compass },
+              { id: 'search', label: 'Tìm kiếm', Icon: SlidersHorizontal },
+              { id: 'chat', label: 'Hỏi AI', Icon: MessageCircle },
+              ...(currentUser.isLoggedIn
+                ? [{ id: 'mealPlan', label: 'Thực đơn', Icon: CalendarDays }]
+                : []),
+            ].map(({ id, label, Icon }) => {
+              const active = currentTab === id;
+              return (
+                <button
+                  key={id}
+                  onClick={() => onTabChange(id)}
+                  aria-label={label}
+                  aria-current={active ? 'page' : undefined}
+                  className={`flex flex-col items-center justify-center gap-0.5 py-1 rounded-xl transition-colors cursor-pointer select-none active:scale-95 ${
+                    active ? 'text-orange-600' : 'text-slate-500 hover:text-ink'
+                  }`}
+                >
+                  <span
+                    className={`flex items-center justify-center w-12 h-7 rounded-full transition-colors ${
+                      active ? 'bg-orange-100' : ''
+                    }`}
+                  >
+                    <Icon className="w-5 h-5" strokeWidth={active ? 2.4 : 2} />
+                  </span>
+                  <span className={`text-[11px] leading-tight ${active ? 'font-bold' : 'font-medium'}`}>
+                    {label}
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
         )}
       </div>
     </header>
