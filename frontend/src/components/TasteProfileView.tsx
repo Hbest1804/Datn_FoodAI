@@ -55,6 +55,8 @@ function toForm(p: BackendTasteProfile, fallback: TasteProfileForm): TasteProfil
       liked_ingredient_ids: p.taste_prefs?.liked_ingredient_ids ?? [],
     },
     household_size: p.household_size ?? fallback.household_size,
+    // Ô calo luôn hiển thị một con số, nên null từ máy chủ phải lấy mặc định, không thì lưu lại vẫn là null
+    calorie_goal: p.calorie_goal ?? fallback.calorie_goal,
   };
 }
 
@@ -163,7 +165,7 @@ export const TasteProfileView: React.FC<TasteProfileViewProps> = ({
     return () => clearTimeout(timer);
   }, [ingSearchInput]);
 
-  // Độ hoàn thiện tính như máy chủ: mức vị 20, nguyên liệu thích 10, chế độ ăn 15, dị ứng 15, calo 20, ngân sách 20
+  // Độ hoàn thiện tính như máy chủ: mức vị 20, nguyên liệu thích 20, chế độ ăn 20, calo 20, ngân sách 20
   const completenessScore = useMemo(() => {
     let score = 0;
     const prefs = profile.taste_prefs;
