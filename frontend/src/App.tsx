@@ -540,14 +540,8 @@ export default function App() {
             element={
               currentUser.role === 'admin' ? (
                 <AdminStudioView
-                  onBackToUserMode={() => {
-                    setCurrentTab('discovery');
-                    setCurrentUser(prev => ({
-                      ...prev,
-                      role: 'user',
-                      roleLabel: 'Đầu bếp tại gia',
-                    }));
-                  }}
+                  // Chỉ chuyển sang giao diện người dùng, giữ nguyên vai trò để còn quay lại Cổng quản trị
+                  onBackToUserMode={() => setCurrentTab('discovery')}
                   recipes={recipes}
                   onOpenRecipe={openRecipe}
                 />
