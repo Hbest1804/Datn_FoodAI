@@ -208,7 +208,9 @@ export async function adminGetAuditLogs(req, res) {
     .from('audit_logs')
     .select('id, action, target_type, target_id, detail, created_at, actor:users(id, display_name)', { count: 'exact' })
     .gte('created_at', range.fromIso)
-    .lte('created_at', range.toIso);
+    .lte('created_at', range.toIso)
+    // Bản ghi cũ của tính năng Bài viết (đã bỏ khỏi phạm vi) – không hiển thị
+    .not('action', 'like', 'post.%');
   if (req.query.actor_id) query = query.eq('actor_id', req.query.actor_id);
   if (typeof req.query.action === 'string' && req.query.action.trim()) query = query.eq('action', req.query.action.trim());
   query = query.order('created_at', { ascending: false }).range(pg.from, pg.to);

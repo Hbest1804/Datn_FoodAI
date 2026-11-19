@@ -299,11 +299,11 @@ export const AuditLogPanel: React.FC = () => {
                     <td className="py-2.5 font-semibold text-slate-800">{log.actor?.display_name || 'Không rõ'}</td>
                     <td className="py-2.5">
                       <span className={`inline-block px-2 py-0.5 rounded-md text-[11px] font-bold ${actionTone(log.action)}`}>
-                        {ACTION_LABELS[log.action] || log.action}
+                        {ACTION_LABELS[log.action] || 'Thao tác khác'}
                       </span>
                     </td>
                     <td className="py-2.5 text-slate-600">
-                      <div className="font-semibold text-slate-700">{TARGET_LABELS[log.target_type] || log.target_type || '—'}</div>
+                      <div className="font-semibold text-slate-700">{TARGET_LABELS[log.target_type] || '—'}</div>
                     </td>
                     <td className="py-2.5 pr-3 text-slate-600 text-[11px] break-words max-w-xs">{describeDetail(log.detail)}</td>
                   </tr>
