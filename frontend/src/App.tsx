@@ -423,7 +423,15 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-slate-800 flex flex-col font-sans">
+    <div className="isolate min-h-screen bg-[#F8FAFC] text-slate-800 flex flex-col font-sans">
+      {/* Nền 3D: vầng sáng trôi chậm và lưới chấm nghiêng phía sau nội dung */}
+      <div className="fx-ambient" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+        <i />
+      </div>
+
       {/* Header */}
       <Header
         currentTab={currentTab}

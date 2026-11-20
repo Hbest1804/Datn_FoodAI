@@ -309,3 +309,348 @@ input, select, textarea, button {
 @media (prefers-reduced-motion: reduce) {
   .tabbar-flip, .tabbar-pill-in, .tabbar-fab-float, .tabbar-sheen { animation: none; }
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   Bộ hiệu ứng 3D dùng chung cho mọi trang (xem src/utils/fx3d.ts)
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── Thẻ hiện lên kiểu lật 3D khi cuộn tới ──
+   Chỉ dùng fill "backwards": chạy xong thì transform trở về none, không làm hỏng
+   các phần tử position: fixed nằm bên trong thẻ. */
+@keyframes fx-reveal {
+  from {
+    opacity: 0;
+    transform: perspective(1100px) translate3d(0, 28px, -40px) rotateX(14deg) scale(0.97);
+  }
+  60% { opacity: 1; }
+  to { opacity: 1; transform: none; }
+}
+[data-fx-reveal='pending'] { opacity: 0; }
+[data-fx-reveal='in'] {
+  animation: fx-reveal 0.7s cubic-bezier(0.22, 1, 0.36, 1) var(--fx-delay, 0ms) backwards;
+  transform-origin: 50% 100%;
+}
+
+/* ── Thẻ nghiêng theo chuột, có bóng đổ dịch theo và vệt sáng ── */
+[data-fx-tilt] {
+  transition:
+    transform 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    translate 0.3s ease-out, scale 0.3s ease-out,
+    border-color 0.2s, background-color 0.2s, color 0.2s;
+}
+[data-fx-tilt='on'] {
+  transform: perspective(900px) rotateX(var(--fx-rx, 0deg)) rotateY(var(--fx-ry, 0deg)) scale(1.02);
+  transition:
+    transform 0.12s ease-out, box-shadow 0.2s ease-out,
+    translate 0.3s ease-out, scale 0.3s ease-out,
+    border-color 0.2s, background-color 0.2s, color 0.2s;
+  box-shadow:
+    var(--fx-sx, 0px) var(--fx-sy, 12px) 30px -12px rgba(15, 23, 42, 0.22),
+    0 2px 6px -2px rgba(249, 115, 22, 0.12);
+  z-index: 1;
+}
+[data-fx-glare]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 20;
+  opacity: 0;
+  transition: opacity 0.4s ease-out;
+  background: radial-gradient(circle at var(--fx-gx, 50%) var(--fx-gy, 0%), rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 55%);
+  mix-blend-mode: soft-light;
+}
+[data-fx-glare][data-fx-tilt='on']::after { opacity: 1; }
+
+/* Điện thoại: chạm vào thẻ bấm được thì thẻ lún nhẹ ra sau */
+@media (hover: none) {
+  .cursor-pointer[data-fx-reveal='done']:active,
+  a[data-fx-reveal='done']:active {
+    transform: perspective(800px) rotateX(3deg) scale(0.975);
+    transition: transform 0.12s ease-out;
+  }
+}
+
+/* ── Nút chính (cam, đen) dạng khối 3D: có cạnh dày phía dưới, bấm vào thì lún xuống ── */
+:is(button, a).bg-orange-500:not(:disabled),
+:is(button, a).bg-orange-600:not(:disabled) {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 3px 0 0 #c2410c,
+    0 8px 16px -6px rgba(234, 88, 12, 0.55);
+  transition: transform 0.12s ease-out, box-shadow 0.12s ease-out, background-color 0.15s;
+}
+:is(button, a).bg-slate-900:not(:disabled) {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    0 3px 0 0 #020617,
+    0 8px 16px -6px rgba(15, 23, 42, 0.5);
+  transition: transform 0.12s ease-out, box-shadow 0.12s ease-out, background-color 0.15s;
+}
+:is(button, a).bg-emerald-500:not(:disabled),
+:is(button, a).bg-emerald-600:not(:disabled) {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 3px 0 0 #047857,
+    0 8px 16px -6px rgba(5, 150, 105, 0.5);
+  transition: transform 0.12s ease-out, box-shadow 0.12s ease-out, background-color 0.15s;
+}
+@media (hover: hover) {
+  :is(button, a):is(.bg-orange-500, .bg-orange-600, .bg-slate-900, .bg-emerald-500, .bg-emerald-600):not(:disabled):hover {
+    transform: translateY(-1px);
+  }
+}
+:is(button, a):is(.bg-orange-500, .bg-orange-600):not(:disabled):active {
+  transform: translateY(3px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 0 0 0 #c2410c, 0 2px 6px -2px rgba(234, 88, 12, 0.5);
+}
+:is(button, a).bg-slate-900:not(:disabled):active {
+  transform: translateY(3px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 0 0 0 #020617, 0 2px 6px -2px rgba(15, 23, 42, 0.5);
+}
+:is(button, a):is(.bg-emerald-500, .bg-emerald-600):not(:disabled):active {
+  transform: translateY(3px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 0 0 0 #047857, 0 2px 6px -2px rgba(5, 150, 105, 0.5);
+}
+
+/* ── animate-in / fade-in / zoom-in / slide-in-from-* ──
+   Các class này có sẵn trong code nhưng chưa có plugin nên trước giờ không chạy.
+   Định nghĩa lại theo kiểu 3D: mỗi class góp một phần vào điểm xuất phát. */
+@keyframes fx-enter {
+  from {
+    opacity: var(--fx-o, 1);
+    transform: perspective(1000px) translate3d(var(--fx-x, 0), var(--fx-y, 0), var(--fx-z, 0))
+      rotateX(var(--fx-erx, 0deg)) rotateY(var(--fx-ery, 0deg)) scale(var(--fx-s, 1));
+  }
+}
+.animate-in {
+  animation: fx-enter var(--tw-duration, 0.35s) cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+.fade-in { --fx-o: 0; }
+[class*='zoom-in-'] { --fx-s: 0.94; --fx-z: -40px; --fx-erx: 10deg; }
+[class*='slide-in-from-bottom'] { --fx-y: 1.25rem; --fx-erx: 14deg; }
+[class*='slide-in-from-top'] { --fx-y: -0.75rem; --fx-erx: -14deg; }
+[class*='slide-in-from-right'] { --fx-x: 1.25rem; --fx-ery: -14deg; }
+[class*='slide-in-from-left'] { --fx-x: -1.25rem; --fx-ery: 14deg; }
+
+/* Khung modal (thẻ trắng nằm trong lớp phủ toàn màn hình) bật ra kiểu 3D */
+@keyframes fx-modal-in {
+  from {
+    opacity: 0;
+    transform: perspective(1400px) translate3d(0, 40px, -80px) rotateX(16deg) scale(0.94);
+  }
+  to { opacity: 1; transform: none; }
+}
+.fixed.inset-0 > .bg-white:is(.rounded-2xl, .rounded-3xl, [class*='rounded-[']) {
+  animation: fx-modal-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  transform-origin: 50% 0%;
+}
+
+/* ── Nền: các vầng sáng màu trôi chậm trong không gian 3D phía sau nội dung ── */
+.fx-ambient {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  perspective: 900px;
+}
+.fx-ambient > span {
+  position: absolute;
+  border-radius: 9999px;
+  will-change: transform;
+}
+.fx-ambient > span:nth-child(1) {
+  width: 46vmax; height: 46vmax; top: -18vmax; right: -12vmax;
+  background: radial-gradient(circle, rgba(251, 146, 60, 0.22), rgba(251, 146, 60, 0) 65%);
+  animation: fx-drift-a 22s ease-in-out infinite;
+}
+.fx-ambient > span:nth-child(2) {
+  width: 40vmax; height: 40vmax; bottom: -16vmax; left: -14vmax;
+  background: radial-gradient(circle, rgba(52, 211, 153, 0.16), rgba(52, 211, 153, 0) 65%);
+  animation: fx-drift-b 26s ease-in-out infinite;
+}
+.fx-ambient > span:nth-child(3) {
+  width: 30vmax; height: 30vmax; top: 38%; left: 42%;
+  background: radial-gradient(circle, rgba(250, 204, 21, 0.13), rgba(250, 204, 21, 0) 65%);
+  animation: fx-drift-c 30s ease-in-out infinite;
+}
+/* Lưới chấm mờ phía trên, nghiêng như mặt bàn bếp nhìn từ xa */
+.fx-ambient > i {
+  position: absolute;
+  left: -25%; right: -25%; top: -10%;
+  height: 70vh;
+  background-image: radial-gradient(rgba(148, 163, 184, 0.35) 1px, transparent 1.4px);
+  background-size: 26px 26px;
+  transform: rotateX(58deg);
+  transform-origin: 50% 0%;
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.55), transparent 75%);
+  -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.55), transparent 75%);
+}
+@keyframes fx-drift-a {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(-8vmax, 6vmax, 120px) scale(1.08); }
+}
+@keyframes fx-drift-b {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(9vmax, -5vmax, 80px) scale(1.1); }
+}
+@keyframes fx-drift-c {
+  0%, 100% { transform: translate3d(0, 0, -60px) scale(0.95); }
+  33% { transform: translate3d(-10vmax, -6vmax, 60px) scale(1.05); }
+  66% { transform: translate3d(6vmax, 8vmax, 0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-fx-reveal] { opacity: 1 !important; animation: none !important; }
+  [data-fx-tilt] { transform: none !important; }
+  .animate-in,
+  .fixed.inset-0 > .bg-white,
+  .fx-ambient > span { animation: none !important; }
+  :is(button, a):not(:disabled):is(:hover, :active) { transform: none !important; }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   Cổng quản trị trên điện thoại: dock nổi + menu lật 3D (AdminMobileNav.tsx)
+   ══════════════════════════════════════════════════════════════════ */
+
+/* Dock nổi: kính mờ, viền sáng, đổ bóng sâu như đang lơ lửng trên trang */
+.adm-dock {
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(16px) saturate(1.6);
+  -webkit-backdrop-filter: blur(16px) saturate(1.6);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 1),
+    0 1px 0 rgba(226, 232, 240, 0.9),
+    0 18px 40px -14px rgba(15, 23, 42, 0.35),
+    0 6px 14px -6px rgba(249, 115, 22, 0.25);
+  animation: adm-dock-in 0.7s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+  transform-origin: 50% 100%;
+}
+@keyframes adm-dock-in {
+  from { opacity: 0; transform: perspective(700px) translateY(40px) rotateX(-55deg) scale(0.92); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Icon vuông dạng viên kẹo 3D: mặt trên bóng, cạnh dưới đậm */
+.adm-icon {
+  box-shadow:
+    inset 0 1.5px 1px rgba(255, 255, 255, 0.5),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.18),
+    0 3px 0 rgba(0, 0, 0, 0.12),
+    0 6px 12px -4px rgba(15, 23, 42, 0.35);
+  transform-style: preserve-3d;
+}
+
+/* Nút Menu: khối cam dày, bồng bềnh nhẹ, bấm vào lún xuống */
+.adm-fab {
+  background: radial-gradient(circle at 30% 20%, #ffb347 0%, #f97316 45%, #ea580c 80%, #c2410c 100%);
+  box-shadow:
+    inset 0 2px 2px rgba(255, 255, 255, 0.45),
+    inset 0 -3px 5px rgba(124, 45, 18, 0.35),
+    0 5px 0 0 #b33200,
+    0 12px 20px -6px rgba(249, 115, 22, 0.55);
+  transition: transform 0.14s ease-out, box-shadow 0.14s ease-out, background 0.3s;
+}
+.adm-fab-btn:active .adm-fab {
+  transform: translateY(4px);
+  box-shadow:
+    inset 0 2px 2px rgba(255, 255, 255, 0.45),
+    inset 0 -2px 4px rgba(124, 45, 18, 0.35),
+    0 1px 0 0 #b33200,
+    0 4px 8px -2px rgba(249, 115, 22, 0.45);
+}
+.adm-fab-icon { transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); transform-style: preserve-3d; }
+.adm-fab-open {
+  background: radial-gradient(circle at 30% 20%, #475569 0%, #1e293b 60%, #0f172a 100%);
+  box-shadow:
+    inset 0 2px 2px rgba(255, 255, 255, 0.2),
+    inset 0 -3px 5px rgba(0, 0, 0, 0.4),
+    0 5px 0 0 #020617,
+    0 12px 20px -6px rgba(15, 23, 42, 0.5);
+}
+.adm-fab-open .adm-fab-icon { transform: perspective(200px) rotateX(360deg); }
+
+/* Tên mục trên dock trượt lên khi đổi */
+@keyframes adm-label-in {
+  from { opacity: 0; transform: perspective(300px) translateY(8px) rotateX(-70deg); }
+  to { opacity: 1; transform: none; }
+}
+.adm-label-in { animation: adm-label-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; transform-origin: 50% 100%; }
+
+/* Lớp phủ */
+@keyframes adm-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes adm-fade-out { from { opacity: 1; } to { opacity: 0; } }
+.adm-fade-in { animation: adm-fade-in 0.3s ease-out both; }
+.adm-fade-out { animation: adm-fade-out 0.3s ease-in both; }
+
+/* Bảng menu: bật dựng lên từ đáy như mở nắp hộp */
+.adm-sheet {
+  background: linear-gradient(180deg, #ffffff 0%, #fff7ed 100%);
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 -2px 0 rgba(254, 215, 170, 0.6),
+    0 30px 60px -20px rgba(15, 23, 42, 0.55),
+    0 10px 24px -10px rgba(234, 88, 12, 0.35);
+  transform-origin: 50% 100%;
+  transform-style: preserve-3d;
+}
+@keyframes adm-sheet-in {
+  0% { opacity: 0; transform: translateY(60px) rotateX(-62deg) scale(0.9); }
+  60% { opacity: 1; transform: translateY(-6px) rotateX(6deg) scale(1.01); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes adm-sheet-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(50px) rotateX(-55deg) scale(0.92); }
+}
+.adm-sheet-in { animation: adm-sheet-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.adm-sheet-out { animation: adm-sheet-out 0.32s cubic-bezier(0.55, 0, 0.75, 0.2) both; }
+
+/* Từng ô mục: lật vào lần lượt quanh trục ngang */
+@keyframes adm-tile-in {
+  0% { opacity: 0; transform: perspective(600px) translateY(24px) rotateX(-85deg) scale(0.9); }
+  65% { opacity: 1; transform: perspective(600px) translateY(-3px) rotateX(10deg) scale(1.02); }
+  100% { opacity: 1; transform: perspective(600px) rotateX(0) scale(1); }
+}
+@keyframes adm-tile-out {
+  to { opacity: 0; transform: perspective(600px) translateY(16px) rotateX(-70deg) scale(0.92); }
+}
+.adm-tile-in { animation: adm-tile-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) both; transform-origin: 50% 100%; }
+.adm-tile-out { animation: adm-tile-out 0.22s ease-in both; transform-origin: 50% 100%; }
+
+/* Ô mục dạng phím 3D: cạnh dày phía dưới, chạm vào thì lún */
+.adm-tile,
+.adm-key {
+  background: #fff;
+  border: 1px solid #f1f5f9;
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 3px 0 0 #e2e8f0,
+    0 8px 16px -10px rgba(15, 23, 42, 0.35);
+  transition: transform 0.12s ease-out, box-shadow 0.12s ease-out, background 0.2s;
+}
+.adm-tile:active,
+.adm-key:active {
+  transform: perspective(600px) translateY(3px) rotateX(6deg) !important;
+  box-shadow: inset 0 1px 0 #fff, 0 0 0 0 #e2e8f0, 0 3px 6px -4px rgba(15, 23, 42, 0.3);
+}
+.adm-tile-on {
+  background: linear-gradient(145deg, #fb923c 0%, #f97316 45%, #ea580c 100%);
+  border-color: #fdba74;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    0 4px 0 0 #c2410c,
+    0 12px 22px -8px rgba(234, 88, 12, 0.6);
+}
+.adm-tile-on:active { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 0 0 0 #c2410c, 0 3px 6px -3px rgba(234, 88, 12, 0.5); }
+.adm-tile-on .adm-icon { background: rgba(255, 255, 255, 0.22); }
+
+@media (prefers-reduced-motion: reduce) {
+  .adm-dock, .adm-label-in, .adm-sheet-in, .adm-sheet-out, .adm-tile-in, .adm-tile-out,
+  .adm-fade-in, .adm-fade-out { animation-duration: 0.01ms !important; animation-delay: 0ms !important; }
+}
