@@ -49,6 +49,7 @@ import { toast, showConfirm, showPrompt } from './NotificationModal';
 import type { DishImportResult } from '../api/admin.api';
 import RecipeImportModal from './RecipeImportModal';
 import AuditLogPanel from './AuditLogPanel';
+import AdminMobileNav from './AdminMobileNav';
 import { ADMIN_TABS, type AdminTab } from './adminTabs';
 
 // Tên hiển thị của các cột trong file nhập món
@@ -1049,9 +1050,12 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
   };
 
   return (
-    <div className="admin-studio-view flex flex-col lg:flex-row gap-5 min-h-[800px] animate-in fade-in duration-300">
-      {/* Admin Sidebar Navigation */}
-      <div className="w-full lg:w-64 bg-white rounded-3xl p-5 border border-slate-200/80 shadow-xs space-y-6 shrink-0 h-fit">
+    <div className="admin-studio-view flex flex-col lg:flex-row gap-5 min-h-[800px] pb-[calc(6.5rem+env(safe-area-inset-bottom))] lg:pb-0 animate-in fade-in duration-300">
+      {/* Điện thoại: dock nổi dưới đáy + menu lật 3D thay cho sidebar */}
+      <AdminMobileNav active={adminTab} onChange={setAdminTab} onBackToUserMode={onBackToUserMode} />
+
+      {/* Admin Sidebar Navigation (máy tính) */}
+      <div className="hidden lg:block w-full lg:w-64 bg-white rounded-3xl p-5 border border-slate-200/80 shadow-xs space-y-6 shrink-0 h-fit">
         <div className="space-y-1">
           <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider px-3">
             QUẢN LÝ ĐIỀU HÀNH
