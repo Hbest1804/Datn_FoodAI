@@ -1,4 +1,4 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { Header } from './components/Header';
@@ -287,9 +287,17 @@ export default function App() {
     return () => { cancelled = true; };
   }, [dishParam]);
 
+  // Vừa bấm Đăng xuất: React Router đổi URL trong startTransition nên tài khoản đã thành khách
+  // trước khi URL rời /admin. Không coi đó là "khách cố vào trang Quản trị".
+  const loggingOutRef = useRef(false);
+
   // Trang Quản trị: chờ khôi phục phiên đăng nhập xong mới kiểm tra quyền
   useEffect(() => {
-    if (!isAdminMode || !sessionChecked || currentUser.role === 'admin') return;
+    if (!isAdminMode) {
+      loggingOutRef.current = false;
+      return;
+    }
+    if (!sessionChecked || currentUser.role === 'admin' || loggingOutRef.current) return;
     toast.warning('Bạn cần đăng nhập bằng tài khoản Quản trị viên để truy cập trang này.');
     if (!currentUser.isLoggedIn) {
       navigate('/login', { replace: true, state: { from: '/admin' } });
@@ -388,7 +396,8 @@ export default function App() {
       isPro: true,
     }));
     // Quản trị viên vào thẳng trang Quản trị; người dùng quay lại trang đang xem trước khi đăng nhập
-    navigate(isAdmin ? '/admin' : returnTo, { replace: true });
+    // (trừ khi trang đó là /admin, ví dụ sau khi Admin đăng xuất, thì về trang chủ)
+    navigate(isAdmin ? '/admin' : returnTo.startsWith('/admin') ? '/' : returnTo, { replace: true });
   };
 
   const handleLogout = async () => {
@@ -397,6 +406,7 @@ export default function App() {
     } catch {}
     localStorage.removeItem('culina_token');
     localStorage.removeItem('culina_user');
+    if (isAdminMode) loggingOutRef.current = true;
     setCurrentUser(DEFAULT_GUEST);
     setCurrentTab('discovery');
   };
