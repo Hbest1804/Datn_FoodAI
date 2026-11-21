@@ -2320,10 +2320,11 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                     </button>
                     <button
                       onClick={() => setShowChatbotConfigModal(true)}
-                      className="p-1.5 hover:bg-orange-50 rounded-lg text-slate-500 hover:text-orange-600 cursor-pointer transition-colors"
+                      className="px-2.5 py-1 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded-lg text-xs font-bold text-orange-700 cursor-pointer transition-colors flex items-center gap-1.5"
                       title="Cấu hình hoạt động Chatbot"
                     >
-                      <Settings className="w-4 h-4" />
+                      <Settings className="w-3.5 h-3.5" />
+                      Cấu hình Chatbot
                     </button>
                   </div>
                 </div>
