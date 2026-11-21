@@ -207,6 +207,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
   const [chatbotHealth, setChatbotHealth] = useState<any>(null);
   const [loadingConfig, setLoadingConfig] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
+  const [showChatbotConfigModal, setShowChatbotConfigModal] = useState(false);
 
   // Recipe Management State
   const [selectedRecipeDishId, setSelectedRecipeDishId] = useState<string>('');
@@ -820,6 +821,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
     try {
       await apiService.admin.updateChatbotConfig(chatbotConfig);
       toast.success('Đã cập nhật cấu hình Chatbot AI thành công!');
+      setShowChatbotConfigModal(false);
     } catch (err: any) {
       toast.error(err.message || 'Lỗi khi lưu cấu hình');
     } finally {
@@ -2288,7 +2290,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
             {/* Main Content: Sessions & Config */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               {/* Left Column: Chat Sessions & Transcript (col 7) */}
-              <div className="lg:col-span-7 bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+              <div className="lg:col-span-12 bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100">
                   <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                     <MessageSquare className="w-4 h-4 text-orange-500" />
@@ -2316,12 +2318,19 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${loadingSessions ? 'animate-spin' : ''}`} />
                     </button>
+                    <button
+                      onClick={() => setShowChatbotConfigModal(true)}
+                      className="p-1.5 hover:bg-orange-50 rounded-lg text-slate-500 hover:text-orange-600 cursor-pointer transition-colors"
+                      title="Cấu hình hoạt động Chatbot"
+                    >
+                      <Settings className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
                   {/* Sessions list (col 5) */}
-                  <div className="md:col-span-5 space-y-1.5 max-h-96 overflow-y-auto pr-1 border-r border-slate-100">
+                  <div className="md:col-span-4 space-y-1.5 max-h-[70vh] min-h-[420px] overflow-y-auto pr-1 border-r border-slate-100">
                     {loadingSessions ? (
                       <div className="py-8 text-center text-xs text-slate-400">
                         <Loader2 className="w-4 h-4 animate-spin mx-auto text-orange-500 mb-1" />
@@ -2351,7 +2360,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                   </div>
 
                   {/* Messages transcript (col 7) */}
-                  <div className="md:col-span-7 flex flex-col justify-between max-h-96 overflow-y-auto pl-2 space-y-3">
+                  <div className="md:col-span-8 flex flex-col max-h-[70vh] min-h-[420px] overflow-y-auto pl-2 space-y-3">
                     {loadingSessionDetail ? (
                       <div className="py-12 text-center text-xs text-slate-400">
                         <Loader2 className="w-4 h-4 animate-spin mx-auto text-orange-500 mb-1" />
@@ -2400,16 +2409,59 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                 </div>
               </div>
 
-              {/* Right Column: Chatbot Settings & Frequent Questions (col 5) */}
-              <div className="lg:col-span-5 space-y-6">
-                {/* Chatbot Config Form */}
-                <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+              {/* Frequent Questions (full width) */}
+              <div className="lg:col-span-12">
+                {/* Frequent Questions list */}
+                <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-3">
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-amber-500" />
+                    Chủ Đề & Câu Hỏi Thường Gặp
+                  </h3>
+                  <div className="space-y-2">
+                    {frequentQuestions.length === 0 ? (
+                      <div className="text-xs text-slate-400">
+                        Chưa có thống kê câu hỏi thường gặp.
+                      </div>
+                    ) : (
+                      frequentQuestions.map((q, idx) => (
+                        <div key={idx} className="p-2.5 bg-slate-50 rounded-xl text-xs flex items-center justify-between">
+                          <span className="font-medium text-slate-800">{q.question || q.topic}</span>
+                          <span className="text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded">
+                            {q.count || 1} lượt
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Chatbot Config Modal */}
+            {showChatbotConfigModal && (
+              <div
+                className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
+                onClick={() => setShowChatbotConfigModal(false)}
+              >
+                <div
+                  className="bg-white rounded-3xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto space-y-4 shadow-2xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                     <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                       <Settings className="w-4 h-4 text-orange-500" />
                       Cấu Hình Hoạt Động Chatbot
                     </h3>
-                    {loadingConfig && <span className="text-xs text-slate-400 font-medium animate-pulse">Đang tải...</span>}
+                    <div className="flex items-center gap-2">
+                      {loadingConfig && <span className="text-xs text-slate-400 font-medium animate-pulse">Đang tải...</span>}
+                      <button
+                        onClick={() => setShowChatbotConfigModal(false)}
+                        className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 cursor-pointer"
+                        title="Đóng"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
 
                   <form onSubmit={handleSaveChatbotConfig} className="space-y-3.5 text-xs">
@@ -2487,7 +2539,7 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                         Chỉ dẫn hệ thống chuyên sâu (System Prompt):
                       </label>
                       <textarea
-                        rows={3}
+                        rows={6}
                         maxLength={4000}
                         value={chatbotConfig.system_prompt}
                         onChange={(e) => setChatbotConfig({
@@ -2511,32 +2563,8 @@ export const AdminStudioView: React.FC<AdminStudioViewProps> = ({
                     </div>
                   </form>
                 </div>
-
-                {/* Frequent Questions list */}
-                <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-3">
-                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-amber-500" />
-                    Chủ Đề & Câu Hỏi Thường Gặp
-                  </h3>
-                  <div className="space-y-2">
-                    {frequentQuestions.length === 0 ? (
-                      <div className="text-xs text-slate-400">
-                        Chưa có thống kê câu hỏi thường gặp.
-                      </div>
-                    ) : (
-                      frequentQuestions.map((q, idx) => (
-                        <div key={idx} className="p-2.5 bg-slate-50 rounded-xl text-xs flex items-center justify-between">
-                          <span className="font-medium text-slate-800">{q.question || q.topic}</span>
-                          <span className="text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded">
-                            {q.count || 1} lượt
-                          </span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
               </div>
-            </div>
+            )}
           </div>
         )}
       </div>
