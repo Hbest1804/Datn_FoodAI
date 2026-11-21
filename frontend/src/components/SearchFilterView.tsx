@@ -689,6 +689,7 @@ export const SearchFilterView: React.FC<SearchFilterViewProps> = ({
               {displayRecipes.map(recipe => (
                 <div
                   key={recipe.id}
+                  data-fx-off
                   onClick={() => onSelectRecipe(recipe)}
                   className="bg-white rounded-3xl border border-slate-200/80 overflow-hidden shadow-2xs hover:shadow-xl transition-all duration-300 group cursor-pointer flex flex-col justify-between"
                 >

@@ -503,7 +503,98 @@ input, select, textarea, button {
   66% { transform: translate3d(6vmax, 8vmax, 0) scale(1); }
 }
 
+/* ── Tiêu đề lật đứng dậy từ mặt bàn (trục ngang ở chân chữ) ── */
+@keyframes fx-head {
+  from {
+    opacity: 0;
+    transform: perspective(700px) translate3d(0, 0.4em, 0) rotateX(-80deg);
+    filter: blur(3px);
+  }
+  55% { opacity: 1; filter: blur(0); }
+  80% { transform: perspective(700px) rotateX(8deg); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+[data-fx-head='pending'] { opacity: 0; }
+[data-fx-head='in'] {
+  animation: fx-head 0.8s cubic-bezier(0.22, 1, 0.36, 1) var(--fx-delay, 0ms) backwards;
+  transform-origin: 50% 100%;
+}
+
+/* ── Đổi trang: nội dung mới xoay vào từ phía sau như lật trang sách ──
+   Fill "backwards" để chạy xong transform về none, không ảnh hưởng modal position: fixed bên trong. */
+@keyframes fx-page-in {
+  from {
+    opacity: 0;
+    transform: perspective(1600px) translate3d(0, 24px, -120px) rotateX(6deg) rotateY(-5deg);
+  }
+  to { opacity: 1; transform: none; }
+}
+.fx-page-in {
+  animation: fx-page-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  transform-origin: 50% 0%;
+}
+
+/* ── Nguyên liệu 3D lơ lửng ở nền: mỗi món một quỹ đạo, vừa trôi vừa xoay quanh nhiều trục ── */
+.fx-ambient > b {
+  --fx-i: 0;
+  position: absolute;
+  font-size: 34px;
+  line-height: 1;
+  font-weight: normal;
+  opacity: 0.32;
+  transform-style: preserve-3d;
+  animation: fx-ing-drift calc(24s + var(--fx-i) * 3s) ease-in-out calc(var(--fx-i) * -4s) infinite;
+  filter: drop-shadow(0 10px 8px rgba(15, 23, 42, 0.18));
+}
+.fx-ambient > b > em {
+  display: block;
+  font-style: normal;
+  animation: fx-ing-spin calc(14s + var(--fx-i) * 2s) linear calc(var(--fx-i) * -1.7s) infinite;
+}
+.fx-ambient > b:nth-of-type(1) { top: 14%; left: 6%; }
+.fx-ambient > b:nth-of-type(2) { top: 30%; right: 7%; font-size: 40px; }
+.fx-ambient > b:nth-of-type(3) { top: 62%; left: 4%; font-size: 28px; }
+.fx-ambient > b:nth-of-type(4) { top: 78%; right: 12%; }
+.fx-ambient > b:nth-of-type(5) { top: 46%; left: 48%; font-size: 26px; opacity: 0.2; }
+.fx-ambient > b:nth-of-type(6) { top: 8%; right: 30%; font-size: 30px; }
+.fx-ambient > b:nth-of-type(7) { top: 88%; left: 30%; font-size: 30px; }
+.fx-ambient > b:nth-of-type(8) { top: 22%; left: 32%; font-size: 24px; opacity: 0.22; }
+@keyframes fx-ing-drift {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  25% { transform: translate3d(3vw, -4vh, 160px); }
+  50% { transform: translate3d(-2vw, -8vh, 40px); }
+  75% { transform: translate3d(-4vw, -2vh, -120px); }
+}
+@keyframes fx-ing-spin {
+  from { transform: perspective(300px) rotateX(0deg) rotateY(0deg) rotateZ(0deg); }
+  to { transform: perspective(300px) rotateX(360deg) rotateY(720deg) rotateZ(180deg); }
+}
+/* Điện thoại: chỉ giữ 4 món, nhỏ hơn cho đỡ rối mắt */
+@media (max-width: 767px) {
+  .fx-ambient > b { font-size: 24px !important; opacity: 0.22; }
+  .fx-ambient > b:nth-of-type(n + 5) { display: none; }
+}
+
+/* ── Menu trên Header (máy tính): phím 3D, mục đang chọn lật xuống rồi nổi lên ── */
+.nav3d {
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.2s, background-color 0.2s, color 0.2s;
+  transform-style: preserve-3d;
+}
+.nav3d:hover { transform: translateY(-2px) rotateX(10deg); }
+.nav3d:active { transform: translateY(1px) rotateX(-6deg) scale(0.97); }
+.nav3d-on {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 3px 0 0 #fed7aa, 0 8px 14px -8px rgba(234, 88, 12, 0.45);
+  animation: nav3d-flip 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+@keyframes nav3d-flip {
+  from { transform: rotateX(-110deg); opacity: 0.4; }
+  to { transform: none; opacity: 1; }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  [data-fx-head] { opacity: 1 !important; animation: none !important; }
+  .fx-page-in, .nav3d-on, .fx-ambient > b, .fx-ambient > b > em { animation: none !important; }
+  .nav3d { transform: none !important; }
   [data-fx-reveal] { opacity: 1 !important; animation: none !important; }
   [data-fx-tilt] { transform: none !important; }
   .animate-in,

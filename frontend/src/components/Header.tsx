@@ -159,49 +159,25 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Navigation Links (User Mode) */}
           {!isAdminMode ? (
-            <nav className="hidden lg:flex items-center gap-1.5">
-              <button
-                onClick={() => onTabChange('discovery')}
-                className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer ${
-                  currentTab === 'discovery'
-                    ? 'text-orange-600 bg-orange-50 font-bold'
-                    : 'text-slate-600 hover:text-ink hover:bg-surface-2'
-                }`}
-              >
-                Khám phá
-              </button>
-              <button
-                onClick={() => onTabChange('search')}
-                className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer ${
-                  currentTab === 'search'
-                    ? 'text-orange-600 bg-orange-50 font-bold'
-                    : 'text-slate-600 hover:text-ink hover:bg-surface-2'
-                }`}
-              >
-                Tìm kiếm & Lọc
-              </button>
-              <button
-                onClick={() => onTabChange('chat')}
-                className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer ${
-                  currentTab === 'chat'
-                    ? 'text-orange-600 bg-orange-50 font-bold'
-                    : 'text-slate-600 hover:text-ink hover:bg-surface-2'
-                }`}
-              >
-                Trò chuyện AI
-              </button>
-              {currentUser.isLoggedIn && (
+            <nav className="hidden lg:flex items-center gap-1.5 [perspective:600px]">
+              {[
+                { tab: 'discovery', label: 'Khám phá' },
+                { tab: 'search', label: 'Tìm kiếm & Lọc' },
+                { tab: 'chat', label: 'Trò chuyện AI' },
+                ...(currentUser.isLoggedIn ? [{ tab: 'mealPlan', label: 'Thực đơn tuần' }] : []),
+              ].map(({ tab, label }) => (
                 <button
-                  onClick={() => onTabChange('mealPlan')}
-                  className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer ${
-                    currentTab === 'mealPlan'
-                      ? 'text-orange-600 bg-orange-50 font-bold'
+                  key={tab}
+                  onClick={() => onTabChange(tab)}
+                  className={`nav3d px-4 py-2 text-sm font-semibold rounded-xl cursor-pointer ${
+                    currentTab === tab
+                      ? 'nav3d-on text-orange-600 bg-orange-50 font-bold'
                       : 'text-slate-600 hover:text-ink hover:bg-surface-2'
                   }`}
                 >
-                  Thực đơn tuần
+                  {label}
                 </button>
-              )}
+              ))}
             </nav>
           ) : null}
 

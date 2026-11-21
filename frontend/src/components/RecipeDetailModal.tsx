@@ -32,6 +32,39 @@ interface RecipeDetailModalProps {
   onOpenChatWithPrompt?: (prompt: string, fridgeContext?: string[]) => void;
 }
 
+const DEFAULT_TIMER_MINUTES = 5;
+const MIN_TIMER_MINUTES = 1;
+const MAX_TIMER_MINUTES = 180;
+
+// Tiếng "bíp" báo hết giờ (Web Audio, không cần file âm thanh)
+const playTimerAlarm = () => {
+  try {
+    const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    [0, 0.4, 0.8].forEach(offset => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.25, ctx.currentTime + offset);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + offset + 0.3);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(ctx.currentTime + offset);
+      osc.stop(ctx.currentTime + offset + 0.3);
+    });
+    setTimeout(() => ctx.close(), 1500);
+  } catch {
+    /* trình duyệt chặn âm thanh: vẫn còn thông báo trên màn hình */
+  }
+  try { navigator.vibrate?.([300, 150, 300]); } catch { /* không hỗ trợ rung */ }
+};
+
+const formatTimer = (totalSeconds: number) => {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+};
+
 interface CommunityReviewItem {
   id: string | number;
   author: string;
@@ -54,8 +87,12 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [servings, setServings] = useState(initialRecipe.servings || 2);
   const [activeStep, setActiveStep] = useState(1);
+  // Bộ hẹn giờ nấu: chạy hoàn toàn trên trình duyệt, không gọi backend.
+  // Người dùng tự chọn số phút (mặc định 5) rồi bấm Bắt đầu.
   const [showTimer, setShowTimer] = useState(false);
-  const [activeTimerSeconds, setActiveTimerSeconds] = useState(240);
+  const [timerStep, setTimerStep] = useState(1);
+  const [timerMinutes, setTimerMinutes] = useState(DEFAULT_TIMER_MINUTES);
+  const [activeTimerSeconds, setActiveTimerSeconds] = useState(DEFAULT_TIMER_MINUTES * 60);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [isMarkedCooked, setIsMarkedCooked] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
@@ -125,18 +162,18 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
     return () => { isMounted = false; };
   }, [initialRecipe.id]);
 
-  // Handle Timer Countdown
+  // Đếm ngược; về 0 thì dừng, phát tiếng báo và hiện thông báo
   useEffect(() => {
-    let interval: any = null;
-    if (isTimerRunning && activeTimerSeconds > 0) {
-      interval = setInterval(() => {
-        setActiveTimerSeconds(prev => prev - 1);
-      }, 1000);
-    } else if (activeTimerSeconds === 0) {
+    if (!isTimerRunning) return;
+    if (activeTimerSeconds <= 0) {
       setIsTimerRunning(false);
+      playTimerAlarm();
+      toast.success(`Hết giờ bước ${timerStep}. Chuyển sang bước tiếp theo nhé!`, 'Hết giờ', 8000);
+      return;
     }
-    return () => clearInterval(interval);
-  }, [isTimerRunning, activeTimerSeconds]);
+    const timeout = setTimeout(() => setActiveTimerSeconds(prev => prev - 1), 1000);
+    return () => clearTimeout(timeout);
+  }, [isTimerRunning, activeTimerSeconds, timerStep]);
 
   // Dynamic ingredient scale factor
   const scale = servings / (recipe.servings || 2);
@@ -166,11 +203,38 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
     onOpenChatWithPrompt(prompt, have);
   };
 
-  const handleStartTimer = (durationMinutes: number) => {
-    setActiveTimerSeconds(Math.max(1, durationMinutes) * 60);
-    setIsTimerRunning(true);
+  // Mở bộ hẹn giờ cho một bước (chưa chạy): người dùng chỉnh số phút rồi bấm Bắt đầu
+  const handleOpenTimer = (stepNumber: number) => {
+    setActiveStep(stepNumber);
+    setTimerStep(stepNumber);
+    setIsTimerRunning(false);
+    setActiveTimerSeconds(timerMinutes * 60);
     setShowTimer(true);
   };
+
+  const handleAdjustTimer = (deltaMinutes: number) => {
+    const next = Math.min(MAX_TIMER_MINUTES, Math.max(MIN_TIMER_MINUTES, timerMinutes + deltaMinutes));
+    setTimerMinutes(next);
+    setActiveTimerSeconds(next * 60);
+  };
+
+  const handleToggleTimer = () => {
+    if (!isTimerRunning && activeTimerSeconds <= 0) setActiveTimerSeconds(timerMinutes * 60);
+    setIsTimerRunning(r => !r);
+  };
+
+  const handleResetTimer = () => {
+    setIsTimerRunning(false);
+    setActiveTimerSeconds(timerMinutes * 60);
+  };
+
+  const handleCloseTimer = () => {
+    setIsTimerRunning(false);
+    setShowTimer(false);
+  };
+
+  // Trạng thái chưa chạy lần nào (hoặc vừa đặt lại): cho phép chỉnh số phút
+  const timerPristine = !isTimerRunning && activeTimerSeconds === timerMinutes * 60;
 
   const handleToggleFavorite = async () => {
     if (!currentUser.isLoggedIn) {
@@ -424,7 +488,7 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
               {/* CTAs */}
               <div className="flex flex-wrap items-center gap-3 pt-2">
                 <button
-                  onClick={() => handleStartTimer(recipe.steps[0]?.durationMinutes || 5)}
+                  onClick={() => handleOpenTimer(recipe.steps?.[0]?.stepNumber || 1)}
                   className="px-5 py-3 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-xs sm:text-sm rounded-2xl shadow-md shadow-orange-500/20 transition-all flex items-center gap-2 cursor-pointer"
                 >
                   <Clock className="w-4 h-4" />
@@ -601,11 +665,14 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
                           </span>
                           <div>
                             <h4 className="text-sm font-bold text-slate-900">{step.title || `Bước ${step.stepNumber || idx + 1}`}</h4>
-                            <span className="text-xs font-semibold text-slate-400 flex items-center gap-1">
-                              <Clock className="w-3 h-3 text-orange-500" />
-                              Thời gian: {formatMetric(step.durationMinutes)} phút
-                              {step.temperature && ` • Nhiệt độ: ${step.temperature}`}
-                            </span>
+                            {(step.durationMinutes || step.temperature) && (
+                              <span className="text-xs font-semibold text-slate-400 flex items-center gap-1">
+                                <Clock className="w-3 h-3 text-orange-500" />
+                                {step.durationMinutes ? `Thời gian: ${formatMetric(step.durationMinutes)} phút` : ''}
+                                {step.durationMinutes && step.temperature ? ' • ' : ''}
+                                {step.temperature ? `Nhiệt độ: ${step.temperature}` : ''}
+                              </span>
+                            )}
                           </div>
                         </div>
 
@@ -613,11 +680,12 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleStartTimer(step.durationMinutes || 5);
+                              handleOpenTimer(step.stepNumber || idx + 1);
                             }}
-                            className="px-2.5 py-1 bg-slate-100 hover:bg-orange-50 hover:text-orange-700 text-slate-600 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                            className="px-2.5 py-1 bg-slate-100 hover:bg-orange-50 hover:text-orange-700 text-slate-600 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1"
                           >
-                            Hẹn giờ {formatMetric(step.durationMinutes)}m
+                            <Clock className="w-3 h-3" />
+                            Hẹn giờ
                           </button>
                         </div>
                       </div>
@@ -784,24 +852,60 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
 
         {/* Floating cooking timer */}
         {showTimer && (
-          <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white p-4 rounded-3xl shadow-2xl border border-slate-700 flex items-center gap-4 animate-in slide-in-from-bottom-4">
-            <div className="w-10 h-10 rounded-2xl bg-orange-500 flex items-center justify-center font-bold">
-              <Clock className="w-5 h-5 text-white" />
+          <div
+            role="timer"
+            aria-live="polite"
+            className="fixed bottom-4 right-4 left-4 sm:left-auto sm:bottom-6 sm:right-6 z-50 bg-slate-900 text-white p-4 rounded-3xl shadow-2xl border border-slate-700 flex items-center gap-3 animate-in slide-in-from-bottom-4"
+          >
+            <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${activeTimerSeconds === 0 ? 'bg-emerald-500' : 'bg-orange-500'}`}>
+              {activeTimerSeconds === 0 ? <CheckCircle2 className="w-5 h-5 text-white" /> : <Clock className="w-5 h-5 text-white" />}
             </div>
-            <div>
-              <div className="text-xs font-bold text-orange-400">Đang nấu: Bước 0{activeStep}</div>
-              <div className="text-sm font-black">
-                {Math.floor(activeTimerSeconds / 60)}:{activeTimerSeconds % 60 < 10 ? '0' : ''}{activeTimerSeconds % 60}
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-bold text-orange-400">
+                {activeTimerSeconds === 0 ? `Hết giờ bước ${timerStep}` : `Hẹn giờ bước ${timerStep}`}
+              </div>
+              <div className="flex items-center gap-1.5">
+                {timerPristine && (
+                  <button
+                    onClick={() => handleAdjustTimer(-1)}
+                    disabled={timerMinutes <= MIN_TIMER_MINUTES}
+                    aria-label="Giảm 1 phút"
+                    className="p-1 rounded-lg bg-white/10 hover:bg-white/20 disabled:opacity-30 cursor-pointer"
+                  >
+                    <Minus className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                <span className="text-lg font-black tabular-nums">{formatTimer(activeTimerSeconds)}</span>
+                {timerPristine && (
+                  <button
+                    onClick={() => handleAdjustTimer(1)}
+                    disabled={timerMinutes >= MAX_TIMER_MINUTES}
+                    aria-label="Tăng 1 phút"
+                    className="p-1 rounded-lg bg-white/10 hover:bg-white/20 disabled:opacity-30 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
             <button
-              onClick={() => setIsTimerRunning(!isTimerRunning)}
-              className="p-2 rounded-xl bg-white/20 hover:bg-white/30 text-white cursor-pointer"
+              onClick={handleToggleTimer}
+              aria-label={isTimerRunning ? 'Tạm dừng' : 'Bắt đầu'}
+              className="p-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white cursor-pointer"
             >
               {isTimerRunning ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
             </button>
+            {!timerPristine && (
+              <button
+                onClick={handleResetTimer}
+                className="px-2 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-bold cursor-pointer"
+              >
+                Đặt lại
+              </button>
+            )}
             <button
-              onClick={() => { setShowTimer(false); setIsTimerRunning(false); }}
+              onClick={handleCloseTimer}
+              aria-label="Đóng hẹn giờ"
               className="p-2 rounded-xl text-slate-400 hover:text-white cursor-pointer"
             >
               <X className="w-4 h-4" />
