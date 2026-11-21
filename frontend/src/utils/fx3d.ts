@@ -4,6 +4,7 @@
  * Tự tìm các "thẻ" (khối bo góc 2xl/3xl có nền, viền hoặc bóng) bên trong <main> rồi gắn:
  *  - data-fx-reveal: hiện lên kiểu lật 3D khi cuộn tới, các thẻ lần lượt nối đuôi nhau
  *  - data-fx-tilt:   nghiêng theo con trỏ chuột kèm vệt sáng (chỉ máy có chuột)
+ *  - data-fx-head:   tiêu đề h1/h2 lật đứng dậy khi cuộn tới (không áp dụng trang Admin)
  *
  * Chỉ dùng thuộc tính data-* và biến CSS nên không đụng tới className/style mà React quản lý.
  * Muốn tắt hiệu ứng cho một khối nào đó: thêm thuộc tính data-fx-off vào khối đó.
@@ -68,9 +69,26 @@ const setup = (el: HTMLElement) => {
   }
 };
 
+/* ── Tiêu đề (h1/h2) ở giao diện người dùng: lật đứng dậy từ mặt bàn khi cuộn tới ── */
+const HEAD_SELECTOR = 'main h1, main h2';
+
+const setupHead = (el: HTMLElement) => {
+  if (processed.has(el)) return;
+  // Tiêu đề nằm trong thẻ đã có hiệu ứng, trong modal/thanh nổi hoặc ở trang Admin thì bỏ qua
+  if (el.closest('[data-fx-reveal], [data-fx-off], .fixed, .sticky, .admin-studio-view')) return;
+  const rect = el.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return;
+  processed.add(el);
+  el.setAttribute('data-fx-head', 'pending');
+  io?.observe(el);
+};
+
 const scan = (root: ParentNode = document) => {
   if (root instanceof HTMLElement && root.matches(CARD_SELECTOR)) setup(root);
   root.querySelectorAll<HTMLElement>(CARD_SELECTOR).forEach(setup);
+  // Xét tiêu đề sau thẻ để tiêu đề nằm trong thẻ không bị chạy hiệu ứng hai lần
+  if (root instanceof HTMLElement && root.matches(HEAD_SELECTOR)) setupHead(root);
+  root.querySelectorAll<HTMLElement>(HEAD_SELECTOR).forEach(setupHead);
 };
 
 /* ── Hiện lên khi cuộn tới ── */
@@ -81,10 +99,11 @@ const onIntersect: IntersectionObserverCallback = (entries) => {
   visible.forEach((entry, i) => {
     const el = entry.target as HTMLElement;
     io?.unobserve(el);
+    const attr = el.hasAttribute('data-fx-head') ? 'data-fx-head' : 'data-fx-reveal';
     el.style.setProperty('--fx-delay', `${Math.min(i, 8) * 60}ms`);
-    el.setAttribute('data-fx-reveal', 'in');
+    el.setAttribute(attr, 'in');
     const done = () => {
-      el.setAttribute('data-fx-reveal', 'done');
+      el.setAttribute(attr, 'done');
       el.style.removeProperty('--fx-delay');
     };
     el.addEventListener('animationend', done, { once: true });

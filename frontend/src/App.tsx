@@ -60,6 +60,9 @@ const DEFAULT_GUEST: UserProfile = {
   tasteAccuracy: 0,
 };
 
+// Nguyên liệu bay lơ lửng ở nền giao diện người dùng
+const FLOATING_INGREDIENTS = ['🍅', '🌿', '🌶️', '🍋', '🧄', '🥕', '🍤', '🥢'];
+
 // Ánh xạ giữa tên tab (Header/Footer dùng) và đường dẫn URL
 const TAB_PATHS: Record<string, string> = {
   discovery: '/',
@@ -440,6 +443,10 @@ export default function App() {
         <span />
         <span />
         <i />
+        {/* Nguyên liệu 3D lơ lửng, xoay chậm (chỉ ở giao diện người dùng) */}
+        {!isAdminMode && FLOATING_INGREDIENTS.map((emoji, i) => (
+          <b key={i} style={{ '--fx-i': i } as React.CSSProperties}><em>{emoji}</em></b>
+        ))}
       </div>
 
       {/* Header */}
@@ -467,6 +474,8 @@ export default function App() {
             </div>
           }
         >
+        {/* Đổi trang thì nội dung mới lật vào kiểu 3D (key theo đường dẫn để chạy lại hiệu ứng) */}
+        <div key={location.pathname} className={isAdminMode ? undefined : 'fx-page-in'}>
         <Routes>
           <Route
             path="/"
@@ -575,6 +584,7 @@ export default function App() {
           <Route path="/auth/callback" element={null} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </div>
         </Suspense>
       </main>
 
