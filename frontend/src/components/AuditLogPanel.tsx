@@ -75,6 +75,21 @@ const DETAIL_LABELS: Record<string, string> = {
   dish_ids: 'Số món',
   total_dishes: 'Tổng số món',
   valid_dishes: 'Món hợp lệ',
+  // Cấu hình chatbot (chatbot.settings_update)
+  system_prompt: 'Chỉ dẫn hệ thống',
+  guest_window_hours: 'Chu kỳ làm mới (giờ)',
+  max_context_dishes: 'Số món tham khảo tối đa',
+  guest_message_limit: 'Lượt hỏi khách / chu kỳ',
+  user_daily_message_limit: 'Lượt hỏi mỗi người dùng / ngày',
+  // Xoá đánh giá (rating.delete) và các thao tác khác
+  user_id: 'Mã người dùng',
+  dish_id: 'Mã món',
+  stars: 'Số sao',
+  comment: 'Bình luận',
+  hidden: 'Ẩn',
+  is_published: 'Công khai',
+  deleted: 'Đã xoá',
+  new_ingredient_ids: 'Số nguyên liệu mới',
 };
 
 const PAGE_SIZE = 20;
