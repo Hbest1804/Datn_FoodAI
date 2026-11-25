@@ -391,7 +391,7 @@ Nếu câu hỏi hoàn toàn KHÔNG liên quan ẩm thực, dinh dưỡng, nấu
 ${allergyRules(allergens)}${dietRules(strictDiets)}
 DANH SÁCH MÓN ĂN HỆ THỐNG PHÙ HỢP (đã loại món chứa nguyên liệu dị ứng và món không hợp chế độ ăn bắt buộc; chỉ được giới thiệu thẻ món trong danh sách này):
 ${JSON.stringify(dishesSummary)}
-
+${dishesSummary.length === 0 ? '- Hệ thống KHÔNG có món phù hợp: được phép đề xuất công thức tự soạn (vẫn tuân thủ dị ứng và chế độ ăn ở trên), nhưng phải ghi rõ ngay đầu phần công thức là "(Công thức do AI đề xuất, chưa có trong hệ thống)"; matched_dish_ids để rỗng.\n' : ''}
 NGUYÊN LIỆU TRONG TỦ LẠNH:
 ${fridgeInfo.length ? fridgeInfo.join('\n') : '(Không có)'}
 ${historyText ? `\nLỊCH SỬ HỘI THOẠI:\n${historyText}\n` : ''}
