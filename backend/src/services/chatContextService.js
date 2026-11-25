@@ -12,6 +12,7 @@ import { containsBannedWords } from '../utils/bannedWords.js';
 import { normalizeText } from '../utils/textUtils.js';
 import { detectQuestionAllergenGroups, ingredientMatchesAllergen } from '../utils/allergenRules.js';
 import { looksLikePromptInjection } from '../utils/promptGuard.js';
+import { extractRequestedDish, findDishByRequestedName } from '../utils/requestedDish.js';
 import { buildDietFilter, detectQuestionDietCodes } from './dietService.js';
 import { ApiError } from '../utils/http.js';
 
@@ -199,11 +200,18 @@ export async function retrieveDishes(options) {
 /**
  * Như retrieveDishes nhưng kèm trạng thái truy hồi để chatbot chọn cách trả lời (UC chatbot luồng 4a, 5a):
  *  • 'ok'           – còn món phù hợp;
- *  • 'none'         – không truy hồi được món nào (danh mục rỗng);
+ *  • 'none'         – không có món phù hợp: danh mục rỗng, hoặc người dùng xin cách làm một món cụ thể
+ *                     mà tên món đó không có trong hệ thống (vd "cách gói bánh chưng");
  *  • 'all_excluded' – có món nhưng đều chứa nguyên liệu kiêng / dị ứng hoặc trái chế độ ăn bắt buộc.
  */
 export async function retrieveDishesWithStatus({ questionVector, content, pantry, forbiddenIngredientIds = new Set(), dishFilter = null, limit = 8 }) {
   const dishes = await getPublishedDishes();
+  // Hỏi cách làm một món không có trong hệ thống: không gửi món "gần giống" cho AI,
+  // để AI đề xuất công thức tham khảo và ghi rõ do AI đề xuất (UC07 luồng 4a)
+  const requested = extractRequestedDish(content);
+  if (requested && !findDishByRequestedName(requested, dishes)) {
+    return { dishes: [], status: 'none' };
+  }
   const safe = dishes.filter((d) =>
     (!dishFilter || dishFilter(d))
     && !(d.dish_ingredients || []).some((di) => forbiddenIngredientIds.has(Number(di.ingredient_id))));
