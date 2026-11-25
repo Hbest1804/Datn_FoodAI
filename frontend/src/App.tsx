@@ -460,6 +460,7 @@ export default function App() {
         onOpenLoginModal={openLoginPage}
         onOpenRegisterModal={openRegisterModal}
         onSearchSubmit={handleSearchSubmit}
+        onSelectDish={openRecipe}
         onLogout={handleLogout}
       />
 

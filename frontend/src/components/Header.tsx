@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { 
   Search, 
   ShieldCheck, 
@@ -10,9 +10,12 @@ import {
   User,
   ChefHat,
   CalendarDays,
-  House
+  House,
+  Clock,
+  Loader2,
+  ArrowRight
 } from 'lucide-react';
-import { UserProfile, UserRole, GuestQuota } from '../types';
+import { UserProfile, UserRole, GuestQuota, Recipe } from '../types';
 import { apiService } from '../api';
 import { GUEST_QUOTA_EVENT } from '../utils/guestQuota';
 import { ChefLogo3D } from './ChefLogo3D';
@@ -28,8 +31,12 @@ interface HeaderProps {
   onOpenLoginModal: () => void;
   onOpenRegisterModal: () => void;
   onSearchSubmit: (query: string) => void;
+  onSelectDish?: (dish: Recipe) => void;
   onLogout?: () => void;
 }
+
+const SUGGEST_LIMIT = 6;
+const SUGGEST_DELAY_MS = 250;
 
 export const Header: React.FC<HeaderProps> = ({
   currentTab,
@@ -41,9 +48,17 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenLoginModal,
   onOpenRegisterModal,
   onSearchSubmit,
+  onSelectDish,
   onLogout,
 }) => {
   const [searchInput, setSearchInput] = useState('');
+  const [suggestions, setSuggestions] = useState<Recipe[]>([]);
+  const [suggestTotal, setSuggestTotal] = useState(0);
+  const [suggestLoading, setSuggestLoading] = useState(false);
+  const [showSuggest, setShowSuggest] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const searchBoxRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [guestQuota, setGuestQuota] = useState<GuestQuota | null>(null);
 
@@ -59,12 +74,99 @@ export const Header: React.FC<HeaderProps> = ({
     return () => { cancelled = true; window.removeEventListener(GUEST_QUOTA_EVENT, onQuota); };
   }, [currentUser.role]);
 
+  // Gợi ý món ăn khi gõ vào ô tìm kiếm: chờ người dùng ngừng gõ rồi mới gọi GET /dishes?q=
+  useEffect(() => {
+    const q = searchInput.trim();
+    if (!q) {
+      setSuggestions([]);
+      setSuggestTotal(0);
+      setSuggestLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSuggestLoading(true);
+    const timer = window.setTimeout(() => {
+      apiService.dishes.getDishes({ q, limit: SUGGEST_LIMIT, sort: 'relevance' })
+        .then(res => {
+          if (cancelled) return;
+          setSuggestions(res.dishes);
+          setSuggestTotal(res.total);
+          setActiveIndex(-1);
+        })
+        .finally(() => { if (!cancelled) setSuggestLoading(false); });
+    }, SUGGEST_DELAY_MS);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [searchInput]);
+
+  // Bấm ra ngoài ô tìm kiếm thì đóng danh sách gợi ý
+  useEffect(() => {
+    if (!showSuggest) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (searchBoxRef.current && !searchBoxRef.current.contains(e.target as Node)) setShowSuggest(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [showSuggest]);
+
+  // Phím tắt Ctrl/⌘ + K để nhảy vào ô tìm kiếm
+  useEffect(() => {
+    if (isAdminMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isAdminMode]);
+
+  const closeSuggest = () => {
+    setShowSuggest(false);
+    setActiveIndex(-1);
+  };
+
+  const selectDish = (dish: Recipe) => {
+    apiService.dishes.trackInteraction('click', String(dish.id), { source: 'header_search', query: searchInput.trim() });
+    closeSuggest();
+    setSearchInput('');
+    searchInputRef.current?.blur();
+    onSelectDish?.(dish);
+  };
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
+    if (showSuggest && activeIndex >= 0 && suggestions[activeIndex]) {
+      selectDish(suggestions[activeIndex]);
+      return;
+    }
     if (searchInput.trim()) {
+      closeSuggest();
+      searchInputRef.current?.blur();
       onSearchSubmit(searchInput.trim());
     }
   };
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') {
+      closeSuggest();
+      return;
+    }
+    if (!suggestions.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setShowSuggest(true);
+      setActiveIndex(i => (i + 1) % suggestions.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setShowSuggest(true);
+      setActiveIndex(i => (i <= 0 ? suggestions.length - 1 : i - 1));
+    }
+  };
+
+  const trimmedQuery = searchInput.trim();
+  const suggestOpen = showSuggest && trimmedQuery.length > 0;
 
   return (
     <>
@@ -133,18 +235,99 @@ export const Header: React.FC<HeaderProps> = ({
           {!isAdminMode ? (
             <div className="hidden md:flex flex-1 max-w-md mx-4">
               <form onSubmit={handleSearch} className="w-full relative">
-                <div className="relative flex items-center">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 pointer-events-none" />
-                  <input
-                    type="text"
-                    value={searchInput}
-                    onChange={(e) => setSearchInput(e.target.value)}
-                    placeholder="Tìm nguyên liệu, tên món, công thức nấu..."
-                    className="w-full pl-10 pr-16 py-2.5 text-sm bg-white shadow-[0_1px_2px_rgba(0,0,0,0.05)] focus:ring-2 focus:ring-orange-500/30 rounded-xl transition-all outline-none text-ink placeholder-slate-400"
-                  />
-                  <span className="absolute right-3 text-[11px] font-mono bg-line text-slate-500 px-1.5 py-0.5 rounded pointer-events-none">
-                    ⌘K
-                  </span>
+                <div ref={searchBoxRef} className="relative">
+                  <div className="relative flex items-center">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 pointer-events-none" />
+                    <input
+                      ref={searchInputRef}
+                      type="text"
+                      value={searchInput}
+                      onChange={(e) => { setSearchInput(e.target.value); setShowSuggest(true); }}
+                      onFocus={() => setShowSuggest(true)}
+                      onKeyDown={handleSearchKeyDown}
+                      placeholder="Tìm nguyên liệu, tên món, công thức nấu..."
+                      role="combobox"
+                      aria-expanded={suggestOpen}
+                      aria-controls="header-search-suggest"
+                      aria-autocomplete="list"
+                      aria-activedescendant={activeIndex >= 0 ? `header-suggest-${activeIndex}` : undefined}
+                      className="w-full pl-10 pr-16 py-2.5 text-sm bg-white shadow-[0_1px_2px_rgba(0,0,0,0.05)] focus:ring-2 focus:ring-orange-500/30 rounded-xl transition-all outline-none text-ink placeholder-slate-400"
+                    />
+                    <span className="absolute right-3 text-[11px] font-mono bg-line text-slate-500 px-1.5 py-0.5 rounded pointer-events-none">
+                      ⌘K
+                    </span>
+                  </div>
+
+                  {/* Danh sách món ăn gợi ý sổ xuống khi gõ */}
+                  {suggestOpen && (
+                    <div
+                      id="header-search-suggest"
+                      role="listbox"
+                      className="absolute left-0 right-0 top-full mt-2 bg-white rounded-2xl shadow-xl border border-line overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-150"
+                    >
+                      {suggestLoading && suggestions.length === 0 ? (
+                        <div className="flex items-center gap-2 px-4 py-4 text-sm text-slate-500">
+                          <Loader2 className="w-4 h-4 animate-spin text-orange-500" />
+                          Đang tìm món ăn...
+                        </div>
+                      ) : suggestions.length === 0 ? (
+                        <div className="px-4 py-4 text-sm text-slate-500">
+                          Không tìm thấy món nào khớp với “<span className="font-semibold text-ink">{trimmedQuery}</span>”.
+                        </div>
+                      ) : (
+                        <ul className={`py-1.5 max-h-[60vh] overflow-y-auto transition-opacity ${suggestLoading ? 'opacity-60' : ''}`}>
+                          {suggestions.map((dish, idx) => (
+                            <li key={dish.id} id={`header-suggest-${idx}`} role="option" aria-selected={idx === activeIndex}>
+                              <button
+                                type="button"
+                                onMouseEnter={() => setActiveIndex(idx)}
+                                onClick={() => selectDish(dish)}
+                                className={`w-full flex items-center gap-3 px-3 py-2 text-left cursor-pointer transition-colors ${
+                                  idx === activeIndex ? 'bg-orange-50' : 'hover:bg-orange-50'
+                                }`}
+                              >
+                                <img
+                                  src={dish.image}
+                                  alt=""
+                                  loading="lazy"
+                                  className="w-11 h-11 rounded-lg object-cover bg-slate-100 shrink-0"
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <p className={`text-sm font-semibold truncate ${idx === activeIndex ? 'text-orange-600' : 'text-ink'}`}>
+                                    {dish.title}
+                                  </p>
+                                  <p className="text-xs text-slate-500 truncate flex items-center gap-1.5">
+                                    {dish.category && <span className="truncate">{dish.category}</span>}
+                                    {dish.category && dish.cookingTime ? <span className="text-slate-300">•</span> : null}
+                                    {dish.cookingTime ? (
+                                      <span className="inline-flex items-center gap-1 shrink-0">
+                                        <Clock className="w-3 h-3" />
+                                        {dish.cookingTime} phút
+                                      </span>
+                                    ) : null}
+                                  </p>
+                                </div>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+
+                      {/* Xem toàn bộ kết quả ở trang Tìm kiếm & Lọc */}
+                      <button
+                        type="submit"
+                        onMouseEnter={() => setActiveIndex(-1)}
+                        className="w-full flex items-center justify-between gap-2 px-4 py-2.5 text-xs font-semibold text-orange-600 bg-surface-2 hover:bg-orange-50 border-t border-line cursor-pointer"
+                      >
+                        <span className="truncate">
+                          {suggestTotal > suggestions.length
+                            ? `Xem tất cả ${suggestTotal} kết quả cho “${trimmedQuery}”`
+                            : `Tìm “${trimmedQuery}” trong trang Tìm kiếm & Lọc`}
+                        </span>
+                        <ArrowRight className="w-3.5 h-3.5 shrink-0" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               </form>
             </div>
