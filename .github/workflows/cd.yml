@@ -48,6 +48,15 @@ jobs:
             git fetch --prune origin main
             git reset --hard "$DEPLOY_SHA"
 
+            # docker compose cần đọc được cả hai file .env (lần deploy d9ff6b9 lỗi vì .env gốc mất quyền đọc)
+            for f in .env backend/.env; do
+              if [ ! -r "$f" ]; then
+                echo "Không đọc được $DEPLOY_PATH/$f bằng user $(whoami). Sửa: sudo chown $(whoami): $DEPLOY_PATH/$f && chmod 600 $DEPLOY_PATH/$f"
+                ls -l "$f" || true
+                exit 1
+              fi
+            done
+
             echo "==> Build và khởi động lại container"
             docker compose up -d --build --remove-orphans
 
