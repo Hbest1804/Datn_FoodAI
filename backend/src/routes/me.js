@@ -1,5 +1,5 @@
 // src/routes/me.js
-// 4.5 Hồ sơ khẩu vị, 4.7 Gợi ý, 4.9 Tài khoản & dữ liệu cá nhân, 4.15 Thực đơn tuần, 5.3, 5.5, 5.6
+// 4.5 Hồ sơ khẩu vị, 4.7 Gợi ý, 4.9 Tài khoản & dữ liệu cá nhân, 5.3, 5.5, 5.6
 
 import { Router } from 'express';
 import { authenticate } from '../middlewares/authMiddleware.js';
@@ -27,7 +27,6 @@ import {
   removeDishFromCollection,
   renameCollection,
 } from '../controllers/collectionsController.js';
-import mealPlanRouter from './mealPlan.js';
 import { uuidParam } from '../utils/http.js';
 
 const router = Router();
@@ -57,9 +56,6 @@ router.delete('/favorites', clearMyFavorites);            // 5.5.1
 router.get('/ratings', getMyRatings);                     // 5.5.2
 router.get('/view-history', getMyViewHistory);            // 4.9.7
 router.delete('/view-history', clearMyViewHistory);       // 4.9.8
-
-// 4.15 Gợi ý thực đơn tuần
-router.use('/meal-plan', mealPlanRouter);
 
 // 5.6 Bộ sưu tập
 router.get('/collections', listCollections);                                              // 5.6.1

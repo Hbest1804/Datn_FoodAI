@@ -39,6 +39,15 @@ describe('parseQuestionFilters', () => {
     assert.deepEqual(parseQuestionFilters('Cách nấu thịt kho tàu trứng vịt?'), {});
     assert.deepEqual(parseQuestionFilters('Chào bạn!'), {});
   });
+
+  it('đọc số món người dùng yêu cầu', () => {
+    assert.deepEqual(parseQuestionFilters('Tư vấn 1 món canh cho bữa tối'), { category: 'Món canh', dishCount: 1 });
+    assert.equal(parseQuestionFilters('gợi ý một món xào nhanh').dishCount, 1);
+    assert.equal(parseQuestionFilters('Gợi ý 3 món ăn chuẩn vị cho cả gia đình').dishCount, 3);
+    assert.equal(parseQuestionFilters('Gợi ý món canh cho bữa tối').dishCount, undefined);
+    assert.equal(parseQuestionFilters('Món này nấu cho 4 người được không?').dishCount, undefined);
+    assert.equal(parseQuestionFilters('Từ món này có thể biến tấu gì?').dishCount, undefined);
+  });
 });
 
 describe('buildDishPredicates', () => {

@@ -9,7 +9,7 @@ import {
   Flame,
   User,
   ChefHat,
-  CalendarDays,
+  Salad,
   House,
   Clock,
   Loader2,
@@ -347,7 +347,6 @@ export const Header: React.FC<HeaderProps> = ({
                 { tab: 'discovery', label: 'Khám phá' },
                 { tab: 'search', label: 'Tìm kiếm & Lọc' },
                 { tab: 'chat', label: 'Trò chuyện AI' },
-                ...(currentUser.isLoggedIn ? [{ tab: 'mealPlan', label: 'Thực đơn tuần' }] : []),
               ].map(({ tab, label }) => (
                 <button
                   key={tab}
@@ -464,16 +463,6 @@ export const Header: React.FC<HeaderProps> = ({
                           <ChefHat className="w-4 h-4 text-orange-500" />
                           Hồ sơ khẩu vị & Dinh dưỡng
                         </button>
-                        <button
-                          onClick={() => {
-                            setShowUserDropdown(false);
-                            onTabChange('mealPlan');
-                          }}
-                          className="w-full text-left px-3 py-2 text-xs font-semibold rounded-lg hover:bg-orange-50 hover:text-orange-600 text-slate-700 flex items-center gap-2 cursor-pointer"
-                        >
-                          <CalendarDays className="w-4 h-4 text-orange-500" />
-                          Thực đơn tuần
-                        </button>
                         {currentUser.role === 'admin' && (
                           <button
                             onClick={() => {
@@ -524,14 +513,14 @@ export const Header: React.FC<HeaderProps> = ({
             { id: 'discovery', label: 'Khám phá', Icon: House },
             { id: 'search', label: 'Tìm kiếm', Icon: Search },
             { id: 'chat', label: 'Chef AI', Icon: ChefHat, fab: true },
-            { id: 'mealPlan', label: 'Thực đơn', Icon: CalendarDays },
+            { id: 'profile', label: 'Khẩu vị', Icon: Salad },
             { id: 'account', label: 'Hồ sơ', Icon: User },
           ] as const).map((tab) => {
             const { id, label, Icon } = tab;
             const isFab = 'fab' in tab;
-            // Hồ sơ gồm cả trang tài khoản lẫn hồ sơ khẩu vị; Thực đơn và Hồ sơ cần đăng nhập nên khách bấm vào thì mở trang đăng nhập
-            const active = id === 'account' ? currentTab === 'account' || currentTab === 'profile' : currentTab === id;
-            const needsLogin = id === 'account' || id === 'mealPlan';
+            // Khẩu vị và Hồ sơ cần đăng nhập nên khách bấm vào thì mở trang đăng nhập
+            const active = currentTab === id;
+            const needsLogin = id === 'account' || id === 'profile';
             return (
               <button
                 key={id}

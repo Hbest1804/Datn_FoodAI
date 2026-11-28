@@ -18,6 +18,8 @@ const CATEGORY_RULES = [
   { re: /\bmon nuoc\b/, category: 'Món nước' },
 ];
 
+const NUMBER_WORDS = { mot: 1, hai: 2, ba: 3, bon: 4, nam: 5 };
+
 /** Đổi "70.000" / "70,5" / "70" + đơn vị ("k", "nghìn", "triệu", "đồng") ra số đồng. */
 function parseMoney(numStr, unit) {
   let n = String(numStr);
@@ -33,7 +35,8 @@ function parseMoney(numStr, unit) {
 /**
  * Đọc điều kiện trong câu hỏi. Trả về object (có thể rỗng):
  *   maxKcal, minKcal, minProtein, maxCarbs, lowCarb, maxCost, people, maxTime, difficulty ('easy'|'hard'),
- *   category, sortBy ('carbs_asc'|'protein_desc'|'kcal_asc') khi hỏi "…nhất".
+ *   category, sortBy ('carbs_asc'|'protein_desc'|'kcal_asc') khi hỏi "…nhất",
+ *   dishCount (số món người dùng yêu cầu, vd "1 món canh" → 1).
  */
 export function parseQuestionFilters(content) {
   const raw = String(content || '').normalize('NFC').toLowerCase();
@@ -64,6 +67,12 @@ export function parseQuestionFilters(content) {
       f.category = rule.category;
       break;
     }
+  }
+
+  // Số món người dùng yêu cầu: "1 món canh", "một món", "hai món"… (chỉ nhận 1–10)
+  if ((m = t.match(/\b(\d{1,2}|mot|hai|ba|bon|nam) mon\b/))) {
+    const n = NUMBER_WORDS[m[1]] ?? Number(m[1]);
+    if (n >= 1 && n <= 10) f.dishCount = n;
   }
 
   if (/\bnhat\b/.test(t)) {
