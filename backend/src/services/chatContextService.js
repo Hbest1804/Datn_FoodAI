@@ -30,6 +30,10 @@ const CULINARY_KEYWORDS = [
 ];
 const CULINARY_RE = new RegExp(`(^|\\s)(${CULINARY_KEYWORDS.join('|')})(\\s|$)`);
 
+// Câu hỏi về thời tiết (không dấu): chỉ trong phạm vi khi hỏi kèm chuyện ăn uống ("thời tiết hôm nay ăn món gì")
+const WEATHER_RE = /(^|\s)(thoi tiet|du bao|troi (?:hom nay |bay gio |mai )?(?:co )?(?:mua|nang|lanh|nong|am|ret)|nhiet do (?:ngoai troi|hom nay|bay gio))(\s|$)/;
+const FOOD_INTENT_RE = /(^|\s)(an|mon|nau|bua|uong|thuc don|do an|mon an|goi y mon)(\s|$)/;
+
 // Tên thực phẩm trùng mặt chữ với từ trong danh sách cấm (dùng chung cho kiểm duyệt bình luận)
 const FOOD_TERMS_LIKE_BANNED_RE = /óc chó/giu;
 
@@ -82,6 +86,11 @@ export async function checkTopic(content, settings) {
   }
   // Lớp 1: mẫu tấn công prompt ("bỏ qua mọi hướng dẫn", "ignore previous instructions"…) → từ chối, không gọi AI
   if (looksLikePromptInjection(content)) {
+    return { outOfScope: true, reply: OUT_OF_SCOPE_REPLY, questionVector: null };
+  }
+  // Lớp 1: hỏi thời tiết mà không hỏi chuyện ăn uống ("thời tiết hôm nay thế nào") → từ chối, không gọi AI
+  const plain = normalizeText(content).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (WEATHER_RE.test(plain) && !FOOD_INTENT_RE.test(plain)) {
     return { outOfScope: true, reply: OUT_OF_SCOPE_REPLY, questionVector: null };
   }
 
@@ -246,8 +255,12 @@ export async function retrieveDishesWithStatus({ questionVector, content, pantry
     if (next.length > 0) { pool = next; applied.push(p.label); }
     else notes.push(`Không có món nào trong hệ thống thỏa điều kiện "${p.label}" (cùng các điều kiện khác của câu hỏi): nói rõ điều này, không khẳng định món khác thỏa điều kiện.`);
   }
+  // Người dùng nêu số món ("1 món canh") thì theo đúng số đó; không nêu thì gợi ý 2–4 món để có lựa chọn
+  const howMany = qf.dishCount ? `đúng ${qf.dishCount} món` : '2–4 món';
   if (applied.length > 0) {
-    notes.push(`Danh sách món đã được hệ thống lọc đúng điều kiện: ${applied.join('; ')}. Gợi ý và gắn thẻ 2–4 món trong danh sách (nếu có đủ), nêu số liệu tương ứng của từng món lấy từ dữ liệu.`);
+    notes.push(`Danh sách món đã được hệ thống lọc đúng điều kiện: ${applied.join('; ')}. Gợi ý và gắn thẻ ${howMany} trong danh sách (nếu có đủ), nêu số liệu tương ứng của từng món lấy từ dữ liệu.`);
+  } else if (qf.dishCount) {
+    notes.push(`Người dùng yêu cầu ${howMany}: chỉ gợi ý và gắn thẻ ${howMany} (nếu có đủ), không liệt kê thêm món khác.`);
   }
 
   let embeddings = new Map();

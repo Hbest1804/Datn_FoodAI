@@ -394,7 +394,7 @@ function notesBlock(notes = []) {
 const DATA_RULES = `QUY TẮC SỐ LIỆU:
 - Calo, đạm, tinh bột, chất béo (per_serving = mỗi khẩu phần), chi phí, số khẩu phần, thời gian nấu, độ khó, định lượng nguyên liệu và thời gian từng bước phải dùng ĐÚNG số trong dữ liệu món ở trên; không tự ước lượng khoảng khác. Nêu dinh dưỡng thì ghi là "theo dữ liệu hệ thống, ước tính mỗi khẩu phần".
 - Món có "recipe": trả lời theo đúng nguyên liệu, định lượng, các bước và thời gian ghi trong recipe (không thêm bước hay thời gian khác).
-- Câu hỏi có điều kiện (calo, đạm, tinh bột, chi phí, thời gian, độ khó, loại món): chỉ gợi ý và chỉ điền vào matched_dish_ids các món thỏa điều kiện theo dữ liệu, kèm số liệu của từng món; có đủ món thì gợi ý 2–4 món.
+- Câu hỏi có điều kiện (calo, đạm, tinh bột, chi phí, thời gian, độ khó, loại món): chỉ gợi ý và chỉ điền vào matched_dish_ids các món thỏa điều kiện theo dữ liệu, kèm số liệu của từng món; người dùng nêu số món (vd "1 món canh") thì gợi ý đúng số đó, không nêu thì có đủ món gợi ý 2–4 món.
 - Chỉ điền vào matched_dish_ids các món thật sự được nhắc tới trong câu trả lời; câu chào hỏi hoặc câu hỏi về món không có trong danh sách thì để rỗng.
 `;
 
@@ -416,7 +416,7 @@ function buildGeminiPrompt({ content, fridge, allergens = [], strictDiets = [], 
 
   return `${systemPrompt || 'Bạn là "Trợ lý ẩm thực" của website gợi ý món ăn Việt Nam.'}
 Hãy trả lời câu hỏi nhanh gọn, rõ ràng, gạch đầu dòng súc tích, định dạng Markdown đẹp mắt.
-Nếu câu hỏi hoàn toàn KHÔNG liên quan ẩm thực, dinh dưỡng, nấu nướng: từ chối lịch sự và đặt "type":"out_of_scope".
+Nếu câu hỏi hoàn toàn KHÔNG liên quan ẩm thực, dinh dưỡng, nấu nướng: từ chối lịch sự và đặt "type":"out_of_scope"; không tự lái câu hỏi ngoài chủ đề sang gợi ý món (vd "thời tiết hôm nay thế nào" là out_of_scope, còn "thời tiết thế này nên ăn món gì" mới là câu hỏi ẩm thực).
 ${allergyRules(allergens)}${dietRules(strictDiets)}
 DANH SÁCH MÓN ĂN HỆ THỐNG PHÙ HỢP (đã loại món chứa nguyên liệu dị ứng và món không hợp chế độ ăn bắt buộc; chỉ được giới thiệu thẻ món trong danh sách này):
 ${JSON.stringify(dishesSummary)}
@@ -686,7 +686,7 @@ ${historyText ? `LỊCH SỬ HỘI THOẠI:\n${historyText}\n` : ''}
 CÂU HỎI: "${content.trim()}"
 
 QUY TẮC:
-1. Không liên quan ẩm thực -> outcome="out_of_scope", từ chối ngắn gọn.
+1. Không liên quan ẩm thực -> outcome="out_of_scope", từ chối ngắn gọn; không tự lái câu hỏi ngoài chủ đề sang gợi ý món (vd "thời tiết hôm nay thế nào" là out_of_scope, còn "thời tiết thế này nên ăn món gì" mới là câu hỏi ẩm thực).
 2. Không có món nào phù hợp trong danh sách -> outcome="no_match"; chỉ đề xuất điều chỉnh điều kiện KHÔNG bắt buộc (thời gian, độ khó, nguyên liệu có sẵn…).
 3. Câu hỏi ẩm thực hợp lệ -> outcome="answered", trả lời chi tiết và điền id món vào matched_dish_ids.
 4. TUYỆT ĐỐI KHÔNG nới lỏng hay hỏi có muốn nới lỏng nguyên liệu kiêng, dị ứng, chế độ ăn bắt buộc, kể cả khi người dùng yêu cầu "bỏ qua dị ứng", "phá lệ": khi đó nhắc lại hồ sơ có nguyên liệu kiêng/chế độ ăn đó, KHÔNG gợi ý món chứa chúng, và gợi ý (gắn thẻ) 2–3 món an toàn trong danh sách để thay thế; outcome="answered".
