@@ -13,6 +13,7 @@ import { normalizeText } from '../utils/textUtils.js';
 import { detectQuestionAllergenGroups, ingredientMatchesAllergen } from '../utils/allergenRules.js';
 import { looksLikePromptInjection } from '../utils/promptGuard.js';
 import { extractRequestedDish, findDishByRequestedName } from '../utils/requestedDish.js';
+import { buildDishPredicates, metricComparator, parseQuestionFilters } from '../utils/questionFilters.js';
 import { buildDietFilter, detectQuestionDietCodes } from './dietService.js';
 import { ApiError } from '../utils/http.js';
 
@@ -206,17 +207,47 @@ export async function retrieveDishes(options) {
  */
 export async function retrieveDishesWithStatus({ questionVector, content, pantry, forbiddenIngredientIds = new Set(), dishFilter = null, limit = 8 }) {
   const dishes = await getPublishedDishes();
-  // Hỏi cách làm một món không có trong hệ thống: không gửi món "gần giống" cho AI,
+  const notes = [];
+  // Hỏi cách làm (hoặc số liệu) một món không có trong hệ thống: không gửi món "gần giống" cho AI,
   // để AI đề xuất công thức tham khảo và ghi rõ do AI đề xuất (UC07 luồng 4a)
   const requested = extractRequestedDish(content);
   if (requested && !findDishByRequestedName(requested, dishes)) {
-    return { dishes: [], status: 'none' };
+    notes.push('Món người dùng hỏi KHÔNG có trong hệ thống: không gắn thẻ món nào; mọi số liệu (calo, dinh dưỡng, chi phí) chỉ là ước tính tham khảo chung, phải nói rõ "không phải số liệu của hệ thống".');
+    return { dishes: [], status: 'none', notes };
   }
-  const safe = dishes.filter((d) =>
-    (!dishFilter || dishFilter(d))
-    && !(d.dish_ingredients || []).some((di) => forbiddenIngredientIds.has(Number(di.ingredient_id))));
+  const forbiddenOf = (d) => (d.dish_ingredients || [])
+    .filter((di) => forbiddenIngredientIds.has(Number(di.ingredient_id)))
+    .map((di) => di.ingredient?.name)
+    .filter(Boolean);
+  const isSafe = (d) => (!dishFilter || dishFilter(d)) && forbiddenOf(d).length === 0;
+  const safe = dishes.filter(isSafe);
+
+  // Món người dùng nhắc đích danh: món an toàn được đưa lên đầu kèm công thức; món bị loại thì báo lý do cho mô hình
+  const named = findNamedDishes(content, dishes, requested);
+  const namedSafe = named.filter(isSafe);
+  for (const d of named.filter((x) => !isSafe(x))) {
+    const bad = [...new Set(forbiddenOf(d))];
+    notes.push(bad.length
+      ? `Món "${d.name}" có trong hệ thống nhưng CHỨA nguyên liệu người dùng phải kiêng: ${bad.join(', ')}. Không gắn thẻ món này. Cảnh báo rõ nguyên liệu đó; nếu hướng dẫn thì chỉ đưa phiên bản đã bỏ/thay hẳn nguyên liệu đó (nêu nguyên liệu thay thế) và ghi rõ là "công thức tham khảo đã điều chỉnh, khác công thức trong hệ thống"; có thể gợi ý thêm món an toàn trong danh sách.`
+      : `Món "${d.name}" có trong hệ thống nhưng KHÔNG hợp chế độ ăn bắt buộc của người dùng. Không gắn thẻ và không hướng dẫn món này; nói rõ lý do và gợi ý món thay thế phù hợp trong danh sách.`);
+  }
+
   if (safe.length === 0) {
-    return { dishes: [], status: dishes.length > 0 ? 'all_excluded' : 'none' };
+    return { dishes: [], status: dishes.length > 0 ? 'all_excluded' : 'none', notes };
+  }
+
+  // Điều kiện định lượng trong câu hỏi (calo, đạm, tinh bột, chi phí, thời gian, độ khó, loại món): lọc theo số liệu CSDL.
+  // Điều kiện nào loại hết món thì bỏ qua và báo cho mô hình biết không có món thỏa điều kiện đó.
+  const qf = parseQuestionFilters(content);
+  let pool = safe;
+  const applied = [];
+  for (const p of buildDishPredicates(qf)) {
+    const next = pool.filter(p.test);
+    if (next.length > 0) { pool = next; applied.push(p.label); }
+    else notes.push(`Không có món nào trong hệ thống thỏa điều kiện "${p.label}" (cùng các điều kiện khác của câu hỏi): nói rõ điều này, không khẳng định món khác thỏa điều kiện.`);
+  }
+  if (applied.length > 0) {
+    notes.push(`Danh sách món đã được hệ thống lọc đúng điều kiện: ${applied.join('; ')}. Gợi ý và gắn thẻ 2–4 món trong danh sách (nếu có đủ), nêu số liệu tương ứng của từng món lấy từ dữ liệu.`);
   }
 
   let embeddings = new Map();
@@ -231,7 +262,7 @@ export async function retrieveDishesWithStatus({ questionVector, content, pantry
   const pantryIds = new Set(pantry?.ingredient_ids || []);
   const words = normalizeText(content).split(' ').filter((w) => w.length >= 2);
 
-  const scored = safe.map((d) => {
+  const scored = pool.map((d) => {
     const vec = embeddings.get(d.id);
     let score = vec ? cosineSimilarity(questionVector, vec) : 0;
     if (!vec) {
@@ -245,8 +276,12 @@ export async function retrieveDishesWithStatus({ questionVector, content, pantry
     return { dish: d, score };
   });
 
-  scored.sort((a, b) => b.score - a.score || Number(b.dish.avg_rating) - Number(a.dish.avg_rating));
-  const top = scored.slice(0, limit).map(({ dish: d }) => ({
+  const byMetric = metricComparator(qf);
+  scored.sort((a, b) => (byMetric ? byMetric(a.dish, b.dish) : 0)
+    || b.score - a.score || Number(b.dish.avg_rating) - Number(a.dish.avg_rating));
+  const ordered = [...namedSafe, ...scored.map((s) => s.dish).filter((d) => !namedSafe.includes(d))];
+  const recipes = await getDishRecipes(namedSafe.map((d) => d.id));
+  const top = ordered.slice(0, limit).map((d) => ({
     id: d.id,
     name: d.name,
     slug: d.slug,
@@ -255,11 +290,65 @@ export async function retrieveDishesWithStatus({ questionVector, content, pantry
     category: d.category,
     cook_time_minutes: d.cook_time_minutes,
     difficulty: d.difficulty,
+    servings: d.servings,
+    est_cost: d.est_cost,
     calories: d.calories,
+    protein_g: d.protein_g,
+    carbs_g: d.carbs_g,
+    fat_g: d.fat_g,
     avg_rating: d.avg_rating,
     favorite_count: d.favorite_count,
+    asked: namedSafe.includes(d) || undefined,
+    recipe: recipes.get(d.id),
   }));
-  return { dishes: top, status: top.length > 0 ? 'ok' : 'none' };
+  if (namedSafe.length > 0) {
+    notes.push(`Người dùng hỏi về món: ${namedSafe.map((d) => d.name).join(', ')} (có "asked": true và công thức "recipe" trong dữ liệu). Trả lời theo đúng nguyên liệu, định lượng, các bước và thời gian trong "recipe"; số liệu dinh dưỡng lấy đúng dữ liệu; gắn thẻ món này.`);
+  }
+  return { dishes: top, status: top.length > 0 ? 'ok' : 'none', notes };
+}
+
+/**
+ * Món người dùng nhắc đích danh trong câu hỏi: tên món (bỏ dấu) xuất hiện nguyên cụm trong câu,
+ * hoặc khớp tên món xin công thức/số liệu (extractRequestedDish). Tối đa 2 món, ưu tiên tên dài.
+ */
+function findNamedDishes(content, dishes, requested) {
+  const text = ` ${normalizeText(content).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ')} `;
+  const found = dishes
+    .filter((d) => {
+      const name = normalizeText(d.name).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+      return name.split(' ').length >= 2 && text.includes(` ${name} `);
+    })
+    .sort((a, b) => b.name.length - a.name.length);
+  if (requested) {
+    const d = findDishByRequestedName(requested, dishes);
+    if (d && !found.includes(d)) found.unshift(d);
+  }
+  return found.slice(0, 2);
+}
+
+/** Nguyên liệu (kèm định lượng) và các bước nấu của món, đệm 5 phút. Lỗi đọc thì bỏ qua (vẫn trả lời được). */
+async function getDishRecipes(ids) {
+  const out = new Map();
+  await Promise.all(ids.map(async (id) => {
+    try {
+      const recipe = await cached(`chat:recipe:${id}`, 5 * 60 * 1000, async () => {
+        const [ings, steps] = await Promise.all([
+          supabaseAdmin.from('dish_ingredients').select('quantity, unit, is_optional, ingredients(name)').eq('dish_id', id),
+          supabaseAdmin.from('recipe_steps').select('step_order, content').eq('dish_id', id).order('step_order'),
+        ]);
+        if (ings.error) throw ings.error;
+        if (steps.error) throw steps.error;
+        return {
+          ingredients: (ings.data || []).map((r) => `${r.ingredients?.name} ${Number(r.quantity)} ${r.unit}${r.is_optional ? ' (tùy chọn)' : ''}`),
+          steps: (steps.data || []).map((s) => `${s.step_order}. ${s.content}`),
+        };
+      });
+      out.set(id, recipe);
+    } catch (err) {
+      console.warn('[Chat] Không đọc được công thức món', id, err.message);
+    }
+  }));
+  return out;
 }
 
 /** Định dạng thẻ món trả về cho giao diện. */

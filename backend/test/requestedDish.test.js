@@ -21,6 +21,13 @@ describe('extractRequestedDish', () => {
     assert.equal(extractRequestedDish('chỉ mình làm bánh tét'), 'banh tet');
   });
 
+  it('lấy tên món từ câu hỏi số liệu dinh dưỡng', () => {
+    assert.equal(extractRequestedDish('Bánh flan bao nhiêu calo một cái?'), 'banh flan');
+    assert.equal(extractRequestedDish('Một khẩu phần phở bò tái nạm bao nhiêu calo?'), 'pho bo tai nam');
+    assert.equal(extractRequestedDish('Bò kho bánh mì có bao nhiêu protein?'), 'bo kho banh mi');
+    assert.equal(extractRequestedDish('Món này bao nhiêu calo?'), null);
+  });
+
   it('không coi câu gợi ý chung hay mẹo nấu nướng là xin một món cụ thể', () => {
     for (const q of ['Gợi ý cho tôi một món canh cho bữa tối', 'Gợi ý bữa trưa dưới 400 kcal',
       'Tôi có thịt bò và hành tây nấu gì', 'Cách làm sạch lòng heo', 'Cách khử mùi tanh của cá',

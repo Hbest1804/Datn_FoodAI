@@ -271,7 +271,7 @@ export async function sendChatMessage(req, res) {
       const diet = await getDietConstraints({ dietTypeIds: ctx.userProfile.diet_types.map((d) => d.id), content: question });
       diet.forbiddenIngredientIds.forEach((id) => forbidden.add(id));
       ctx.userProfile.strict_diets = diet.strict;
-      const { dishes: dishesContext, status: retrievalStatus } = await retrieveDishesWithStatus({
+      const { dishes: dishesContext, status: retrievalStatus, notes: retrievalNotes } = await retrieveDishesWithStatus({
         questionVector: topic.questionVector,
         content: question,
         pantry,
@@ -287,6 +287,7 @@ export async function sendChatMessage(req, res) {
         fridge: pantry,
         dishesContext,
         retrievalStatus,
+        retrievalNotes,
         systemPrompt: settings.system_prompt,
         userId,
       });
