@@ -5,7 +5,7 @@
 import crypto from 'crypto';
 import { generateCulinaryReply } from '../services/aiService.js';
 import { getSettings } from '../services/settingsService.js';
-import { checkTopic, detectQuestionAllergens, getDietConstraints, parsePantry, retrieveDishes, toDishCard } from '../services/chatContextService.js';
+import { checkTopic, detectQuestionAllergens, getDietConstraints, parsePantry, retrieveDishesWithStatus, toDishCard } from '../services/chatContextService.js';
 import { sendError, sendOk } from '../utils/http.js';
 import { getClientIp } from '../utils/clientIp.js';
 
@@ -183,7 +183,7 @@ async function answerGuestQuestion({ question, pantry, settings, guestId }) {
     const asked = await detectQuestionAllergens(question);
     const diet = await getDietConstraints({ content: question });
     const forbidden = new Set([...asked.ingredientIds, ...diet.forbiddenIngredientIds]);
-    const dishesContext = await retrieveDishes({
+    const { dishes: dishesContext, notes: retrievalNotes } = await retrieveDishesWithStatus({
       questionVector: topic.questionVector,
       content: question,
       pantry,
@@ -197,6 +197,7 @@ async function answerGuestQuestion({ question, pantry, settings, guestId }) {
       allergens: asked.allergens,
       strictDiets: diet.strict,
       dishesContext,
+      retrievalNotes,
       chatHistory: readGuestHistory(guestId),
       systemPrompt: settings.system_prompt,
     });

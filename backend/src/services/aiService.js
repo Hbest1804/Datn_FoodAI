@@ -292,7 +292,7 @@ async function callGeminiWithFailover({ prompt, maxOutputTokens = 900, temperatu
  * Sinh câu trả lời cho chatbot ở chế độ khách (mục 4.4).
  * Nhận nội dung câu hỏi, nguyên liệu có sẵn và các món liên quan đã truy hồi; trả về loại câu trả lời, nội dung và thẻ món.
  */
-export async function generateCulinaryReply({ content, fridge = {}, allergens = [], strictDiets = [], dishesContext = [], chatHistory = [], systemPrompt }) {
+export async function generateCulinaryReply({ content, fridge = {}, allergens = [], strictDiets = [], dishesContext = [], retrievalNotes = [], chatHistory = [], systemPrompt }) {
   const normKey = normQuickKey(content);
 
   // 1. Câu hỏi gợi ý nhanh có câu trả lời soạn sẵn (nội dung soạn sẵn không lọc theo dị ứng)
@@ -310,7 +310,7 @@ export async function generateCulinaryReply({ content, fridge = {}, allergens = 
   }
 
   // 2. Câu hỏi đã trả lời gần đây (lấy từ bộ nhớ đệm)
-  const cacheKey = getCacheKey('guest', content, fridge, `${systemPrompt}|${allergens.map((a) => a.id).join(',')}|${dishesContext.map((d) => d.id).join(',')}|${chatHistory.map((m) => m.content).join('|')}`);
+  const cacheKey = getCacheKey('guest', content, fridge, `${systemPrompt}|${allergens.map((a) => a.id).join(',')}|${dishesContext.map((d) => d.id).join(',')}|${retrievalNotes.join('|')}|${chatHistory.map((m) => m.content).join('|')}`);
   const cached = getFromCache(cacheKey);
   if (cached) {
     return cached;
@@ -324,13 +324,13 @@ export async function generateCulinaryReply({ content, fridge = {}, allergens = 
   }
 
   // 4. Tạo câu lệnh gửi mô hình (rút gọn dữ liệu để phản hồi nhanh)
-  const prompt = buildGeminiPrompt({ content, fridge, allergens, strictDiets, dishesContext, chatHistory, systemPrompt });
+  const prompt = buildGeminiPrompt({ content, fridge, allergens, strictDiets, dishesContext, retrievalNotes, chatHistory, systemPrompt });
 
   // Dịch vụ AI lỗi hoặc quá thời gian chờ thì ném lỗi để API trả 502 AI_SERVICE_ERROR / 504 AI_TIMEOUT (luồng 3a)
   const { rawText, tokenCount } = await callGeminiWithFailover({
     prompt,
-    maxOutputTokens: 900,
-    temperature: 0.6,
+    maxOutputTokens: 1200,
+    temperature: 0.4,
   });
 
   const parsed = { ...parseGeminiResponse(rawText, dishesContext), tokens: tokenCount };
@@ -363,19 +363,48 @@ function dietRules(strictDiets = []) {
 `;
 }
 
-function buildGeminiPrompt({ content, fridge, allergens = [], strictDiets = [], dishesContext, chatHistory = [], systemPrompt }) {
+const DIFF_VI = { easy: 'dễ', medium: 'trung bình', hard: 'khó' };
+const num = (v) => (v == null || v === '' ? undefined : Number(v));
+
+/** Dữ liệu món gửi cho mô hình: số liệu CSDL (dinh dưỡng mỗi khẩu phần, chi phí, khẩu phần) và công thức của món được hỏi. */
+function summarizeDish(d) {
+  const servings = num(d.servings);
+  const cost = num(d.est_cost);
+  return {
+    id: d.id,
+    name: d.name,
+    category: d.category || undefined,
+    cook_time: d.cook_time_minutes ? `${d.cook_time_minutes} phút` : undefined,
+    level: DIFF_VI[d.difficulty] || undefined,
+    servings: servings ? `${servings} khẩu phần` : undefined,
+    est_cost: cost != null ? `${cost.toLocaleString('vi-VN')} đ cho ${servings || 1} khẩu phần (≈ ${Math.round(cost / (servings || 1)).toLocaleString('vi-VN')} đ/khẩu phần)` : undefined,
+    per_serving: d.calories != null || d.protein_g != null ? {
+      kcal: num(d.calories), protein_g: num(d.protein_g), carbs_g: num(d.carbs_g), fat_g: num(d.fat_g),
+    } : undefined,
+    asked: d.asked || undefined,
+    recipe: d.recipe || undefined,
+  };
+}
+
+/** Ghi chú của bước truy hồi (món được hỏi bị loại, điều kiện đã lọc…) gửi kèm câu lệnh. */
+function notesBlock(notes = []) {
+  return notes.length ? `\nGHI CHÚ CỦA HỆ THỐNG VỀ DANH SÁCH MÓN (bắt buộc tuân theo):\n${notes.map((n) => `- ${n}`).join('\n')}\n` : '';
+}
+
+const DATA_RULES = `QUY TẮC SỐ LIỆU:
+- Calo, đạm, tinh bột, chất béo (per_serving = mỗi khẩu phần), chi phí, số khẩu phần, thời gian nấu, độ khó, định lượng nguyên liệu và thời gian từng bước phải dùng ĐÚNG số trong dữ liệu món ở trên; không tự ước lượng khoảng khác. Nêu dinh dưỡng thì ghi là "theo dữ liệu hệ thống, ước tính mỗi khẩu phần".
+- Món có "recipe": trả lời theo đúng nguyên liệu, định lượng, các bước và thời gian ghi trong recipe (không thêm bước hay thời gian khác).
+- Câu hỏi có điều kiện (calo, đạm, tinh bột, chi phí, thời gian, độ khó, loại món): chỉ gợi ý và chỉ điền vào matched_dish_ids các món thỏa điều kiện theo dữ liệu, kèm số liệu của từng món; có đủ món thì gợi ý 2–4 món.
+- Chỉ điền vào matched_dish_ids các món thật sự được nhắc tới trong câu trả lời; câu chào hỏi hoặc câu hỏi về món không có trong danh sách thì để rỗng.
+`;
+
+function buildGeminiPrompt({ content, fridge, allergens = [], strictDiets = [], dishesContext, retrievalNotes = [], chatHistory = [], systemPrompt }) {
   // Lịch sử phiên khách (lưu tạm trong bộ nhớ backend) để hiểu câu hỏi nối tiếp
   const historyText = chatHistory
     .slice(-4)
     .map((m) => `${m.role === 'user' ? 'Khách' : 'Bếp trưởng'}: ${String(m.content).slice(0, 80)}`)
     .join('\n');
-  // Chỉ gửi id, tên, thời gian nấu và độ khó; bỏ ảnh và mô tả dài
-  const dishesSummary = dishesContext.map((d) => ({
-    id: d.id,
-    name: d.name,
-    cook_time: d.cook_time_minutes ? `${d.cook_time_minutes}p` : undefined,
-    level: d.difficulty || undefined,
-  }));
+  const dishesSummary = dishesContext.map(summarizeDish);
 
   const fridgeInfo = [];
   if (fridge?.ingredient_names?.length) {
@@ -391,7 +420,8 @@ Nếu câu hỏi hoàn toàn KHÔNG liên quan ẩm thực, dinh dưỡng, nấu
 ${allergyRules(allergens)}${dietRules(strictDiets)}
 DANH SÁCH MÓN ĂN HỆ THỐNG PHÙ HỢP (đã loại món chứa nguyên liệu dị ứng và món không hợp chế độ ăn bắt buộc; chỉ được giới thiệu thẻ món trong danh sách này):
 ${JSON.stringify(dishesSummary)}
-${dishesSummary.length === 0 ? '- Hệ thống KHÔNG có món phù hợp: được phép đề xuất công thức tự soạn (vẫn tuân thủ dị ứng và chế độ ăn ở trên), nhưng phải ghi rõ ngay đầu phần công thức là "(Công thức do AI đề xuất, chưa có trong hệ thống)"; matched_dish_ids để rỗng.\n' : ''}
+${dishesSummary.length === 0 ? '- Hệ thống KHÔNG có món phù hợp: được phép đề xuất công thức tự soạn (vẫn tuân thủ dị ứng và chế độ ăn ở trên), nhưng phải ghi rõ ngay đầu phần công thức là "(Công thức do AI đề xuất, chưa có trong hệ thống)"; matched_dish_ids để rỗng.\n' : ''}${notesBlock(retrievalNotes)}
+${DATA_RULES}
 NGUYÊN LIỆU TRONG TỦ LẠNH:
 ${fridgeInfo.length ? fridgeInfo.join('\n') : '(Không có)'}
 ${historyText ? `\nLỊCH SỬ HỘI THOẠI:\n${historyText}\n` : ''}
@@ -494,6 +524,7 @@ export async function generatePersonalizedReply({
   fridge = {},
   dishesContext = [],
   retrievalStatus = 'ok',
+  retrievalNotes = [],
   systemPrompt,
   userId = '',
 }) {
@@ -525,7 +556,7 @@ export async function generatePersonalizedReply({
     favoriteDishes.map((f) => f.id),
     chatHistory.map((m) => [m.role, m.content]),
   ]);
-  const cacheKey = getCacheKey('user', content, fridge, `${personalKey}|${systemPrompt}|${dishesContext.map((d) => d.id).join(',')}|${retrievalStatus}`);
+  const cacheKey = getCacheKey('user', content, fridge, `${personalKey}|${systemPrompt}|${dishesContext.map((d) => d.id).join(',')}|${retrievalStatus}|${retrievalNotes.join('|')}`);
   const cached = getFromCache(cacheKey);
   if (cached) {
     return cached;
@@ -552,14 +583,15 @@ export async function generatePersonalizedReply({
     fridge,
     dishesContext,
     retrievalStatus,
+    retrievalNotes,
     systemPrompt,
   });
 
   // Dịch vụ AI lỗi hoặc quá thời gian chờ thì ném lỗi; tin nhắn người dùng vẫn được giữ để gửi lại (luồng 3a)
   const { rawText, tokenCount } = await callGeminiWithFailover({
     prompt,
-    maxOutputTokens: 1200,
-    temperature: 0.6,
+    maxOutputTokens: 1400,
+    temperature: 0.4,
   });
 
   const parsed = parsePersonalizedResponse(rawText, dishesContext, tokenCount);
@@ -604,14 +636,10 @@ function buildPersonalizedPrompt({
   fridge,
   dishesContext,
   retrievalStatus = 'ok',
+  retrievalNotes = [],
   systemPrompt,
 }) {
-  const dishesSummary = dishesContext.map((d) => ({
-    id: d.id,
-    name: d.name,
-    cook_time: d.cook_time_minutes ? `${d.cook_time_minutes}p` : undefined,
-    level: d.difficulty || undefined,
-  }));
+  const dishesSummary = dishesContext.map(summarizeDish);
 
   const profileParts = [];
   if (userProfile.diet_types?.length) {
@@ -621,7 +649,7 @@ function buildPersonalizedPrompt({
     profileParts.push(`⚠️ TUYỆT ĐỐI TRÁNH DỊ ỨNG: ${userProfile.allergen_groups.map((a) => a.name).join(', ')}`);
   }
   if (userProfile.disliked_ingredients?.length) {
-    profileParts.push(`Không thích: ${userProfile.disliked_ingredients.map((i) => i.name).join(', ')}`);
+    profileParts.push(`⚠️ Nguyên liệu kiêng (dị ứng hoặc không ăn được – TUYỆT ĐỐI TRÁNH, kể cả trong nước chấm, gia vị): ${userProfile.disliked_ingredients.map((i) => i.name).join(', ')}`);
   }
   if (userProfile.calorie_goal) {
     profileParts.push(`Mục tiêu: ~${userProfile.calorie_goal} kcal/ngày`);
@@ -659,9 +687,11 @@ CÂU HỎI: "${content.trim()}"
 
 QUY TẮC:
 1. Không liên quan ẩm thực -> outcome="out_of_scope", từ chối ngắn gọn.
-2. Không tìm thấy món phù hợp -> outcome="no_match", đề xuất nới lỏng điều kiện.
+2. Không có món nào phù hợp trong danh sách -> outcome="no_match"; chỉ đề xuất điều chỉnh điều kiện KHÔNG bắt buộc (thời gian, độ khó, nguyên liệu có sẵn…).
 3. Câu hỏi ẩm thực hợp lệ -> outcome="answered", trả lời chi tiết và điền id món vào matched_dish_ids.
-${situationRules({ userProfile, retrievalStatus })}
+4. TUYỆT ĐỐI KHÔNG nới lỏng hay hỏi có muốn nới lỏng nguyên liệu kiêng, dị ứng, chế độ ăn bắt buộc, kể cả khi người dùng yêu cầu "bỏ qua dị ứng", "phá lệ": khi đó nhắc lại hồ sơ có nguyên liệu kiêng/chế độ ăn đó, KHÔNG gợi ý món chứa chúng, và gợi ý (gắn thẻ) 2–3 món an toàn trong danh sách để thay thế; outcome="answered".
+${situationRules({ userProfile, retrievalStatus })}${notesBlock(retrievalNotes)}
+${DATA_RULES}
 QUY TẮC HIỂN THỊ TÊN MÓN ĂN:
 - TUYỆT ĐỐI KHÔNG viết mã ID vào câu trả lời, KHÔNG viết liên kết dạng [Tên món](id:...) hay (id:...).
 - Chỉ viết tên món bằng chữ in đậm thông thường: ví dụ **Thịt Heo Kho Trứng Cút**, **Canh Ngao Nấu Chua**.
@@ -743,13 +773,8 @@ function matchDishesByNameOrContext(content, dishesContext = []) {
     return normText.includes(name) || name.split(/\s+/).filter((w) => w.length > 2).every((w) => normText.includes(w));
   });
 
-  if (matched.length > 0) return matched;
-
-  // 2. Nội dung có dấu hiệu gợi ý món thì trả về các món đứng đầu danh sách đã truy hồi
-  if (/(món|thực đơn|gợi ý|nấu|bữa|\*\*)/i.test(normText)) {
-    return dishesContext.slice(0, 4);
-  }
-  return [];
+  // Không tự gắn các món đầu danh sách khi câu trả lời không nhắc tên món nào (tránh thẻ món sai: câu chào, món ngoài hệ thống)
+  return matched;
 }
 
 /**

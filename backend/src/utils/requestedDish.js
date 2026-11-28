@@ -36,9 +36,12 @@ function tokens(str) {
  * Lấy tên món người dùng xin cách làm. Trả về null nếu câu hỏi không phải dạng xin công thức một món cụ thể.
  * Ví dụ: "Hướng dẫn tôi cách gói bánh chưng" → "banh chung"; "Gợi ý món canh cho bữa tối" → null.
  */
+// Hỏi số liệu của một món: "bánh flan bao nhiêu calo", "một khẩu phần phở bò bao nhiêu kcal", "bò kho có bao nhiêu protein"
+const FACT_RE = /^(?:(?:mot|1) (?:khau phan|phan|to|dia|bat|cai|chiec|suat|ly|coc|chen) )?(?:mon )?(.+?) (?:co |chua )*(?:bao nhieu|may) (?:calo|kcal|cal|protein|dam|chat dam|tinh bot|carbs?|chat beo|beo|duong)\b/;
+
 export function extractRequestedDish(content) {
   const text = tokens(content).join(' ');
-  const m = text.match(REQUEST_RE);
+  const m = text.match(REQUEST_RE) || text.match(FACT_RE);
   if (!m) return null;
   let name = m[1];
   const tail = name.match(TAIL_RE);
